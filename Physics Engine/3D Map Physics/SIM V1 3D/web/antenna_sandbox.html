@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SIM V1 3D — Antenna Placement Sandbox</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0e12; font-family: -apple-system, Segoe UI, Roboto, sans-serif; }
+  #app { position: relative; width: 100%; height: 100%; }
+  canvas { display: block; }
+  #panel {
+    position: absolute; top: 12px; left: 12px; width: 280px;
+    background: rgba(18, 22, 28, 0.88); color: #e7edf3; border: 1px solid #2a323d;
+    border-radius: 10px; padding: 14px; font-size: 13px; backdrop-filter: blur(6px);
+  }
+  #panel h1 { font-size: 14px; margin: 0 0 10px; font-weight: 600; color: #fff; }
+  #panel label { display: block; margin: 10px 0 4px; color: #9fb0c0; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+  #panel select, #panel button { width: 100%; box-sizing: border-box; padding: 7px 8px; border-radius: 6px; border: 1px solid #37414d; background: #1b2129; color: #e7edf3; font-size: 13px; }
+  #panel button { margin-top: 8px; cursor: pointer; background: #2563eb; border-color: #2563eb; font-weight: 600; }
+  #panel button.secondary { background: #1b2129; border-color: #37414d; font-weight: 500; }
+  #panel button:hover { filter: brightness(1.1); }
+  #panel button.active { background: #16a34a; border-color: #16a34a; }
+  #hint { margin-top: 10px; color: #8fa0b0; font-size: 11.5px; line-height: 1.45; }
+  #stats { margin-top: 10px; padding-top: 10px; border-top: 1px solid #2a323d; color: #9fb0c0; font-size: 11.5px; line-height: 1.6; max-height: 160px; overflow-y: auto; }
+  #stats .row { display: flex; justify-content: space-between; gap: 8px; }
+  #stats .row b { color: #e7edf3; font-weight: 600; }
+  #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #9fb0c0; font-size: 14px; }
+  #crosshair { position: absolute; top: 12px; right: 12px; color: #9fb0c0; font-size: 12px; background: rgba(18,22,28,.88); border: 1px solid #2a323d; border-radius: 8px; padding: 8px 12px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="loading">loading SIM V1 3D scene…</div>
+  <div id="panel" style="display:none">
+    <h1>Antenna Placement Sandbox</h1>
+    <label for="antennaSelect">Antenna type</label>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <span id="antennaSwatch" style="flex:0 0 18px; width:18px; height:18px; border-radius:5px; border:1px solid #37414d; background:#ffb020;"></span>
+      <select id="antennaSelect" style="flex:1 1 auto;"></select>
+    </div>
+    <button id="placeBtn">Click scene to place</button>
+    <button id="clearBtn" class="secondary">Clear placed antennas</button>
+    <div id="hint">Drag to orbit, scroll to zoom, right-drag to pan. Placed antennas have real mass/collision — they fall and rest on the walls/floor voxelized from the building model instead of phasing through it.</div>
+    <div id="stats"><div class="row"><span>placed</span><b id="placedCount">0</b></div></div>
+  </div>
+  <div id="crosshair"></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+    "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+  }
+}
+</script>
+
+<script src="sim_assets_3d.js"></script>
+<script src="collision_3d.js"></script>
+<script src="antenna_catalog_3d.js"></script>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import * as CANNON from "cannon-es";
+
+const COLLISION = window.SIM3D_COLLISION;
+const CATALOG = window.SIM3D_ANTENNA_CATALOG;
+
+// --- renderer / scene / camera ----------------------------------------------
+const app = document.getElementById("app");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = false;
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0e12);
+scene.fog = new THREE.Fog(0x0b0e12, 90, 260);
+
+const [extX, extY, extZ] = COLLISION.extent_m;
+const center = new THREE.Vector3(extX / 2, extY / 2, extZ / 2);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 500);
+camera.position.set(center.x - extX * 0.38, Math.max(extX, extZ) * 0.76, center.z + extZ * 1.41);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.copy(center);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxDistance = Math.max(extX, extZ) * 2;
+controls.update();
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+sun.position.set(center.x + extX * 0.3, extY * 4 + 10, center.z - extZ * 0.2);
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0x8fb0ff, 0x1a1410, 0.4));
+
+const grid = new THREE.GridHelper(Math.max(extX, extZ) * 1.2, 40, 0x2a323d, 0x1a2028);
+grid.position.set(center.x, 0, center.z);
+scene.add(grid);
+
+// --- physics world -----------------------------------------------------------
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.81, 0) });
+world.broadphase = new CANNON.SAPBroadphase(world);
+world.allowSleep = true;
+
+const wallMaterial = new CANNON.Material("wall");
+const antennaMaterial = new CANNON.Material("antenna");
+world.addContactMaterial(new CANNON.ContactMaterial(wallMaterial, antennaMaterial, {
+  friction: 0.6, restitution: 0.1,
+}));
+
+// --- building shell: merged voxel boxes, static bodies + one instanced mesh --
+const nBoxes = COLLISION.boxes.length;
+const wallGeo = new THREE.BoxGeometry(1, 1, 1);
+const wallMat = new THREE.MeshStandardMaterial({ color: 0x5c6b80, transparent: true, opacity: 0.85, roughness: 0.9, metalness: 0.05 });
+const wallMesh = new THREE.InstancedMesh(wallGeo, wallMat, nBoxes);
+const dummy = new THREE.Object3D();
+
+for (let i = 0; i < nBoxes; i++) {
+  const [cx, cy, cz, hx, hy, hz] = COLLISION.boxes[i];
+  dummy.position.set(cx, cy, cz);
+  dummy.scale.set(hx * 2, hy * 2, hz * 2);
+  dummy.updateMatrix();
+  wallMesh.setMatrixAt(i, dummy.matrix);
+
+  const body = new CANNON.Body({ mass: 0, material: wallMaterial });
+  body.addShape(new CANNON.Box(new CANNON.Vec3(hx, hy, hz)));
+  body.position.set(cx, cy, cz);
+  world.addBody(body);
+}
+scene.add(wallMesh);
+
+// raycast target for placement clicks (walls + floor pad, same instanced mesh)
+const raycaster = new THREE.Raycaster();
+const pointerNDC = new THREE.Vector2();
+
+// --- antenna catalog dropdown -------------------------------------------------
+const select = document.getElementById("antennaSelect");
+const swatch = document.getElementById("antennaSwatch");
+for (const kind of CATALOG.kinds) {
+  const opt = document.createElement("option");
+  opt.value = kind;
+  opt.textContent = CATALOG.entries[kind].label;
+  select.appendChild(opt);
+}
+function updateSwatch() {
+  const color = CATALOG.entries[select.value]?.color ?? 0xffb020;
+  swatch.style.background = "#" + color.toString(16).padStart(6, "0");
+}
+select.addEventListener("change", updateSwatch);
+updateSwatch();
+
+function buildAntennaMesh(entry) {
+  const geo = new THREE.BufferGeometry();
+  const verts = new Float32Array(entry.vertices.flat());
+  geo.setAttribute("position", new THREE.BufferAttribute(verts, 3));
+  geo.setIndex(entry.faces.flat());
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({
+    color: entry.color ?? 0xffb020, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide,
+    emissive: entry.color ?? 0xffb020, emissiveIntensity: 0.12,
+  });
+  return new THREE.Mesh(geo, mat);
+}
+
+const placed = []; // { mesh, body }
+let placementMode = false;
+const placeBtn = document.getElementById("placeBtn");
+const placedCountEl = document.getElementById("placedCount");
+const statsEl = document.getElementById("stats");
+
+placeBtn.addEventListener("click", () => {
+  placementMode = !placementMode;
+  placeBtn.classList.toggle("active", placementMode);
+  placeBtn.textContent = placementMode ? "Click scene to place (armed)" : "Click scene to place";
+  renderer.domElement.style.cursor = placementMode ? "crosshair" : "default";
+});
+
+document.getElementById("clearBtn").addEventListener("click", () => {
+  for (const p of placed) {
+    scene.remove(p.mesh);
+    world.removeBody(p.body);
+  }
+  placed.length = 0;
+  refreshStats();
+});
+
+function refreshStats() {
+  placedCountEl.textContent = placed.length;
+  const rows = placed.slice(-8).map(p =>
+    `<div class="row"><span>${p.kind}</span><b>${p.body.mass.toFixed(2)} kg</b></div>`).join("");
+  statsEl.innerHTML = `<div class="row"><span>placed</span><b>${placed.length}</b></div>${rows}`;
+}
+
+renderer.domElement.addEventListener("pointerdown", (ev) => {
+  if (!placementMode || ev.button !== 0) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointerNDC.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  pointerNDC.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointerNDC, camera);
+  const hits = raycaster.intersectObject(wallMesh, false);
+  if (!hits.length) return;
+
+  const hit = hits[0];
+  const normal = hit.face.normal.clone().transformDirection(wallMesh.matrixWorld).normalize();
+  const spawnPos = hit.point.clone().addScaledVector(normal, 0.4);
+
+  const kind = select.value;
+  const entry = CATALOG.entries[kind];
+  const mesh = buildAntennaMesh(entry);
+  mesh.position.copy(spawnPos);
+  scene.add(mesh);
+
+  const phys = entry.physics;
+  const body = new CANNON.Body({ mass: phys.mass_kg, material: antennaMaterial });
+  body.addShape(
+    new CANNON.Box(new CANNON.Vec3(...phys.half_extents_m)),
+    new CANNON.Vec3(...phys.center_offset_m),
+  );
+  body.position.copy(spawnPos);
+  body.linearDamping = 0.15;
+  body.angularDamping = 0.25;
+  world.addBody(body);
+
+  placed.push({ mesh, body, kind });
+  refreshStats();
+});
+
+// --- resize -------------------------------------------------------------------
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// --- main loop ------------------------------------------------------------
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  world.step(1 / 60, dt, 5);
+  for (const p of placed) {
+    p.mesh.position.copy(p.body.position);
+    p.mesh.quaternion.copy(p.body.quaternion);
+  }
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+window.__debug = { scene, camera, controls, world, wallMesh, THREE };
+document.getElementById("loading").style.display = "none";
+document.getElementById("panel").style.display = "block";
+document.getElementById("crosshair").textContent =
+  `${COLLISION.n_boxes.toLocaleString()} collision boxes · ${extX.toFixed(1)}×${extY.toFixed(1)}×${extZ.toFixed(1)} m`;
+animate();
+</script>
+</body>
+</html>

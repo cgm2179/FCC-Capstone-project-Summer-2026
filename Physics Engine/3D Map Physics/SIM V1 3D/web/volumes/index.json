@@ -1,0 +1,37 @@
+{
+  "volumes": [
+    {
+      "txid": "tx_131-9-59",
+      "tx_vox": [
+        131,
+        9,
+        59
+      ],
+      "grid_shape": [
+        262,
+        11,
+        118
+      ],
+      "bands": [
+        2442.0,
+        3500.0,
+        5500.0,
+        6125.0
+      ],
+      "t_freq_mhz": 3500.0,
+      "t_max_ns": 147.11,
+      "t_unreachable_ns": 65504.0,
+      "dtype": "float16",
+      "pl_layout": "band,x,y,z",
+      "t_layout": "x,y,z",
+      "pl_file": "pl_volume_tx_131-9-59.bin",
+      "t_file": "t_volume_tx_131-9-59.bin",
+      "norm": {
+        "pl_min_db": 40.0,
+        "pl_range_db": 130.0,
+        "freq_log_lo_mhz": 2400.0,
+        "freq_log_hi_mhz": 6125.0
+      }
+    }
+  ]
+}

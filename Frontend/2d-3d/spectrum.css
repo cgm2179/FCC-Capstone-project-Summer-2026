@@ -1,0 +1,28 @@
+#spectrumToggle { display: block; width: 100%; margin-top: 14px;
+  appearance: none; border: 1px solid var(--line); background: #fff;
+  color: var(--accent); font-weight: 600; font-size: 0.86rem;
+  padding: 9px 12px; border-radius: 10px; cursor: pointer; text-align: left; }
+#spectrumToggle:hover { background: #eef6f4; }
+#spectrumPanel { display: none; margin-top: 10px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: #fbfdfc;
+  font-size: 0.78rem; line-height: 1.45; color: var(--ink); }
+#spectrumPanel h4 { margin: 10px 0 4px; font-size: 0.8rem; color: var(--accent); }
+#spectrumPanel h4:first-child { margin-top: 0; }
+#spectrumPanel ul { margin: 0 0 4px 0; padding-left: 16px; }
+#spectrumPanel li { margin-bottom: 3px; }
+#spectrumPanel .obs { display: inline-block; background: #e7f4f2;
+  color: var(--accent); border-radius: 6px; padding: 0 5px;
+  font-size: 0.68rem; font-weight: 700; vertical-align: 1px; }
+#spectrumPanel .dim { color: var(--muted); }
+.arfcn-btn { display: block; width: 100%; margin: 0 0 5px; appearance: none;
+  border: 1px solid var(--line); background: #fff; border-radius: 8px;
+  padding: 6px 8px; font-size: 0.74rem; text-align: left; cursor: pointer;
+  color: var(--ink); line-height: 1.3; }
+.arfcn-btn:hover { background: #eef6f4; border-color: var(--accent); }
+.arfcn-btn b { color: var(--accent); }
+#spectrumPanel .carrier-block { margin: 0 -8px 4px; padding: 4px 8px;
+  border-left: 3px solid transparent; border-radius: 8px;
+  transition: background .15s ease, border-color .15s ease; }
+#spectrumPanel .carrier-block h4 { margin-top: 0; }
+#spectrumPanel .carrier-block.selected { background: #eef6f4;
+  border-left-color: var(--accent); }
