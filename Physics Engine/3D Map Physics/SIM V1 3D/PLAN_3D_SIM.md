@@ -111,7 +111,14 @@ Two numerical fixes this found: power must accumulate in **float64** (deep-shado
 inside masked barriers where the CrossingLUT still reports a finite level — so amplitude must not
 be gated on eikonal reachability; phase falls back to d/c there.
 
-### M2 — Mechanisms + the demo  ⬜
+### M2 — Mechanisms + the demo  🚧
+- ✅ **`Diffraction_3D.py`** — UTD wedge diffraction on the voxel grid. Physics reused
+  verbatim from the 2D Kouyoumjian-Pathak implementation; new in 3-D is slice-wise edge
+  finding with the wedge parameter measured from geometry (n = air-arc/π), the Keller-cone
+  angle β₀, and keeping **D complex** so the combiner can interfere.
+- ⬜ `Reflection_3D.py` (GPU) · mechanism channels · enable the six `viz3dMode` options ·
+  mechanism time-lapse
+
 `Diffraction_3D` → `Reflection_3D` → mechanism channels in `export_pl_volume.py --mechanisms` →
 enable the six disabled `viz3dMode` options → **mechanism time-lapse**.
 
