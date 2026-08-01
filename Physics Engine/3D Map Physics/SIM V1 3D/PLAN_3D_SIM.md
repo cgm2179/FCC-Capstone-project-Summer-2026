@@ -72,28 +72,44 @@ cellular bands. *(The manifest's `bs_preset.bearing_deg = 135` was a guess and i
 
 ## 3. Milestones
 
-### M0 — Unblock, re-voxelize, register  🚧
+### M0 — Unblock, re-voxelize, register  ✅ COMPLETE
 - ✅ **M0.1** Restore `Antenna_Type_3D.py` (was truncated to 17 lines; 22 antenna types recovered,
   3 importers unblocked, original authorship header preserved).
-- 🚧 **M0.2** This document.
-- ⬜ **M0.3** `tests3d/` harness — analytic scenes + physics invariants (see §5).
-- ⬜ **M0.4** Re-voxelize from `Sandbox_Version_3D_Simulation_1.obj` (**253 named materials** vs the
+- ✅ **M0.2** This document.
+- ✅ **M0.3** `tests3d/` harness — analytic scenes + physics invariants (see §5).
+- ✅ **M0.4** Re-voxelize from `Sandbox_Version_3D_Simulation_1.obj` (**253 named materials** vs the
   current 18): seal the ceiling, reclass the floor slab to concrete, exclude ~40 people/prop materials.
-- ⬜ **M0.5** Fit `registration_3d.json` (px → local m → voxel); widen `norm.freq_log` to
+- ✅ **M0.5** Fit `registration_3d.json` (px → local m → voxel); widen `norm.freq_log` to
   `[600, 6200]` and add the measured cellular bands.
 
-> **Why M0 gates everything.** Layer census of the current `material_grid.npy`:
+> **Why M0 gated everything (now resolved).** Layer census of the ORIGINAL `material_grid.npy`:
 > **y=10 is 100 % air → no ceiling slab**; the floor slab is `drywall_partition` (ε′≈2.9) not
 > concrete (ε′≈5.24); **concrete = 284 voxels (0.08 %)**, **furniture = 73 (0.02 %)**, drywall = 23 %.
 > For a ceiling-mounted AP the floor and ceiling bounces are the two dominant specular paths — one has
 > the wrong permittivity, the other does not exist. Six perfect solvers on this grid would produce a
 > confidently wrong answer. **Material fidelity, not solver quality, is the binding error term.**
+>
+> **After M0.4** (262×17×132 from the 253-material mesh): concrete **11.33 %**, furniture
+> **2.17 %**, drywall 11.53 %, floor slab 100 % concrete, ceiling at y=9, `valid_tx` 2,510 of
+> 69,432 interior voxels. All four scene gates are now hard-passing tests.
 
-### M1 — Complex-field spine  ⬜
-`contracts.py` (`FieldGrid`, `CombinedField`) · `Path_Loss_3D.py` · `Combine_3D.py`.
-**Gate:** `to_legacy_volumes(combine([pathloss])) == SceneV3.pathloss_maps(tx)` to < 0.01 dB —
-proving the new architecture is a strict superset of the working engine, with zero exporter or
-frontend changes required.
+### M1 — Complex-field spine  ✅ COMPLETE
+`contracts.py` (`FieldGrid`, `CombinedField`, `PathSet`) · `Path_Loss_3D.py` (first of the six
+0-byte stubs filled) · `Combine_3D.py` · `_bootstrap.py`.
+
+**Gate PASSED:** `to_legacy_volumes(combine([path_loss])) == SceneV3.pathloss_maps(tx)` to
+< 0.01 dB on free-space, slab, two-plate AND the production scene — so the complex architecture
+is a strict superset of the working engine, and the browser/dataset stages need no changes.
+
+Verified behaviours: `−10log10 Σ|E|² == PL` · phase carried (rotates with range) ·
+**coherent doubling = 6.02 dB vs incoherent = 3.01 dB** (the distinction the design rests on) ·
+bandwidth averaging is a no-op for one path but shrinks fringe dynamic range for two sources ·
+FSPL floor · single path has exactly zero delay spread.
+
+Two numerical fixes this found: power must accumulate in **float64** (deep-shadow voxels reach
+540 dB, so |E|² ~1e-54 underflows float32 to zero and reports +inf), and the eikonal returns inf
+inside masked barriers where the CrossingLUT still reports a finite level — so amplitude must not
+be gated on eikonal reachability; phase falls back to d/c there.
 
 ### M2 — Mechanisms + the demo  ⬜
 `Diffraction_3D` → `Reflection_3D` → mechanism channels in `export_pl_volume.py --mechanisms` →
