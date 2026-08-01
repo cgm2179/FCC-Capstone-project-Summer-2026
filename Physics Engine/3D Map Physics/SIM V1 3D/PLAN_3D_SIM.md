@@ -128,8 +128,16 @@ be gated on eikonal reachability; phase falls back to d/c there.
   not power-summed as P7 specifies — power-summing destroys the standing-wave structure
   reflection exists to create. numpy + torch backends (CUDA/MPS), parity ≤ 0.01 dB.
   **Runs in ~3 s on the full scene — no GPU needed** (see compute note below).
+- ✅ **`Scattering_3D.py`** — diffuse scattering, effective-roughness / directive model
+  (Degli-Esposti). The only fundamentally INCOHERENT mechanism: fills `p_incoh`, leaves `E`
+  zero, and the combiner adds it as power. Energy is *split* not invented — specular keeps
+  `sqrt(1−S²)·R`, diffuse takes `S²|R|²` — so conservation is structural and testable.
+  Supplies the delay-spread tail that the scanner's unused `Ref Signal - Delay Spread`
+  column (5,951 samples) can validate. numpy + torch backends. **This is the mechanism that
+  genuinely wants the A100** (O(n_patches × n_rx)).
 - ⬜ mechanism channels in `export_pl_volume.py --mechanisms` · enable the six `viz3dMode`
   options · mechanism time-lapse
+- ⬜ `Refraction_3D.py`, `Absorption_3D.py` (both cheap, local)
 
 `Diffraction_3D` → `Reflection_3D` → mechanism channels in `export_pl_volume.py --mechanisms` →
 enable the six disabled `viz3dMode` options → **mechanism time-lapse**.
