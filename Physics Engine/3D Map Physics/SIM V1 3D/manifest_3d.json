@@ -119,8 +119,14 @@
     }
   },
   "freqs_mhz": [
+    619.0,
+    627.0,
+    1935.0,
     2442.0,
+    2510.0,
+    2600.0,
     3500.0,
+    3710.0,
     5500.0,
     6125.0
   ],
@@ -133,8 +139,8 @@
   "norm": {
     "pl_min_db": 40.0,
     "pl_range_db": 130.0,
-    "freq_log_lo_mhz": 2400.0,
-    "freq_log_hi_mhz": 6125.0
+    "freq_log_lo_mhz": 600.0,
+    "freq_log_hi_mhz": 6200.0
   },
   "speed_of_light_mps": 299792458.0,
   "tx": {
@@ -147,5 +153,22 @@
   ],
   "provenance": {
     "material_map": "sandbox_material_map.py"
+  },
+  "band_catalog": {
+    "wifi_mhz": [
+      2442.0,
+      5500.0,
+      6125.0
+    ],
+    "cellular_mhz": [
+      619.0,
+      627.0,
+      1935.0,
+      2510.0,
+      2600.0,
+      3500.0,
+      3710.0
+    ],
+    "note": "cellular set derived from the PCTEL G-flex walk (T-Mobile MCC310/MNC260): n71 619/627, B2/n2 1935, n41 2510/2600, n78 3500/3710. n78 is the only band overlapping the sim's original WiFi list, so it is the one validatable band."
   }
 }
