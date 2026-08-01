@@ -219,13 +219,16 @@ def _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
         device = ("cuda" if torch.cuda.is_available()
                   else "mps" if torch.backends.mps.is_available() else "cpu")
     dev = torch.device(device)
+    # MPS has no float64; CUDA and CPU do. Diffuse power spans many decades, so use the
+    # widest dtype the device supports rather than silently degrading everywhere.
+    acc_dt = torch.float32 if dev.type == "mps" else torch.float64
     cell = scene.cell
     Rf = torch.as_tensor(R.reshape(-1, 3), device=dev)
     P = torch.as_tensor(pos, device=dev)
     N = torch.as_tensor(nrm, device=dev)
     A = torch.as_tensor(area, device=dev)
     tx_t = torch.as_tensor(txv, device=dev)
-    out = torch.zeros((len(freqs), Rf.shape[0]), dtype=torch.float64, device=dev)
+    out = torch.zeros((len(freqs), Rf.shape[0]), dtype=acc_dt, device=dev)
 
     r_in = tx_t[None] - P
     s_in = torch.linalg.norm(r_in, dim=-1) * cell
@@ -235,21 +238,41 @@ def _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
     spec = 2.0 * cos_i[:, None] * N - u_in
 
     obs_t = [torch.as_tensor(np.asarray(obs_tx[bi]), device=dev) for bi in bidx]
-    for pi in torch.nonzero(ok).flatten().tolist():
-        r_out = Rf - P[pi][None]
-        s_out = torch.linalg.norm(r_out, dim=-1) * cell
-        u_out = r_out / torch.clamp(torch.linalg.norm(r_out, dim=-1, keepdim=True), min=1e-6)
-        cos_s = u_out @ spec[pi]
-        lobe = ((alpha_R + 1.0) / (2.0 * np.pi)) * torch.clamp(cos_s, min=0) ** alpha_R
-        lobe = lobe * ((u_out @ N[pi]) > 0)
-        for i, bi in enumerate(bidx):
-            ix = P[pi].long()
-            pl_in = (scene.fspl1[bi] + 10.0 * scene.n_exp
-                     * torch.log10(torch.clamp(s_in[pi], min=scene.d0))
-                     + obs_t[i][ix[0], ix[1], ix[2]])
-            p_in = torch.pow(10.0, -pl_in / 10.0) * A[pi] * cos_i[pi]
-            out[i] += (diffuse_frac * p_in * lobe
-                       / torch.clamp(s_out ** 2, min=cell ** 2)).to(torch.float64)
+    sel = torch.nonzero(ok).flatten()
+    if sel.numel() == 0:
+        return out.reshape((len(freqs),) + R.shape[:3]).cpu().numpy()
+
+    # Per-patch incident power, all patches and bands at once (n_patch, n_band).
+    ixyz = P[sel].long()
+    p_in = torch.empty((sel.numel(), len(freqs)), dtype=acc_dt, device=dev)
+    for i, bi in enumerate(bidx):
+        pl_in = (scene.fspl1[bi] + 10.0 * scene.n_exp
+                 * torch.log10(torch.clamp(s_in[sel], min=scene.d0))
+                 + obs_t[i][ixyz[:, 0], ixyz[:, 1], ixyz[:, 2]])
+        p_in[:, i] = (torch.pow(10.0, -pl_in / 10.0) * A[sel] * cos_i[sel]).to(acc_dt)
+
+    # CHUNKED over patches rather than looped: the earlier per-patch Python loop issued
+    # ~200k tiny kernels per Tx and left the A100 at 0% utilisation -- launch-bound, not
+    # compute-bound. Chunking turns it into a handful of large batched reductions.
+    Pc, Nc, Sc = P[sel], N[sel], spec[sel]
+    n_rx = Rf.shape[0]
+    chunk = max(1, min(int(sel.numel()), max(1, (1 << 24) // max(n_rx, 1))))
+    norm_lobe = (alpha_R + 1.0) / (2.0 * np.pi)
+    for k in range(0, sel.numel(), chunk):
+        pc, nc, sc_ = Pc[k:k + chunk], Nc[k:k + chunk], Sc[k:k + chunk]
+        r_out = Rf[None, :, :] - pc[:, None, :]                       # (c, n_rx, 3)
+        dist = torch.linalg.norm(r_out, dim=-1)
+        s_out = dist * cell
+        u_out = r_out / torch.clamp(dist, min=1e-6).unsqueeze(-1)
+        cos_s = torch.einsum("crk,ck->cr", u_out, sc_)
+        lobe = norm_lobe * torch.clamp(cos_s, min=0) ** alpha_R
+        lobe = lobe * (torch.einsum("crk,ck->cr", u_out, nc) > 0)
+        geo = (lobe / torch.clamp(s_out ** 2, min=cell ** 2)).to(acc_dt)
+        geo = torch.where(s_out > cell, geo, torch.zeros((), dtype=acc_dt, device=dev))
+        # (n_band, c) @ (c, n_rx) -> (n_band, n_rx): one matmul per chunk
+        out += diffuse_frac * (p_in[k:k + chunk].T @ geo)
+        if progress:
+            print(f"  patches {min(k+chunk, sel.numel())}/{sel.numel()}", flush=True)
     return out.reshape((len(freqs),) + R.shape[:3]).cpu().numpy()
 
 
