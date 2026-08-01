@@ -13,3 +13,6 @@ scikit-fmm==2025.06.23
 # Phase C (Colab): 3D UNet training + ONNX export — torch/onnx/onnxruntime come
 # preinstalled on Colab; the notebook records exact versions in its output.
 # For a local GPU box: torch>=2.4, onnx>=1.16, onnxruntime>=1.19
+
+# test harness (tests3d/)
+pytest==9.1.1

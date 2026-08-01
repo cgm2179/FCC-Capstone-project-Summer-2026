@@ -37,10 +37,19 @@ Antenna families covered (ANTENNA_TYPES keys in parens):
     Fractal (Koch monopole/dipole)                ("fractal")
     Metamaterial (split-ring-resonator array)    ("metamaterial")
 
+Not yet implemented (future families to consider in this environment):
+    Internal & PCB antennas, chip antennas, embedded antennas
+    Broadband & multi-element arrays
+    Microwave & waveguide antennas
+    Reflector antennas, lens antennas
+
 This module only builds geometry — it does not place antennas in the scene
 or attach RF patterns; that is Construct_Transmitter_3D.py's job, which can
 use ANTENNA_TYPES / build_antenna() below to build from a JSON transmitter
 spec the same way physics_3d.py consumes manifest_3d.json.
+
+Author: Cameron Mickle
+Created: 2024-06-07
 """
 from dataclasses import dataclass, field
 from typing import Sequence
