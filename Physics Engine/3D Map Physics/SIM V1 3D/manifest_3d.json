@@ -1,6 +1,6 @@
 {
   "version": "sim3d-v1.0",
-  "source_obj": "Data/models/Indoor 7th floor v2 First Render.obj/6afecb6b-b2f0-47e9-8488-d48cd283b15a.obj",
+  "source_obj": "/Users/cameronmickle/Documents/Indoor_Walk_Test_7-7/Sandbox_Version_3D_Simulation_1.obj/3ff8432c-980b-41b6-9045-c09dbe1d74cc.obj",
   "scale_reference": {
     "floorplan_w_px": 1150,
     "m_per_px": 0.0679,
@@ -15,17 +15,17 @@
   "_computed_by_voxelize": "grid_shape, cell_size_m, m_per_unit, origin_units, ceiling_height_m are filled in by voxelize.py",
   "grid_shape": [
     262,
-    11,
-    118
+    17,
+    132
   ],
   "cell_size_m": 0.3,
-  "m_per_unit": 0.01830716,
+  "m_per_unit": 0.01837683,
   "origin_units": [
-    -61.422,
+    -45.25,
     -8.25,
-    -1875.08
+    -1882.59
   ],
-  "ceiling_height_m": 2.855,
+  "ceiling_height_m": 4.579,
   "materials": [
     {
       "id": 0,
@@ -143,6 +143,9 @@
   },
   "room_band": [
     3,
-    9
-  ]
+    8
+  ],
+  "provenance": {
+    "material_map": "sandbox_material_map.py"
+  }
 }

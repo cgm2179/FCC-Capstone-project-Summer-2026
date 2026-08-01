@@ -4,28 +4,31 @@ Scene fidelity — the binding error term.
 The physics solvers are only as good as the material grid they read. These tests pin the
 properties a physically usable indoor scene must have.
 
-STATUS: the `scene_defect` tests are expected to FAIL against the current grid and are
-marked xfail. They document the M0.4 re-voxelization acceptance criteria. Once
-`voxelize.py` is re-run from Sandbox_Version_3D_Simulation_1.obj (253 named materials,
-sealed ceiling, concrete floor slab), flip STRICT_SCENE to True and they become hard gates.
+STATUS: PASSING as hard gates (STRICT_SCENE=True) since the M0.4 re-voxelization.
 
-Measured defect in the current grid (262x11x118):
-    y=10 is 100% air            -> NO CEILING SLAB
-    floor slab (y=1,2) is class 1 drywall (eps'~2.9), should be class 2 concrete (~5.24)
-    concrete   284 voxels (0.08%)
-    furniture   73 voxels (0.02%)
-    drywall  79220 voxels (23.3%)   <- the ".*" -> class 1 catch-all swallowed the structure
+Why these exist: for a ceiling-mounted AP the floor bounce and the ceiling bounce are the
+two dominant specular paths, so a scene with no ceiling, or a floor slab carrying the
+wrong permittivity, produces a confidently wrong answer no matter how good the solver is.
 
-Why this gates every reflection result: for a ceiling-mounted AP the floor bounce and the
-ceiling bounce are the two dominant specular paths. One currently has the wrong
-permittivity; the other does not exist.
+The defect these were written against (old grid, 262x11x118, from the sparse 18-material
+mesh with a `".*" -> class 1` catch-all):
+    y=10 was 100% air                  -> NO CEILING SLAB
+    floor slab was drywall (eps'~2.9)  -> should be concrete (~5.24)
+    concrete 0.084%, furniture 0.021%, drywall 23.3%
+    valid_tx_mask identical to inside_mask (no wall clearance)
+
+After re-voxelizing from Sandbox_Version_3D_Simulation_1.obj (253 named materials,
+5.08M triangles, 542k people/prop triangles excluded) the grid is 262x17x132 with:
+    room band y=3..8, floor slabs y=0,2 (100% concrete), ceiling y=9 (87.5% solid)
+    concrete 11.33%  furniture 2.17%  drywall 11.53%  glass 1.32%
+    valid_tx 2,510 of 69,432 interior voxels (2-voxel wall clearance)
 """
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-STRICT_SCENE = False        # flip to True after M0.4 re-voxelization
+STRICT_SCENE = True         # M0.4 re-voxelization landed - these are now hard gates
 _defect = pytest.mark.xfail(not STRICT_SCENE, reason="M0.4 re-voxelization pending",
                             strict=False)
 
@@ -54,25 +57,43 @@ def test_scene_has_matter(grid):
 
 
 # --------------------------------------------------------------------------- fidelity
+def room_band(grid, thresh=0.5):
+    """(room_lo, room_hi, floor_slabs, ceiling_y) - the room is the largest vertical gap
+    between dense slabs. Mirrors voxelize.interior_air so tests and voxelizer agree."""
+    prof = (grid != AIR).mean(axis=(0, 2))
+    slabs = np.nonzero(prof > thresh)[0]
+    if slabs.size < 2:
+        return 1, grid.shape[1] - 1, slabs.tolist(), None
+    k = int(np.argmax(np.diff(slabs)))
+    return int(slabs[k]) + 1, int(slabs[k + 1]) - 1, slabs[:k + 1].tolist(), int(slabs[k + 1])
+
+
 @_defect
 def test_ceiling_slab_exists(grid):
-    """The topmost layer must contain structure, else there is no ceiling bounce."""
-    top = grid[:, -1, :]
-    solid = float((top != AIR).mean())
-    assert solid > 0.5, (
-        f"top layer is {100*(1-solid):.1f}% air - NO CEILING SLAB. "
-        "Ceiling reflection is a dominant indoor path and cannot be modelled.")
+    """A ceiling slab must cap the room, else the ceiling bounce cannot be modelled.
+
+    Checked against the ROOM BAND, not the top grid layer: a detailed mesh may model a
+    plenum/roof above the ceiling, so the topmost layer is legitimately air.
+    """
+    _lo, hi, _floor, ceil_y = room_band(grid)
+    assert ceil_y is not None, (
+        "no ceiling slab found above the room band - ceiling reflection is a dominant "
+        "indoor path and cannot be modelled.")
+    solid = float((grid[:, ceil_y, :] != AIR).mean())
+    assert solid > 0.5, f"ceiling layer y={ceil_y} is only {100*solid:.1f}% solid"
+    assert ceil_y > hi, "ceiling must sit above the room band"
 
 
 @_defect
 def test_floor_slab_is_concrete(grid):
     """A floor slab modelled as drywall has the wrong permittivity for the floor bounce."""
-    floor = grid[:, 1, :]
-    solid = floor[floor != AIR]
+    lo, _hi, _floor, _c = room_band(grid)
+    slab = grid[:, :lo, :]
+    solid = slab[slab != AIR]
     assert solid.size > 0, "no floor slab at all"
     frac_concrete = float((solid == CONCRETE).mean())
     assert frac_concrete > 0.5, (
-        f"floor slab is only {100*frac_concrete:.1f}% concrete "
+        f"floor slab (y<{lo}) is only {100*frac_concrete:.1f}% concrete "
         f"(dominant class = {np.bincount(solid).argmax()}); "
         "eps' 2.9 vs 5.24 gives the wrong floor-bounce reflection coefficient.")
 
