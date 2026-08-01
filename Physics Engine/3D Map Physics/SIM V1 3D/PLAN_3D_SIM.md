@@ -33,11 +33,17 @@ These are the complete set of first-order EM–matter interactions; everything e
 | Mechanism | Module | Emits | Physics source | Compute |
 |---|---|---|---|---|
 | Spreading / transmission | `Path_Loss_3D.py` | coherent **E** | `SceneV3` + `CrossingLUT` | local |
-| Reflection | `Reflection_3D.py` | coherent **E** | `r_slab`, `fresnel_coeffs`, image sources | GPU |
+| Reflection | `Reflection_3D.py` | coherent **E** | `r_slab` (complex Airy), image sources | local (~3 s) |
 | Refraction | `Refraction_3D.py` | coherent **E** | `speed_field`, eikonal, `slab_transmission_coherent` | local |
 | Diffraction | `Diffraction_3D.py` | coherent **E** | `utd_coefficient` (complex D) | local / GPU |
 | Scattering | `Scattering_3D.py` | **`p_incoh`** | effective-roughness (Degli-Esposti) | GPU |
 | Absorption | `Absorption_3D.py` | multiplier + absorbed-power density | `Im(q)`, `per_metre` | local |
+
+> **Compute note (measured, not estimated).** Order-1 image sources on axis-aligned planes cost
+> one distance field per plane — 8 planes over 262×17×132×2 bands takes **3.0 s on CPU** (MPS 4.4 s;
+> transfer overhead dominates at this size). The earlier "first true GPU solver" estimate assumed
+> general plane clustering with order-2 bounces. The A100 is still wanted for **Scattering_3D**
+> (~20k lit patches × angular basis), the **1,500-Tx dataset sweep**, and order-2+ reflections.
 
 **Emergent, not modules:** multipath & fading (coherent sum over space), delay spread & dispersion
 (that sum resolved in time), waveguiding/ducting (high-order reflection in confined geometry — watch
@@ -116,8 +122,14 @@ be gated on eikonal reachability; phase falls back to d/c there.
   verbatim from the 2D Kouyoumjian-Pathak implementation; new in 3-D is slice-wise edge
   finding with the wedge parameter measured from geometry (n = air-arc/π), the Keller-cone
   angle β₀, and keeping **D complex** so the combiner can interfere.
-- ⬜ `Reflection_3D.py` (GPU) · mechanism channels · enable the six `viz3dMode` options ·
-  mechanism time-lapse
+- ✅ **`Reflection_3D.py`** — specular multipath by image sources. A voxel scene's faces are
+  axis-aligned by construction, so mirroring and path length are exact and fully vectorized:
+  one distance field per plane. Complex Airy-slab R (`physics_3d.r_slab`) added COHERENTLY,
+  not power-summed as P7 specifies — power-summing destroys the standing-wave structure
+  reflection exists to create. numpy + torch backends (CUDA/MPS), parity ≤ 0.01 dB.
+  **Runs in ~3 s on the full scene — no GPU needed** (see compute note below).
+- ⬜ mechanism channels in `export_pl_volume.py --mechanisms` · enable the six `viz3dMode`
+  options · mechanism time-lapse
 
 `Diffraction_3D` → `Reflection_3D` → mechanism channels in `export_pl_volume.py --mechanisms` →
 enable the six disabled `viz3dMode` options → **mechanism time-lapse**.
