@@ -30,11 +30,19 @@ share against the total it already has, as 10**((PL_total - PL_mech)/10).
 Resumable by design: an existing pair for a txid is skipped, so a dropped Colab session
 costs only the Tx in flight. Mirrors the shard-level skip the 2D dataset stage uses.
 
+PROPAGATION MODES (--mode, M3)
+    vacuum | indoor | o2i | outdoor — see modes_3d.py, which owns the registry. The mode
+    selects the scene AND the default mechanism stack; an explicit --mechanisms still
+    wins. Each volume records its mode in index.json, because a volume solved in one mode
+    is not interchangeable with another's: o2i has no transmitter inside the grid and
+    outdoor is a different grid entirely.
+
 usage
     python precompute_volumes.py --list 24 --stratify          # pick Tx positions
     python precompute_volumes.py --n-tx 24 --mechanisms path_loss,reflection,diffraction \
            --backend torch --out web/volumes
     python precompute_volumes.py --n-tx 1 --mech-bands 2442,3500   # small viz export
+    python precompute_volumes.py --mode o2i --n-tx 1                # outdoor-to-indoor
 """
 from __future__ import annotations
 
@@ -55,6 +63,7 @@ for _p in (HERE, MECH_DIR, HERE.parent.parent / "2D" / "SIM"):
 import engine_3d  # noqa: E402
 
 F16_MAX = 65504.0
+DEFAULT_MECHANISMS = "path_loss,reflection,diffraction"
 
 
 def tx_id(tx) -> str:
@@ -95,16 +104,28 @@ def choose_tx(scene, n, *, stratify=True, seed=0, y_fixed=None):
 
 
 def solve_one(scene, tx, bands, mechanisms, backend, bandwidth_hz=None,
-              relay=None, edges=None, n_edges=16):
+              relay=None, edges=None, n_edges=16, mode="indoor"):
     """Run the requested mechanisms for one Tx.
 
     Returns (PL (nf,NX,NY,NZ) dB, T (NX,NY,NZ) s, CombinedField, contribs) — the last two
     carry the per-mechanism breakdown the channel exporter needs. The (PL, T) pair alone
     is exactly what the legacy single-channel path wrote, so callers that only want the
     total can ignore the rest.
+
+    `mode` selects the propagation mode (modes_3d). Only O2I changes anything here — it
+    swaps the point source for a facade plane wave — so the indoor path is untouched.
     """
     import Combine_3D as CMB
     contribs = []
+
+    if "o2i_facade" in mechanisms:
+        import modes_3d as MD
+        g = MD.forte_hall_geometry()
+        fg = MD.bs_field_3d(scene, g["arrival_bearing_deg"], bands=bands,
+                            distance_m=g["distance_m"])
+        contribs.append(fg)
+        tx = fg.tx_vox              # secondary mechanisms expand from the lit facade
+
     if "path_loss" in mechanisms:
         import Path_Loss_3D as PLM
         contribs.append(PLM.solve(scene, tx, bands=bands))
@@ -125,7 +146,11 @@ def solve_one(scene, tx, bands, mechanisms, backend, bandwidth_hz=None,
                                   patch_cells=3, rx_downsample=2))
     if not contribs:
         raise SystemExit("no mechanisms selected")
-    cf = CMB.combine(contribs, bandwidth_hz=bandwidth_hz, floor_at_fspl=True,
+    # The FSPL floor is a point-source invariant ("a passive channel cannot beat free
+    # space FROM THE TRANSMITTER"). In O2I the transmitter is 416 m outside the grid, so
+    # flooring against an in-grid facade voxel would clamp the map to a fiction.
+    floor = "o2i_facade" not in mechanisms
+    cf = CMB.combine(contribs, bandwidth_hz=bandwidth_hz, floor_at_fspl=floor,
                      scene=scene, tx=tx)
     pl, t = CMB.to_legacy_volumes(cf)
     return pl, t, cf, contribs
@@ -243,7 +268,7 @@ def _entry_id(e):
     return e.get("txid") or e.get("tx_id")
 
 
-def merge_index(out_dir: Path, entries, manifest, mechanisms, bands):
+def merge_index(out_dir: Path, entries, manifest, mechanisms, bands, mode=None):
     """Rewrite index.json, preserving entries for transmitters not in this run.
 
     Schema note (v3): entries carry `txid`, `pl_file` and `t_file` because that is what
@@ -267,6 +292,10 @@ def merge_index(out_dir: Path, entries, manifest, mechanisms, bands):
         old[_entry_id(e)] = e
     doc = {
         "version": "vol3d-v3",
+        # Modes cannot share a volume file: they have different scenes and different
+        # source models, so the browser filters the catalog by mode before matching a Tx.
+        "modes": sorted({e.get("mode", "indoor") for e in old.values()}
+                        | ({mode} if mode else set())),
         "grid_shape": manifest["grid_shape"],
         "cell_size_m": manifest["cell_size_m"],
         "bands_mhz": list(bands),
@@ -294,6 +323,8 @@ def migrate_entry(e: dict, out_dir: Path, manifest: dict) -> dict:
     e = dict(e)
     e["txid"] = tid
     e.pop("tx_id", None)
+    # everything written before M3 was the indoor floor with a point source
+    e.setdefault("mode", "indoor")
     e.setdefault("pl_file", f"pl_volume_{tid}.bin")
     e.setdefault("t_file", f"t_volume_{tid}.bin")
     e.setdefault("grid_shape", list(manifest["grid_shape"]))
@@ -344,7 +375,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--n-tx", type=int, default=8)
     ap.add_argument("--out", default=str(HERE / "web" / "volumes"))
-    ap.add_argument("--mechanisms", default="path_loss,reflection,diffraction")
+    ap.add_argument("--mechanisms", default=DEFAULT_MECHANISMS)
     ap.add_argument("--bands", default=None, help="comma-separated MHz (default: all)")
     ap.add_argument("--backend", default="numpy", choices=["numpy", "torch"])
     ap.add_argument("--bandwidth-mhz", type=float, default=None)
@@ -363,11 +394,24 @@ def main(argv=None) -> int:
     ap.add_argument("--relay-cache", default=None,
                     help="path for the diffraction relay cache (.npy); built if missing. "
                          "Default: cache/relay_<n_edges>.npy beside this script")
+    ap.add_argument("--mode", default=None,
+                    help="propagation mode: vacuum | indoor | o2i | outdoor "
+                         "(default: the manifest's `mode`). Selects the scene AND the "
+                         "default mechanism stack — see modes_3d.py")
     a = ap.parse_args(argv)
 
-    scene, manifest = engine_3d.load_scene(HERE)
+    import modes_3d as MD
+    mode = a.mode or json.loads((HERE / "manifest_3d.json").read_text()).get(
+        "mode", MD.DEFAULT_MODE)
+    info = MD.describe(mode)
+    if not info["available"]:
+        raise SystemExit(f"mode {mode!r} unavailable: {info['unavailable_reason']}")
+
+    scene, manifest = MD.build_scene(mode)
     bands = ([float(x) for x in a.bands.split(",")] if a.bands else list(scene.freqs))
-    mechs = [m.strip() for m in a.mechanisms.split(",") if m.strip()]
+    # an explicit --mechanisms still wins; otherwise take the mode's own stack
+    mechs = ([m.strip() for m in a.mechanisms.split(",") if m.strip()]
+             if a.mechanisms != DEFAULT_MECHANISMS else list(info["mechanisms"]))
     out_dir = Path(a.out).expanduser().resolve()
 
     band_sel = None
@@ -382,6 +426,7 @@ def main(argv=None) -> int:
             print(tx_id(t), t)
         return 0
 
+    print(f"mode {mode} — {info['label']}: {info['summary']}")
     print(f"scene {scene.M.shape}  bands {len(bands)}  mechanisms {mechs}  "
           f"backend {a.backend}")
     print(f"out {out_dir}"
@@ -400,7 +445,7 @@ def main(argv=None) -> int:
         t1 = time.time()
         pl, t, cf, contribs = solve_one(
             scene, tx, bands, mechs, a.backend, relay=relay, edges=edges,
-            n_edges=a.n_edges,
+            n_edges=a.n_edges, mode=mode,
             bandwidth_hz=(a.bandwidth_mhz * 1e6) if a.bandwidth_mhz else None)
         tid, nbytes, tmax = write_volumes(out_dir, tx, pl, t)
         mech_files = {}
@@ -410,7 +455,7 @@ def main(argv=None) -> int:
             nbytes += mbytes
         done_bytes += nbytes
         fin = np.isfinite(pl) & (pl < 400)
-        entries.append({"txid": tid, "tx_vox": list(map(int, tx)),
+        entries.append({"txid": tid, "mode": mode, "tx_vox": list(map(int, tx)),
                         "grid_shape": list(map(int, scene.M.shape)),
                         "bands": bands, "t_max_ns": tmax, "t_unreachable_ns": F16_MAX,
                         "pl_file": f"pl_volume_{tid}.bin", "t_file": f"t_volume_{tid}.bin",
@@ -423,7 +468,7 @@ def main(argv=None) -> int:
               f"{nbytes/1e6:.1f} MB"
               + (f"  +{len(mech_files)} mech channels" if mech_files else ""))
 
-    doc = merge_index(out_dir, entries, manifest, mechs, bands)
+    doc = merge_index(out_dir, entries, manifest, mechs, bands, mode=mode)
     print(f"\nwrote {len(entries)} new volumes ({done_bytes/1e6:.1f} MB) "
           f"in {time.time()-t0:.1f}s; cache now holds {doc['count']} Tx")
     return 0

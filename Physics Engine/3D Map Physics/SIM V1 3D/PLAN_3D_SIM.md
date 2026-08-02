@@ -170,9 +170,46 @@ change, not an export change.
    still described the pre-M0.4 262×11×118 grid while the volumes were 262×17×132. Both are
    regenerated; `insideMaskFor()` now refuses to index one grid with the other's strides.
 
-### M3 — Four modes + offload/cache  ⬜
-Remaining mechanisms (`Refraction`, `Absorption`, `Scattering`) · mode selector ·
-`cache/precompute_volumes.py` + `cache_index.py`.
+### M3 — Four modes + offload/cache  🚧
+- ✅ **`modes_3d.py`** — the mode registry. Four modes, one solve path: modes differ only
+  in which grid they build and where the source is, so that difference is data, not four
+  forked scripts.
+  | mode | scene | source | mechanisms |
+  |---|---|---|---|
+  | `vacuum` | all air, production grid shape | point | path loss only |
+  | `indoor` | the voxelized 7th floor | point | all four |
+  | `o2i` | the same floor | plane wave on the facade | facade + reflection/diffraction/scattering |
+  | `outdoor` | `city/NoMa_DC_buildings` | point | path loss, reflection, diffraction |
+- ✅ **Vacuum is the invariant gate made visible.** The engine must reproduce
+  `20log₁₀(d) + 20log₁₀(f) − 27.55` exactly; the browser re-checks the exported volume
+  against the closed form and prints the worst deviation, so the gate is something the
+  user can *see* rather than a line in a test log.
+- ✅ **O2I geometry is derived, not guessed.** `forte_hall_geometry()` computes
+  **415.9 m at arrival bearing 237.0°** from the floor plan's own QGIS georeference plus
+  the known rooftop coordinates — replacing `bs_preset.bearing_deg = 135`, which its own
+  comment called a demo placeholder. Outdoor-leg FSPL 80.7 dB (619 MHz) → 96.2 dB
+  (3710 MHz). The tests assert the *derivation*, not the constant.
+- ✅ **`facade_sources_3d` / `bs_field_3d`** — 3-D port of `phase_a.facade_sources`/
+  `bs_maps`. Normals are estimated for the whole grid at once (the per-voxel Python
+  version was ~573k iterations; the vectorized one is 0.15 s). Opposite bearings light
+  **disjoint** facades — the property that makes O2I directional at all.
+- ✅ **Mode selector in the browser**, with the volume catalog filtered by mode. A volume
+  solved in one mode is not interchangeable with another's, so the filter is correctness,
+  not tidiness.
+- ⬜ `cache_index.py` (content-addressed LRU) · browser prefetch of neighbouring Tx.
+
+**Why the O2I field is cached.** Every facade source costs one `crossing_loss` solve
+(~2.9 s), so one source per lit voxel is 645 solves — half an hour for one map. But the
+O2I source geometry is *fixed*: Forte Hall does not move. So the field is a one-time
+computation keyed by scene+bearing+loss+bands, ~2 min at the default 48 sources and free
+afterwards. Same reasoning as the diffraction relay cache.
+
+**Two deliberate departures from the indoor path**, both because the transmitter is
+416 m outside the grid: the FSPL floor is disabled in O2I (flooring against an in-grid
+facade voxel would clamp the map to a fiction), and the facade contributions are summed
+as **power, not field** — they discretize one wavefront, so a coherent sum would
+manufacture an interference pattern that is an artifact of the sampling stride.
+
 Browser resolution order: **cached volume → DL surrogate → analytic fallback.**
 
 ### M4 — Dataset + DL surrogate  ⬜ *(Colab A100)*

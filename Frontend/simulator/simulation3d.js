@@ -52,6 +52,8 @@ const animCtl  = document.getElementById('anim3dControls');
 const animPlay = document.getElementById('anim3dPlay');
 const animScrub = document.getElementById('anim3dScrub');
 const vizMode  = document.getElementById('viz3dMode');
+const modeSel  = document.getElementById('mode3dSelect');
+const modeNote = document.getElementById('mode3dNote');
 
 function setStatus(msg) { if (statusEl) statusEl.textContent = msg || ''; }
 
@@ -323,6 +325,25 @@ const VOL_TOL = 20;              // voxels — precomputed Tx are sparse; match 
 let volumeIndex = null;          // [] once fetched; entries = index.json sidecars
 const volumeCache = {};          // txid -> decoded volume
 
+// ---- Propagation modes (M3) ----
+// The mode picks the SCENE and the SOURCE MODEL, so a volume solved in one mode is not
+// interchangeable with another's: `o2i` has no transmitter inside the grid at all, and
+// `outdoor` is a different grid entirely. The browser therefore filters the volume
+// catalog by mode before it ever looks for a matching Tx. Physics lives in
+// SIM V1 3D/modes_3d.py; this is only the selector and the explanation.
+const MODE_INFO = {
+  vacuum: { label: 'Vacuum / free space', source: 'point',
+    note: 'All air — path loss must equal FSPL exactly. This is the invariant gate made visible: if the engine cannot reproduce free space, nothing else it says is trustworthy.' },
+  indoor: { label: 'Indoor', source: 'point',
+    note: 'The voxelized 7th floor with the transmitter inside. The production case — place a Tx on the model.' },
+  o2i: { label: 'Indoor + Outdoor (O2I)', source: 'plane_wave',
+    note: 'A macro cell 416 m away (Forte Hall, arriving from 237°) lights the facade; energy penetrates through 3GPP O2I loss and spreads inside. There is no transmitter to place — the source is outside the grid.' },
+  outdoor: { label: 'Outdoor (city)', source: 'point',
+    note: 'NoMa DC city block: buildings are one barrier class, streets are air. Ground reflection and terrain diffraction come from the same reflection/diffraction modules, on a scene whose walls are buildings.' },
+};
+function currentMode() { return (modeSel && modeSel.value) || 'indoor'; }
+function modeIsPointSource() { return (MODE_INFO[currentMode()] || {}).source !== 'plane_wave'; }
+
 function f16ToF32(u16) {
   const out = new Float32Array(u16.length);
   for (let i = 0; i < u16.length; i++) {
@@ -339,10 +360,19 @@ async function loadVolumeIndex() {
   catch (e) { volumeIndex = []; }
   return volumeIndex;
 }
-function matchVolume(txVox) {
-  if (!volumeIndex || !volumeIndex.length || !txVox) return null;
+// Volumes written before M3 carry no `mode`; they were all the indoor floor.
+function volumesForMode(mode) {
+  return (volumeIndex || []).filter((e) => (e.mode || 'indoor') === mode);
+}
+function matchVolume(txVox, mode) {
+  const pool = volumesForMode(mode || currentMode());
+  if (!pool.length) return null;
+  // A plane-wave mode has no transmitter to match against — there is exactly one
+  // solution per bearing, so take it rather than pretending to search. Same for a point
+  // mode with no Tx placed yet: showing the mode's cached solve beats showing nothing.
+  if (!modeIsPointSource() || !txVox) return pool[0];
   let best = null, bd = Infinity;
-  for (const e of volumeIndex) {
+  for (const e of pool) {
     const d = Math.hypot(e.tx_vox[0] - txVox[0], e.tx_vox[1] - txVox[1], e.tx_vox[2] - txVox[2]);
     if (d < bd) { bd = d; best = e; }
   }
@@ -371,12 +401,41 @@ function nearestBandIndex(vol, fMHz) {
   for (let i = 0; i < vol.bands.length; i++) { const d = Math.abs(vol.bands[i] - fMHz); if (d < bd) { bd = d; bi = i; } }
   return bi;
 }
-// background-load the volume matching txVox; call onReady() when it arrives
+// background-load the volume matching txVox in the current mode; call onReady() when it arrives
 function tryLoadVolume(txVox, onReady) {
   loadVolumeIndex().then(() => {
     const e = matchVolume(txVox);
-    if (e && (!window.SIM3D_VOLUME || window.SIM3D_VOLUME.entry.txid !== e.txid)) loadVolume(e).then(onReady);
+    if (!e) { reportNoVolume(txVox); return; }
+    if (!window.SIM3D_VOLUME || window.SIM3D_VOLUME.entry.txid !== e.txid
+        || (window.SIM3D_VOLUME.entry.mode || 'indoor') !== (e.mode || 'indoor')) {
+      loadVolume(e).then(onReady);
+    } else if (onReady) { onReady(window.SIM3D_VOLUME); }
   });
+}
+// Two different failures wear the same "no volume" label, and the fix differs: either the
+// mode has nothing cached (go solve one), or it has volumes but none near this
+// transmitter (go move the Tx). Say which.
+function reportNoVolume(txVox) {
+  const m = currentMode(), label = (MODE_INFO[m] || {}).label;
+  const pool = volumesForMode(m);
+  const solveHint = ' — run: python "SIM V1 3D/export_pl_volume.py" --mode ' + m
+    + ' --mechanisms path_loss,reflection,diffraction,scattering';
+  if (!pool.length) {
+    setStatus(label + ' · nothing cached for this mode yet ('
+      + (volumeIndex || []).length + ' cached in others)' + solveHint);
+    return;
+  }
+  if (!txVox) { setStatus(label + ' · place a transmitter to pick a cached solve.'); return; }
+  let bd = Infinity, near = null;
+  for (const e of pool) {
+    const d = Math.hypot(e.tx_vox[0] - txVox[0], e.tx_vox[1] - txVox[1], e.tx_vox[2] - txVox[2]);
+    if (d < bd) { bd = d; near = e; }
+  }
+  setStatus(label + ' · ' + pool.length + ' cached solve' + (pool.length === 1 ? '' : 's')
+    + ' in this mode, but the nearest (' + near.txid + ') is ' + Math.round(bd)
+    + ' voxels away — beyond the ' + VOL_TOL + '-voxel match tolerance. Move the transmitter '
+    + 'near it, or solve this position:' + solveHint + ' --tx '
+    + txVox.join(' '));
 }
 
 // ---- Per-mechanism channels (m_<mech>_<txid>.bin + tau_<mech>_<txid>.bin) ----
@@ -685,6 +744,62 @@ function runMechanismField(mech) {
       + ' · first arrival ≤ ' + ch.t_max_ns.toFixed(0) + ' ns.');
   });
 }
+// ---- Vacuum mode: the invariant gate, checked in the browser ----
+// Not decorative. The vacuum volume is solved by the SAME engine as every other mode, so
+// comparing it here against the closed form 20log10(d) + 20log10(f) - 27.55 is a genuine
+// end-to-end check of the whole chain — solver, float16 export, index, JS decoder — and it
+// is the one case where the right answer is known exactly.
+function checkVacuum(vol, freqMHz) {
+  const bi = nearestBandIndex(vol, freqMHz);
+  const f = vol.bands[bi];
+  const tx = vol.tx_vox;
+  const NX = vol.dims[0], NY = vol.dims[1], NZ = vol.dims[2];
+  let worst = 0, n = 0, worstAt = null, tauBad = 0;
+  const d0 = 1.0;
+  for (let ix = 0; ix < NX; ix += 3)
+    for (let iy = 0; iy < NY; iy += 2)
+      for (let iz = 0; iz < NZ; iz += 3) {
+        const d = Math.hypot(ix - tx[0], iy - tx[1], iz - tx[2]) * CELL_M;
+        const ana = 20 * Math.log10(Math.max(d, d0)) + 20 * Math.log10(f) - 27.55;
+        const got = plAt(vol, bi, ix, iy, iz);
+        if (!isFinite(got) || got >= 65504) continue;
+        const e = Math.abs(got - ana);
+        if (e > worst) { worst = e; worstAt = [ix, iy, iz]; }
+        n++;
+        // causality: the front cannot outrun c. One cell of slack for the eikonal's
+        // source-contour offset (skfmm seeds on the source cell).
+        const tNs = tAt(vol, ix, iy, iz);
+        if (tNs < 65504 && tNs < (d / 299792458) * 1e9 - (CELL_M / 299792458) * 1e9 * 1.5) tauBad++;
+      }
+  // float16 storage is the floor on achievable agreement: half-precision spacing at
+  // ~130 dB is 0.0625 dB, so anything under ~0.05 dB is exact to the wire format.
+  return { band: f, samples: n, worstDb: worst, worstAt, tauViolations: tauBad,
+           pass: worst < 0.1 && tauBad === 0 };
+}
+function runVacuumField() {
+  if (!ensureInit()) return;
+  const freqMHz = Number(wfBand && wfBand.value) || 2437;
+  const vol = window.SIM3D_VOLUME;
+  if (!vol || (vol.entry.mode || 'indoor') !== 'vacuum') {
+    const tx = firstTx();
+    const D = GDIMS || MANIFEST.grid_shape;
+    const src = tx ? tx.body.position : null;
+    const txVox = (src && D) ? [clampi(Math.floor(src.x / CELL_M), D[0]),
+                               clampi(Math.floor(src.y / CELL_M), D[1]),
+                               clampi(Math.floor(src.z / CELL_M), D[2])] : null;
+    tryLoadVolume(txVox, () => { if (currentMode() === 'vacuum') runVacuumField(); });
+    return;
+  }
+  runStaticField();                      // draw it with the normal coverage renderer
+  const r = checkVacuum(vol, freqMHz);
+  setStatus('Vacuum · ' + (r.pass ? 'INVARIANT GATE PASSED' : 'GATE FAILED')
+    + ' · engine vs closed-form FSPL over ' + r.samples.toLocaleString() + ' voxels @ '
+    + Math.round(r.band) + ' MHz: max |Δ| = ' + r.worstDb.toFixed(4) + ' dB'
+    + (r.worstDb < 0.05 ? ' (float16 storage limit — exact to the wire format)' : '')
+    + ' · causality violations: ' + r.tauViolations
+    + (r.pass ? '' : ' · worst at voxel ' + (r.worstAt || []).join(',')));
+}
+
 function noMechData(meta, vol) {
   const have = vol ? mechList(vol).map((m) => m.label).join(', ') : '';
   setStatus(meta.label + ' · no mechanism channel in the cached volume'
@@ -1267,6 +1382,10 @@ if (animScrub) animScrub.addEventListener('input', () => {
 // Central dispatch — every viz mode routes through here so the Tx-placement and band
 // handlers below stay a one-liner instead of repeating the same if-chain three times.
 function runVizMode(mode) {
+  // Vacuum's coverage view IS the invariant gate, so it replaces the plain field render.
+  if (currentMode() === 'vacuum' && (mode === 'coverage' || mode === 'path_loss')) {
+    runVacuumField(); return;
+  }
   if (mode === 'field') { runFieldVectors(); return; }
   if (mode === 'radiation') { runRadiationPattern(); return; }
   if (mode === 'interference') { runInterference(); return; }
@@ -1279,6 +1398,33 @@ function runVizMode(mode) {
     ' — this mechanism module is not built yet (Refraction_3D.py / Absorption_3D.py are still stubs).');
 }
 if (vizMode) vizMode.addEventListener('change', () => runVizMode(vizMode.value));
+
+// ---- Propagation mode ----
+// Changing the mode invalidates the loaded volume (different scene, different source), so
+// drop it and re-resolve rather than rendering one mode's physics under another's label.
+function refreshModeNote() {
+  if (!modeNote) return;
+  const info = MODE_INFO[currentMode()] || {};
+  const n = volumeIndex ? volumesForMode(currentMode()).length : null;
+  modeNote.textContent = (info.note || '') + (n === null ? ''
+    : '  ·  ' + (n ? n + ' cached volume' + (n === 1 ? '' : 's') + '.'
+                   : 'nothing cached for this mode yet.'));
+}
+function applyMode() {
+  refreshModeNote();
+  // the Tx controls are meaningless when the source is a plane wave 416 m away
+  const pt = modeIsPointSource();
+  for (const el of [txPlace, txType]) if (el) el.disabled = !pt;
+  // a volume from another mode is a different scene and a different source model, so it
+  // must not survive the switch
+  window.SIM3D_VOLUME = null;
+  loadVolumeIndex().then(() => {
+    refreshModeNote();
+    if (vizMode) runVizMode(vizMode.value);
+  });
+}
+if (modeSel) modeSel.addEventListener('change', applyMode);
+if (modeNote) applyMode();
 // changing the transmitter antenna type live-updates the lobe when in radiation mode
 if (txType) txType.addEventListener('change', () => {
   if (vizMode && vizMode.value === 'radiation') runRadiationPattern();

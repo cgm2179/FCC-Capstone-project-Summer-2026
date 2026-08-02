@@ -34,6 +34,7 @@ usage:
   python "SIM V1 3D/export_pl_volume.py" --mechanisms path_loss,reflection,diffraction,scattering
 """
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -65,13 +66,29 @@ def main():
                     help="band subset for the per-mechanism channels only")
     ap.add_argument("--backend", default="numpy", choices=["numpy", "torch"])
     ap.add_argument("--n-edges", type=int, default=16)
+    ap.add_argument("--mode", default=None,
+                    help="vacuum | indoor | o2i | outdoor (default: the manifest's `mode`)")
     ap.add_argument("--out", default=str(HERE / "web" / "volumes"))
     args = ap.parse_args()
 
-    scene, man = load_scene(HERE)
-    valid = np.load(HERE / "valid_tx_mask.npy")
-    tx = np.array(args.tx, float) if args.tx else pick_tx(valid)
-    txi = [int(round(v)) for v in tx]
+    import modes_3d as MD
+    man0 = json.loads((HERE / "manifest_3d.json").read_text())
+    mode = args.mode or man0.get("mode", MD.DEFAULT_MODE)
+    info = MD.describe(mode)
+    if not info["available"]:
+        raise SystemExit(f"mode {mode!r} unavailable: {info['unavailable_reason']}")
+
+    scene, man = MD.build_scene(mode)
+    if mode == "o2i":
+        # no Tx voxel exists: the source is 416 m outside the grid
+        txi = list(MD.bs_field_3d(scene, MD.forte_hall_geometry()["arrival_bearing_deg"],
+                                  bands=[float(scene.freqs[0])]).tx_vox)
+        tx = np.array(txi, float)
+    else:
+        vt = HERE / "valid_tx_mask.npy"
+        valid = np.load(vt) if vt.exists() else np.ones(scene.M.shape, bool)
+        tx = np.array(args.tx, float) if args.tx else pick_tx(valid)
+        txi = [int(round(v)) for v in tx]
     nx, ny, nz = scene.M.shape
     bands = ([float(x) for x in args.bands.split(",")] if args.bands
              else [float(f) for f in man["freqs_mhz"]])
@@ -82,7 +99,11 @@ def main():
         want = [float(x) for x in args.mech_bands.split(",")]
         band_sel = [min(range(len(bands)), key=lambda i: abs(bands[i] - w)) for w in want]
 
-    mechs = [m.strip() for m in args.mechanisms.split(",")] if args.mechanisms else []
+    # An explicit --mechanisms wins; otherwise the mode supplies its own stack, which is
+    # the only way `o2i` ever gets its facade source.
+    mechs = ([m.strip() for m in args.mechanisms.split(",")] if args.mechanisms
+             else (list(info["mechanisms"]) if mode != "indoor" else []))
+    print(f"mode {mode} — {info['label']}")
     print(f"grid {nx}x{ny}x{nz}  tx(voxel)={txi}  bands={bands}  "
           + (f"mechanisms={mechs}" if mechs else f"path-loss only, T@{args.t_freq:.0f} MHz"))
 
@@ -90,7 +111,8 @@ def main():
     if mechs:
         edges, relay = PV._prepare_diffraction(scene, mechs, args.n_edges, None)
         PL, T, cf, contribs = PV.solve_one(scene, tx, bands, mechs, args.backend,
-                                           relay=relay, edges=edges, n_edges=args.n_edges)
+                                           relay=relay, edges=edges,
+                                           n_edges=args.n_edges, mode=mode)
     else:
         idx = [scene.band_index(f) for f in bands]
         PL = np.ascontiguousarray(scene.pathloss_maps(tx)[idx])   # (nf,nx,ny,nz) dB
@@ -104,7 +126,8 @@ def main():
         nbytes += mbytes
 
     entry = {
-        "txid": txid, "tx_vox": txi, "grid_shape": [nx, ny, nz], "bands": bands,
+        "txid": txid, "mode": mode,
+        "tx_vox": txi, "grid_shape": [nx, ny, nz], "bands": bands,
         "t_max_ns": t_max_ns, "t_unreachable_ns": T_UNREACHABLE_NS,
         "pl_file": f"pl_volume_{txid}.bin", "t_file": f"t_volume_{txid}.bin",
         "mechanisms": mech_files,
@@ -113,7 +136,7 @@ def main():
         "t_freq_mhz": None if mechs else args.t_freq,
         "norm": man.get("norm"), "bytes": int(nbytes),
     }
-    doc = PV.merge_index(out_dir, [entry], man, mechs or ["path_loss"], bands)
+    doc = PV.merge_index(out_dir, [entry], man, mechs or ["path_loss"], bands, mode=mode)
 
     pin = PL[:, scene.inside] if scene.inside is not None else PL.reshape(len(bands), -1)
     print(f"wrote {out_dir}/{entry['pl_file']}, {entry['t_file']}"
