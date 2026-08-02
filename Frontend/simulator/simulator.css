@@ -64,6 +64,44 @@
 .sim3d-legend .lg-bar { flex: 1 1 auto; height: 10px; border-radius: 3px; border: 1px solid rgba(0, 0, 0, 0.08); }
 .sim3d-legend .lg-lab { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sim3d-legend .lg-cap { color: var(--ink); font-weight: 600; }
+/* --- Tier 1 display step (prediction plane, received-power classes) --- */
+.sim3d-hint { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--muted); font-size: 0.66rem; cursor: help; vertical-align: 1px; }
+.sim3d-planerow { display: flex; align-items: center; gap: 8px; margin: 2px 0 4px; }
+.sim3d-planerow .sim-btn { width: auto; flex: 0 0 auto; margin-top: 0; padding: 5px 10px; font-size: 0.78rem; white-space: nowrap; }
+.sim3d-planerow input[type=range] { flex: 1 1 auto; min-width: 0; }
+.sim3d-cell { display: inline-flex; align-items: center; gap: 6px; margin-top: 5px; }
+.sim3d-cell input[type=number] { width: 68px; border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 0.86rem; }
+.sim3d-cell input[type=range] { width: 118px; }
+.sim3d-cellval { font-variant-numeric: tabular-nums; color: var(--ink); }
+
+/* Persistent context strip — top-centre pill, corners kept free for the toggle / probe */
+.sim3d-metabar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 260px);
+  background: rgba(255, 255, 255, 0.86); border: 1px solid var(--line); border-radius: 8px; padding: 4px 11px;
+  font-size: 0.72rem; color: var(--muted); backdrop-filter: blur(4px); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.sim3d-metabar[hidden] { display: none; }
+
+/* Point-probe readout — top-right card */
+.sim3d-probe { position: absolute; top: 12px; right: 12px; width: 224px; background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px 10px; font-size: 0.78rem; color: var(--ink);
+  backdrop-filter: blur(4px); box-shadow: 0 4px 16px rgba(20, 40, 35, 0.12); }
+.sim3d-probe[hidden] { display: none; }
+.sim3d-probe .probe-x { position: absolute; top: 5px; right: 7px; border: none; background: none; color: var(--muted);
+  font-size: 0.82rem; cursor: pointer; line-height: 1; padding: 2px; }
+.sim3d-probe .probe-body > div { padding: 1px 0; }
+.sim3d-probe .pr-vx { color: var(--muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; margin-bottom: 3px; }
+.sim3d-probe b { font-variant-numeric: tabular-nums; }
+.sim3d-probe .pr-cov { font-weight: 700; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.03em; }
+.sim3d-probe .pr-good { color: #16a34a; }
+.sim3d-probe .pr-marginal { color: #c98a12; }
+.sim3d-probe .pr-dead { color: #d0453b; }
+.sim3d-probe .pr-hint { color: var(--muted); font-size: 0.7rem; font-style: italic; }
+
+/* class-legend swatch (coverage-class mode) */
+.sim3d-legend .lg-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px;
+  margin-right: 4px; border: 1px solid rgba(0, 0, 0, 0.12); }
+
 /* phase-animation toggle for the interference view (top-left viewport overlay) */
 .sim3d-toggle { position: absolute; left: 12px; top: 12px; display: inline-flex; align-items: center;
   gap: 6px; background: rgba(255, 255, 255, 0.86); border: 1px solid var(--line); border-radius: 8px;

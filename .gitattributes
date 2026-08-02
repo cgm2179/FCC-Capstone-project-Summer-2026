@@ -6,3 +6,5 @@
 *.npz binary
 *.onnx binary
 *.pt binary
+*.glb binary
+*.gltf binary

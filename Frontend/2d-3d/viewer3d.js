@@ -9,11 +9,17 @@
     // export folder in and add one line here (or just use "Load model file…"
     // for a one-off). URLs are encoded because the folders contain spaces.
     const MODELS = [
-      { name: 'v2 · First Render (materials)',
+      // Full detailed 7th floor as a Draco-compressed GLB: converted once from the 329 MB
+      // OBJ (3.28M tris, 65,845 usemtl groups) with Data/models/convert_obj_to_glb.mjs.
+      // Binary, materials pre-merged, ~1-2 s to load instead of the OBJ's minute-long
+      // download-then-parse freeze. This is the default; the OBJ iterations stay selectable.
+      { name: '7th floor · full detail (fast GLB)',
+        url: 'Data/models/7th_floor_full.glb' },
+      { name: 'v2 · First Render (materials, OBJ)',
         url: 'Data/models/Indoor%207th%20floor%20v2%20First%20Render.obj/6afecb6b-b2f0-47e9-8488-d48cd283b15a.obj' },
-      { name: 'v2 · Test 2',
+      { name: 'v2 · Test 2 (OBJ)',
         url: 'Data/models/Indoor%207th%20floor%20v2.obj-HTML%20Test%202/12d74bc1-4044-458b-ae88-3c28b951399f.obj' },
-      { name: 'v2 · Test 1',
+      { name: 'v2 · Test 1 (OBJ)',
         url: 'Data/models/Indoor%207th%20floor%20v2.obj-HTML%20Test%201/8681a299-6227-4f6a-a55c-d149f0e525ff.obj' },
     ];
     const DEFAULT_MODEL_URL = MODELS[0].url;
@@ -46,6 +52,72 @@
     function setStatus(msg, isError) {
       statusEl.textContent = msg || '';
       statusEl.classList.toggle('error', !!isError);
+    }
+
+    // ---- load-progress bar ----
+    // A big OBJ used to give no feedback at all — the tab just sat there while the file
+    // downloaded and then parsed, and it read as a crash. This is a slim bar injected
+    // under the status line (no HTML/CSS churn): a real fill during download, then an
+    // indeterminate "parsing" stripe for the one phase that genuinely blocks the main
+    // thread and cannot be sped up in the browser (synchronous OBJLoader.parse).
+    let progressEl = null, progressBar = null;
+    function ensureProgress() {
+      if (progressEl || !statusEl || !statusEl.parentNode) return progressEl;
+      progressEl = document.createElement('div');
+      progressEl.style.cssText = 'height:4px;margin-top:4px;border-radius:2px;'
+        + 'background:rgba(0,0,0,0.10);overflow:hidden;display:none';
+      progressBar = document.createElement('div');
+      progressBar.style.cssText = 'height:100%;width:0;border-radius:2px;'
+        + 'background:#0a7f7a;transition:width .15s linear';
+      progressEl.appendChild(progressBar);
+      statusEl.parentNode.insertBefore(progressEl, statusEl.nextSibling);
+      // one keyframe for the indeterminate parse stripe, injected once
+      if (!document.getElementById('v3d-prog-kf')) {
+        const st = document.createElement('style');
+        st.id = 'v3d-prog-kf';
+        st.textContent = '@keyframes v3dprog{0%{transform:translateX(-100%)}'
+          + '100%{transform:translateX(400%)}}';
+        document.head.appendChild(st);
+      }
+      return progressEl;
+    }
+    const fmtMB = (b) => (b / 1048576).toFixed(b < 10485760 ? 1 : 0) + ' MB';
+    function setProgress(loaded, total) {
+      ensureProgress();
+      if (!progressEl) return;
+      progressEl.style.display = 'block';
+      progressBar.style.animation = '';
+      const pct = total ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+      progressBar.style.width = (total ? pct : 8) + '%';
+    }
+    // Indeterminate stripe for the synchronous parse — a determinate bar would lie, since
+    // nothing reports progress during OBJLoader.parse.
+    function setParsing() {
+      ensureProgress();
+      if (!progressEl) return;
+      progressEl.style.display = 'block';
+      progressBar.style.width = '30%';
+      progressBar.style.animation = 'v3dprog 1s linear infinite';
+    }
+    function hideProgress() {
+      if (progressEl) { progressEl.style.display = 'none'; progressBar.style.animation = ''; }
+    }
+
+    // A three.js ProgressEvent handler for `name`. Drives the bar during download and, on
+    // reaching 100 %, flips to the parse notice so the freeze is labelled rather than
+    // silent. `isObj` controls that notice — binary formats (GLB) do not stall on parse.
+    function progressHandler(name, isObj) {
+      return (e) => {
+        if (!e || !e.lengthComputable) { setProgress(0, 0); return; }
+        setProgress(e.loaded, e.total);
+        if (e.loaded >= e.total) {
+          if (isObj) { setStatus('Parsing ' + fmtMB(e.total)
+            + ' — large models may pause the tab briefly…'); setParsing(); }
+          else setStatus('Decoding ' + name + ' …');
+        } else {
+          setStatus('Loading ' + name + ' · ' + fmtMB(e.loaded) + ' / ' + fmtMB(e.total));
+        }
+      };
     }
 
     // Lazily build the scene, lights, grid and render loop on first 3D view so
@@ -331,6 +403,7 @@
     }
 
     function placeModel(object, label) {
+      hideProgress();               // the model is here — download/parse both done
       if (currentModel) { scene.remove(currentModel); disposeModel(currentModel); }
       clearRF();
       normalizeModel(object);
@@ -384,29 +457,40 @@
     const extOf = (name) => name.split('?')[0].split('.').pop().toLowerCase();
 
     // Dynamically import the right loader for `ext` and return a uniform
-    // load(url, onLoad(Object3D), onError) wrapper.
-    async function makeLoader(ext, manager) {
+    // load(url, onLoad(Object3D), onError) wrapper. `onProgress` (a three ProgressEvent
+    // handler) is threaded into every loader so large models show a real download bar.
+    async function makeLoader(ext, manager, onProgress) {
       switch (ext) {
         case 'dae': {
           const { ColladaLoader } = await import('three/addons/loaders/ColladaLoader.js');
           const l = new ColladaLoader(manager);
-          return (url, ok, err) => l.load(url, (r) => ok(r.scene), undefined, err);
+          return (url, ok, err) => l.load(url, (r) => ok(r.scene), onProgress, err);
         }
         case 'glb':
         case 'gltf': {
           const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+          const { DRACOLoader } = await import('three/addons/loaders/DRACOLoader.js');
           const l = new GLTFLoader(manager);
-          return (url, ok, err) => l.load(url, (r) => ok(r.scene), undefined, err);
+          // Decode Draco-compressed geometry (our converter's output, and any Draco GLB a
+          // user drops in). The decoder wasm comes from the same pinned three@0.185.1 on
+          // jsdelivr the importmap already uses — no new origin. Draco is what packs the
+          // 7th floor's 3.28M triangles from a ~100MB buffer down to a few MB.
+          const draco = new DRACOLoader()
+            .setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/libs/draco/');
+          l.setDRACOLoader(draco);
+          return (url, ok, err) => l.load(url,
+            (r) => { draco.dispose(); ok(r.scene); },
+            onProgress, (e) => { draco.dispose(); err(e); });
         }
         case 'fbx': {
           const { FBXLoader } = await import('three/addons/loaders/FBXLoader.js');
           const l = new FBXLoader(manager);
-          return (url, ok, err) => l.load(url, ok, undefined, err);
+          return (url, ok, err) => l.load(url, ok, onProgress, err);
         }
         case '3ds': {
           const { TDSLoader } = await import('three/addons/loaders/TDSLoader.js');
           const l = new TDSLoader(manager);
-          return (url, ok, err) => l.load(url, ok, undefined, err);
+          return (url, ok, err) => l.load(url, ok, onProgress, err);
         }
         case 'stl': {
           const { STLLoader } = await import('three/addons/loaders/STLLoader.js');
@@ -415,17 +499,17 @@
             geo.computeVertexNormals();
             ok(new THREE.Mesh(geo, new THREE.MeshStandardMaterial(
               { color: 0xb7c3be, roughness: 0.92, metalness: 0.0 })));
-          }, undefined, err);
+          }, onProgress, err);
         }
         case 'kmz': {
           const { KMZLoader } = await import('three/addons/loaders/KMZLoader.js');
           const l = new KMZLoader(manager);
-          return (url, ok, err) => l.load(url, (r) => ok(r.scene), undefined, err);
+          return (url, ok, err) => l.load(url, (r) => ok(r.scene), onProgress, err);
         }
         case 'obj': {
           const { OBJLoader } = await import('three/addons/loaders/OBJLoader.js');
           const l = new OBJLoader(manager);
-          return (url, ok, err) => l.load(url, ok, undefined, err);
+          return (url, ok, err) => l.load(url, ok, onProgress, err);
         }
         default:
           throw new Error('.' + ext + ' is not web-renderable — export Collada (.dae) or glTF (.glb) instead.');
@@ -434,6 +518,7 @@
 
     function loadErr(name) {
       return (err) => {
+        hideProgress();
         console.error('[3d] load failed:', err);
         const detail = (err && err.message) ? err.message
           : 'fetch/parse error. If you opened this page as a file:// URL, serve it over http '
@@ -448,6 +533,7 @@
       const name = decodeURIComponent(url.split('/').pop());
       const dir = url.substring(0, url.lastIndexOf('/') + 1);
       setStatus('Loading ' + name + ' …');
+      const onProg = progressHandler(name, ext === 'obj');
       try {
         const manager = new THREE.LoadingManager();
         if (ext === 'obj') {
@@ -458,16 +544,16 @@
           const mtlName = name.replace(/\.obj$/i, '.mtl');
           const loadObj = (materials) =>
             new OBJLoader(manager).setMaterials(materials).load(
-              url, (obj) => placeModel(obj, name), undefined, loadErr(name));
+              url, (obj) => placeModel(obj, name), onProg, loadErr(name));
           new MTLLoader(manager).setPath(dir).load(
             encodeURIComponent(mtlName),
             (m) => { m.preload(); loadObj(m); },
             undefined,
             () => new OBJLoader(manager).load(   // no .mtl → geometry only
-              url, (obj) => placeModel(obj, name), undefined, loadErr(name)));
+              url, (obj) => placeModel(obj, name), onProg, loadErr(name)));
           return;
         }
-        const load = await makeLoader(ext, manager);
+        const load = await makeLoader(ext, manager, onProg);
         load(url, (obj) => placeModel(obj, name), loadErr(name));
       } catch (e) { loadErr(name)(e); }
     }
@@ -494,6 +580,7 @@
       });
 
       setStatus('Loading ' + modelFile.name + ' …');
+      const onProg = progressHandler(modelFile.name, ext === 'obj');
       const done = (obj) => {
         placeModel(obj, modelFile.name);
         setTimeout(() => map.forEach((u) => URL.revokeObjectURL(u)), 15000);
@@ -509,13 +596,13 @@
             new MTLLoader(manager).load(map.get(mtl.name), (materials) => {
               materials.preload();
               objLoader.setMaterials(materials);
-              objLoader.load(map.get(modelFile.name), done, undefined, loadErr(modelFile.name));
+              objLoader.load(map.get(modelFile.name), done, onProg, loadErr(modelFile.name));
             }, undefined, loadErr(mtl.name));
           } else {
-            objLoader.load(map.get(modelFile.name), done, undefined, loadErr(modelFile.name));
+            objLoader.load(map.get(modelFile.name), done, onProg, loadErr(modelFile.name));
           }
         } else {
-          const load = await makeLoader(ext, manager);
+          const load = await makeLoader(ext, manager, onProg);
           load(map.get(modelFile.name), done, loadErr(modelFile.name));
         }
       } catch (e) { loadErr(modelFile.name)(e); }

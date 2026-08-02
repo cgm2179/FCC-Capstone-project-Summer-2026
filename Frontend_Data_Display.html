@@ -600,9 +600,45 @@
                   </select>
                 </label>
               </section>
+              <!-- Display controls (Tier 1, WinProp-inspired). These change how the
+                   solved volume is READ, not the physics: a height cut-plane (ProMan's
+                   "prediction plane"), a received-power view with coverage classes
+                   (WRAP's good/marginal/dead), and the fixed dBm scale that makes the
+                   3D field directly comparable to the 2D sim and the scanner data. -->
+              <section class="sim3d-step">
+                <h3><span class="step-n">6</span> Display</h3>
+                <label class="sim3d-field">Prediction plane <span class="sim3d-hint" title="Slice the field at one height so it reads as a clean 2D heatmap, like WinProp's prediction-plane cut. Full volume shows the whole cloud.">?</span></label>
+                <div class="sim3d-planerow">
+                  <button type="button" id="disp3dPlaneBtn" class="sim-btn ghost">Full volume</button>
+                  <input type="range" id="disp3dHeight" min="0" max="100" value="50" disabled>
+                </div>
+                <div class="sim-note" id="disp3dHeightVal">whole volume</div>
+                <label class="sim3d-field">Transmit EIRP
+                  <span class="sim3d-cell"><input type="number" id="disp3dEirp" min="-10" max="60" step="1" value="20"> dBm</span>
+                </label>
+                <label class="sim3d-field">Colour scale
+                  <select id="disp3dScale">
+                    <option value="auto">Auto · path loss (dB)</option>
+                    <option value="fixed">Fixed · received power (dBm)</option>
+                  </select>
+                </label>
+                <label class="sim3d-cbx"><input type="checkbox" id="disp3dClasses"> Coverage classes (good / marginal / dead)</label>
+                <label class="sim3d-field">Coverage threshold
+                  <span class="sim3d-cell"><input type="range" id="disp3dThresh" min="-110" max="-60" value="-85" step="1"> <span id="disp3dThreshVal" class="sim3d-cellval">-85</span> dBm</span>
+                </label>
+              </section>
             </aside>
             <div class="sim3d-viewport-wrap">
               <div id="sim3dViewport"></div>
+              <!-- Persistent context strip (WinProp status bar): grid, cell, extent,
+                   tier that drew this, active cut-plane, and the last solve time. -->
+              <div id="sim3dMeta" class="sim3d-metabar" hidden></div>
+              <!-- Point probe (WRAP Spectrum-Viewer style): click any cell to read
+                   PL / RSRP / first-arrival delay + the dominant mechanism there. -->
+              <div id="sim3dProbe" class="sim3d-probe" hidden>
+                <button type="button" class="probe-x" id="sim3dProbeClose" aria-label="Close probe">✕</button>
+                <div class="probe-body" id="sim3dProbeBody"></div>
+              </div>
               <div id="sim3dStatus" class="sim3d-status">Open this tab in 3D mode to load the simulation scene…</div>
             </div>
           </div>
