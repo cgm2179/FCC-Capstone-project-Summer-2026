@@ -978,6 +978,7 @@ function showProbe(p) {
   if (vol && !noSignal) {
     let best = -Infinity;
     for (const m of mechList(vol)) {
+      if (m.diagnostic) continue;               // refraction/absorption are not arriving paths
       const ch = mechCache[vol.entry.txid + '|' + m.key];
       if (!ch) continue;
       const cbi = chanBandIndex(ch, freqMHz);
@@ -1184,6 +1185,9 @@ function runMechanismField(mech) {
     const isShare = mech !== 'path_loss' && !(MECH_BY_KEY[mech] && MECH_BY_KEY[mech].diagnostic);
     const { sliced, g, yLo, yHi, yInc } = sampleBounds();  // full volume, or one prediction plane
     const inside = insideMaskFor(vol.dims);
+    // Absorption is deposited IN materials, so its map lives in wall voxels, not the air
+    // interior — it must NOT be masked to `inside` or nothing renders.
+    const wallDiag = mech === 'absorption';
     const NY = vol.dims[1], NZ = vol.dims[2];
     const samples = [];
     const lossMin = 45, lossMax = 130;
@@ -1194,7 +1198,7 @@ function runMechanismField(mech) {
           const ix = clampi(Math.floor(x / CELL_M), vol.dims[0]);
           const iy = clampi(Math.floor(y / CELL_M), NY);
           const iz = clampi(Math.floor(z / CELL_M), NZ);
-          if (inside && !inside[(ix * NY + iy) * NZ + iz]) continue;
+          if (inside && !wallDiag && !inside[(ix * NY + iy) * NZ + iz]) continue;
           const plM = chanAt(ch, cbi, ix, iy, iz);
           if (!isFinite(plM) || plM >= 65504) continue;
           let t;
