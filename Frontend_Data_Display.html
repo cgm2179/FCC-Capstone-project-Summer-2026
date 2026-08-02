@@ -585,17 +585,18 @@
                     <option value="sweep">Wavefront sweep (eikonal T)</option>
                     <option value="mechlapse">Mechanism time-lapse</option>
                     <!-- Per-mechanism views read the m_<mech>_*.bin channels written by
-                         export_pl_volume.py --mechanisms. Path loss shows absolute dB;
-                         the rest show each mechanism's share of the total power. -->
+                         export_pl_volume.py --mechanisms. Path loss and the diagnostics
+                         show absolute dB; reflection/diffraction/scattering show each
+                         mechanism's share of the total power. -->
                     <optgroup label="RF physics — per mechanism">
                       <option value="path_loss">Geometric spreading + transmission (S1–S7)</option>
                       <option value="reflection">Specular reflection / multipath</option>
                       <option value="diffraction">UTD diffraction (S8)</option>
                       <option value="scattering">Diffuse scattering</option>
                     </optgroup>
-                    <optgroup label="RF physics — module not built">
-                      <option value="refraction" disabled>Refraction</option>
-                      <option value="absorption" disabled>Absorption</option>
+                    <optgroup label="RF physics — diagnostics (decomposition)">
+                      <option value="refraction">Refraction (transmitted field)</option>
+                      <option value="absorption">Absorption (deposited power)</option>
                     </optgroup>
                   </select>
                 </label>

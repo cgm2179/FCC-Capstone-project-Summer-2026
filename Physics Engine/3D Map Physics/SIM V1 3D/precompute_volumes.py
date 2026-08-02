@@ -145,6 +145,14 @@ def solve_one(scene, tx, bands, mechanisms, backend, bandwidth_hz=None,
         import Scattering_3D as SCT
         contribs.append(SCT.solve(scene, tx, bands=bands, backend=backend,
                                   patch_cells=3, rx_downsample=2))
+    # Diagnostics (DIAGNOSTIC combine_as): decompositions of the direct path, written as
+    # their own m_<mech> channels for the viz but NOT summed into the total by Combine_3D.
+    if "refraction" in mechanisms:
+        import Refraction_3D as RFR
+        contribs.append(RFR.solve(scene, tx, bands=bands))
+    if "absorption" in mechanisms:
+        import Absorption_3D as ABS
+        contribs.append(ABS.solve(scene, tx, bands=bands))
     if not contribs:
         raise SystemExit("no mechanisms selected")
     # The FSPL floor is a point-source invariant ("a passive channel cannot beat free

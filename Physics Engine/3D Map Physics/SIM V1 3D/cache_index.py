@@ -72,6 +72,8 @@ PHYSICS_SOURCES = [
     MECH_DIR / "Reflection_3D.py",
     MECH_DIR / "Diffraction_3D.py",
     MECH_DIR / "Scattering_3D.py",
+    MECH_DIR / "Refraction_3D.py",
+    MECH_DIR / "Absorption_3D.py",
     SIM2D / "physics_v2.py",
 ]
 

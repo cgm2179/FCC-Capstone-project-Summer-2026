@@ -683,7 +683,7 @@ function reportNoVolume(txVox) {
   const m = currentMode(), label = (MODE_INFO[m] || {}).label;
   const pool = volumesForMode(m);
   const solveHint = ' — run: python "SIM V1 3D/export_pl_volume.py" --mode ' + m
-    + ' --mechanisms path_loss,reflection,diffraction,scattering';
+    + ' --mechanisms path_loss,reflection,diffraction,scattering,refraction,absorption';
   if (volumeIndexError) {
     setStatus(label + ' · showing the analytic tier only — ' + volumeIndexError);
     return;
@@ -726,6 +726,13 @@ const MECHS = [
     color: [0.93, 0.45, 0.85] },                                            // magenta
   { key: 'scattering',  label: 'Diffuse scattering', short: 'Diffuse',
     color: [0.48, 0.88, 0.52] },                                            // green
+  // Diagnostics: decompositions of the direct path, not summed into received power.
+  // Refraction shows the through-wall transmission loss + refractive delay; absorption
+  // shows where power is deposited into materials. Rendered as absolute maps, not shares.
+  { key: 'refraction',  label: 'Refraction (transmitted field)', short: 'Refracted',
+    color: [0.55, 0.75, 0.98], diagnostic: true },                         // light blue
+  { key: 'absorption',  label: 'Absorption (deposited power)', short: 'Absorbed',
+    color: [0.96, 0.55, 0.33], diagnostic: true },                         // warm orange
 ];
 const MECH_BY_KEY = Object.fromEntries(MECHS.map((m) => [m.key, m]));
 
@@ -1172,7 +1179,9 @@ function runMechanismField(mech) {
     const _t0 = performance.now();
     const cbi = chanBandIndex(ch, freqMHz);          // channel bands may be a subset
     const tbi = nearestBandIndex(vol, ch.bands[cbi]); // matching band in the total volume
-    const isShare = mech !== 'path_loss';
+    // path loss and the diagnostics (refraction/absorption) are absolute maps; the true
+    // additive mechanisms (reflection/diffraction/scattering) are shown as a share of total.
+    const isShare = mech !== 'path_loss' && !(MECH_BY_KEY[mech] && MECH_BY_KEY[mech].diagnostic);
     const { sliced, g, yLo, yHi, yInc } = sampleBounds();  // full volume, or one prediction plane
     const inside = insideMaskFor(vol.dims);
     const NY = vol.dims[1], NZ = vol.dims[2];
@@ -1292,7 +1301,7 @@ function noMechData(meta, vol) {
   const have = vol ? mechList(vol).map((m) => m.label).join(', ') : '';
   setStatus(meta.label + ' · no mechanism channel in the cached volume'
     + (have ? ' (this Tx has: ' + have + ')' : '')
-    + ' — re-export with `python "SIM V1 3D/export_pl_volume.py" --mechanisms path_loss,reflection,diffraction,scattering`.');
+    + ' — re-export with `python "SIM V1 3D/export_pl_volume.py" --mechanisms path_loss,reflection,diffraction,scattering,refraction,absorption`.');
 }
 
 // ---- Radiation pattern: analytic gain lobes at each Tx (closed-form by kind) ----

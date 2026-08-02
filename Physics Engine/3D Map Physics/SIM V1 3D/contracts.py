@@ -48,6 +48,12 @@ POL_NAMES = ("te", "tm")
 
 COHERENT = "coherent"         # sums as complex field  (specular, direct, diffracted)
 INCOHERENT = "incoherent"     # sums as power          (diffuse scattering)
+DIAGNOSTIC = "diagnostic"     # NOT summed into received power — a decomposition of the
+                              # direct path for visualization (refraction, absorption).
+                              # The eikonal already bends (refraction) and the CrossingLUT
+                              # already includes Im(q) (absorption), so adding these as
+                              # contributions would double-count. Recorded per-mechanism
+                              # (for the viz) but excluded from the power sum and T_first.
 
 
 # --------------------------------------------------------------------------- FieldGrid
