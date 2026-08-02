@@ -21,6 +21,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as CANNON from 'cannon-es';
 import { smoothSurfaceForClass } from './smooth_surface.js';   // A2: smooth surface from the voxels
+import { voxelizeTriangles, objectToTriangles } from './voxelize_browser.js';   // B: imported-model voxelizer
 
 const COLLISION = window.SIM3D_COLLISION;
 const CATALOG   = window.SIM3D_ANTENNA_CATALOG;
@@ -374,6 +375,45 @@ function raycastTargets() {
   return wallMeshes.length ? wallMeshes : [wallMesh];
 }
 
+// ---- Phase B: solve the sim on an IMPORTED model (browser-voxelized) ----
+// Point the engine's grid at a runtime voxelization so the analytic tier (marchPL) AND the
+// smooth surface run on the imported model instead of the fixed scene. A new scene means the
+// cached volumes / DL surrogate cannot apply (they are keyed to the fixed grid), so it runs on
+// the analytic tier — stated honestly in the status line. `vox` is a voxelize_browser output.
+let RUNTIME_SCENE = null;
+function setRuntimeScene(vox, name) {
+  if (!ensureInit() || !vox) return false;
+  GRID3 = vox.grid; GDIMS = vox.dims; CELL_M = vox.cell_m; INSIDE3 = vox.inside;
+  extent = vox.extent.slice();
+  center = new THREE.Vector3(extent[0] / 2, extent[1] / 2, extent[2] / 2);
+  window.SIM3D_VOLUME = null;                    // cached volumes belong to the fixed scene
+  RUNTIME_SCENE = { name: name || 'imported model', dims: vox.dims };
+  // hide the fixed voxel building; render the imported model as a smooth surface of its grid
+  disposeField(); disposeSurface();
+  for (const m of wallMeshes) m.visible = false;
+  DISPLAY.smooth = true; if (dispSmooth) dispSmooth.checked = true;
+  buildSmoothSurface(); applyGeometryVisibility();
+  if (controls) { controls.target.copy(center); controls.update(); }
+  refreshMeta();
+  if (vizMode) runVizMode(vizMode.value);        // solve on the new grid (analytic tier)
+  setStatus('Simulating imported model “' + (name || '') + '” · ' + vox.dims.join('×')
+    + ' voxels @ ' + vox.cell_m.toFixed(2) + ' m · ' + vox.n_solid.toLocaleString()
+    + ' solid · analytic tier (new scene — cached volumes / surrogate do not apply).');
+  return true;
+}
+// Voxelize a loaded THREE model and switch the sim to it (deferred behind a status message).
+function simulateModel(object, name, cellM) {
+  if (!ensureInit()) return;
+  setStatus('Voxelizing “' + (name || 'model') + '” …');
+  setTimeout(() => {
+    const tris = objectToTriangles(THREE, object);
+    if (!tris.length) { setStatus('That model has no triangles to voxelize.'); return; }
+    const vox = voxelizeTriangles(tris, { cell_m: cellM || 0.3, barrierClass: 2, pad: 1 });
+    if (!vox) { setStatus('Voxelization produced an empty grid.'); return; }
+    setRuntimeScene(vox, name);
+  }, 0);
+}
+
 function buildAntennaMesh(entry) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(entry.vertices.flat()), 3));
@@ -444,7 +484,7 @@ function ramp(t) {
 // This is the browser *analytic fallback* model (flat per-class loss_db + satObs);
 // the real Fresnel/Airy + eikonal solve is engine_3d.py SceneV3 (surfaced later, P6).
 const PHY        = MANIFEST.physics || {};
-const CELL_M     = MANIFEST.cell_size_m || 0.3;
+let CELL_M       = MANIFEST.cell_size_m || 0.3;   // `let`: a runtime imported scene can change it
 const STEP_CELL  = PHY.ray_step_cells != null ? PHY.ray_step_cells : 0.5;
 const N_EXP      = PHY.n_exp != null ? PHY.n_exp : 2.0;          // Motley-Keenan
 const D0_M       = PHY.d0_m != null ? PHY.d0_m : 1.0;
@@ -1189,9 +1229,10 @@ function runStaticField() {
   // otherwise render analytic now and upgrade in the background if one loads.
   const vol = volMatches(window.SIM3D_VOLUME, txVox) ? window.SIM3D_VOLUME : null;
   const bandIdx = vol ? nearestBandIndex(vol, freqMHz) : 0;
-  // Tier 1 miss: try to upgrade in the background (cache first, then surrogate), and
-  // render the analytic floor immediately so the user is never looking at nothing.
-  if (!vol && txVox) {
+  // Tier 1 miss: try to upgrade in the background (cache first, then surrogate), and render
+  // the analytic floor immediately so the user is never looking at nothing. Skipped for an
+  // imported runtime scene — its grid is unique, so no cached volume / surrogate can match.
+  if (!vol && txVox && !RUNTIME_SCENE) {
     tryLoadVolume(txVox, () => { if (fieldObj) runStaticField(); });
     tryLoadSurrogate();
   }
@@ -2079,6 +2120,9 @@ window.__sim3d = {
   get scene() { return scene; }, get camera() { return camera; }, get renderer() { return renderer; },
   get wallMesh() { return wallMesh; }, get wallMeshes() { return wallMeshes; },
   get surfaceMeshes() { return surfaceMeshes; }, buildSmoothSurface, setGeometryMode,
+  // Phase B: imported-model voxelization + runtime scene swap
+  setRuntimeScene, simulateModel, voxelizeTriangles, objectToTriangles,
+  get runtimeScene() { return RUNTIME_SCENE; }, get gdims() { return GDIMS; }, get cellM() { return CELL_M; },
   get field() { return fieldObj; }, get wave() { return waveObj; },
   get lobe() { return lobeGroup; }, get vectors() { return vectorState; },
   get interference() { return interferenceState; }, get sweep() { return sweepState; },
