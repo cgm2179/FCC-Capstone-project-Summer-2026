@@ -84,6 +84,30 @@ python3 "SIM V1 3D/export_pl_volume.py" --tx 100 5 60 \
 
 The first diffraction run builds a relay cache (~74 s, once); every later solve reuses it.
 
+## Loading a big CAD model in the Map Coverage 3D tab
+
+The **Map Coverage → 3D** view renders a real CAD mesh of the floor. A raw OBJ export is
+painful there: the 7th-floor OBJ is 329 MB of ASCII with 3.28 M triangles and 65,845
+material-group switches, so the browser downloads it, then **parses it synchronously** —
+the tab looks frozen for a minute. The viewer now shows a download bar and a "Parsing…"
+notice so that pause is at least labelled, but the real fix is to not ship an OBJ.
+
+Convert once to a Draco-compressed GLB (binary, no ASCII parse, materials pre-merged,
+~260× fewer draw groups):
+
+```bash
+node Data/models/convert_obj_to_glb.mjs <your-model.obj> Data/models/out.glb
+```
+
+Needs Node (uses `obj2gltf` + `gltf-pipeline` via `npx`, nothing added to the repo). It
+strips textures by default — glTF only allows JPEG/PNG, and CAD exports carry `.tif`/`.bmp`
+maps that break conversion; material base colours are kept, which is what a massing model
+behind an RF overlay needs. Pass `--keep-textures` only if every map is already JPEG/PNG.
+
+The committed default model `Data/models/7th_floor_full.glb` was produced this way (329 MB
+→ a few MB) and loads in a second or two. Drop a `.glb` into "Load model file…" and it
+loads the same fast path; Draco geometry decodes automatically.
+
 ## What a fresh clone does *not* include
 
 None of these are breakage — they are regenerable artifacts kept out of git deliberately.
