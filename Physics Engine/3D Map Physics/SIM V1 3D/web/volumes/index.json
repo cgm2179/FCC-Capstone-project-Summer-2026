@@ -12,19 +12,31 @@
  ],
  "cell_size_m": 0.3,
  "bands_mhz": [
+  619.0,
+  627.0,
+  1935.0,
   2442.0,
-  3500.0
+  2510.0,
+  2600.0,
+  3500.0,
+  3710.0,
+  5500.0,
+  6125.0
  ],
  "mechanisms": [
   "path_loss",
-  "reflection"
+  "reflection",
+  "diffraction",
+  "scattering",
+  "refraction",
+  "absorption"
  ],
- "engine_ver": "67e2962f3bc2d393",
+ "engine_ver": "15dc2e202c3be7d3",
  "pl_layout": "band,x,y,z  float16 dB",
  "t_layout": "x,y,z  float16 NANOSECONDS (sentinel 65504 = unreachable)",
  "mech_layout": "m_<mech>_<txid>.bin = band,x,y,z float16 dB; tau_<mech>_<txid>.bin = x,y,z float16 ns",
  "count": 6,
- "bytes": 118761456,
+ "bytes": 128168304,
  "volumes": [
   {
    "tx_vox": [
@@ -161,6 +173,10 @@
   },
   {
    "txid": "tx_66-5-54",
+   "mode": "indoor",
+   "key": "c7bc7c0852595374",
+   "scene_sha": "689d48a8799a62f4",
+   "engine_ver": "15dc2e202c3be7d3",
    "tx_vox": [
     66,
     5,
@@ -221,6 +237,22 @@
      "tau_convention": "geometric",
      "combine_as": "incoherent",
      "bytes": 4703424
+    },
+    "refraction": {
+     "pl_file": "m_refraction_tx_66-5-54.bin",
+     "tau_file": "tau_refraction_tx_66-5-54.bin",
+     "t_max_ns": 15.34,
+     "tau_convention": "geometric",
+     "combine_as": "diagnostic",
+     "bytes": 4703424
+    },
+    "absorption": {
+     "pl_file": "m_absorption_tx_66-5-54.bin",
+     "tau_file": "tau_absorption_tx_66-5-54.bin",
+     "t_max_ns": 0.0,
+     "tau_convention": "geometric",
+     "combine_as": "diagnostic",
+     "bytes": 4703424
     }
    },
    "mech_bands": [
@@ -232,7 +264,9 @@
     "path_loss",
     "reflection",
     "diffraction",
-    "scattering"
+    "scattering",
+    "refraction",
+    "absorption"
    ],
    "t_freq_mhz": null,
    "norm": {
@@ -241,8 +275,10 @@
     "freq_log_lo_mhz": 600.0,
     "freq_log_hi_mhz": 6200.0
    },
-   "bytes": 32923968,
-   "mode": "indoor"
+   "bytes": 42330816,
+   "created": 1785708166.42308,
+   "last_used": 1785708166.42308,
+   "hits": 0
   },
   {
    "txid": "tx_2-3-115",
