@@ -559,7 +559,8 @@ def _selftest() -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("--list", action="store_true", help="list the modes and availability")
+    ap.add_argument("--list", action="store_true",
+                    help="list the modes and availability (the default action)")
     ap.add_argument("--describe", metavar="MODE", help="print one mode as JSON")
     ap.add_argument("--test", action="store_true")
     a = ap.parse_args(argv)
@@ -569,14 +570,16 @@ def main(argv=None) -> int:
     if a.describe:
         print(json.dumps(describe(a.describe), indent=2))
         return 0
-    if a.list or True:
-        for k in list_modes():
-            d = describe(k)
-            mark = "ok " if d["available"] else "NA "
-            print(f"  [{mark}] {k:8s} {d['label']:26s} {d['summary']}")
-            if not d["available"]:
-                print(f"            -> {d['unavailable_reason']}")
-        return 0
+    # Listing is the fallthrough, not a gated branch: README documents a bare
+    # `modes_3d.py` as the "what modes are there" command, so --list names the default
+    # rather than switching it on.
+    for k in list_modes():
+        d = describe(k)
+        mark = "ok " if d["available"] else "NA "
+        print(f"  [{mark}] {k:8s} {d['label']:26s} {d['summary']}")
+        if not d["available"]:
+            print(f"            -> {d['unavailable_reason']}")
+    return 0
 
 
 if __name__ == "__main__":
