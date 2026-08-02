@@ -69,6 +69,10 @@ const dispThreshVal = document.getElementById('disp3dThreshVal');
 const dispClipGeom  = document.getElementById('disp3dClipGeom');
 const dispClipAxis  = document.getElementById('disp3dClipAxis');
 const dispSmooth    = document.getElementById('disp3dSmooth');
+const modelFile     = document.getElementById('sim3dModelFile');    // Phase B: load a model to simulate
+const modelCell     = document.getElementById('sim3dModelCell');
+const modelRevert   = document.getElementById('sim3dModelRevert');
+const modelNote     = document.getElementById('sim3dModelNote');
 const metaEl        = document.getElementById('sim3dMeta');
 const probeEl       = document.getElementById('sim3dProbe');
 const probeBody     = document.getElementById('sim3dProbeBody');
@@ -402,17 +406,75 @@ function setRuntimeScene(vox, name) {
   return true;
 }
 // Voxelize a loaded THREE model and switch the sim to it (deferred behind a status message).
-function simulateModel(object, name, cellM) {
+function simulateModel(object, name, realSizeM) {
   if (!ensureInit()) return;
   setStatus('Voxelizing “' + (name || 'model') + '” …');
   setTimeout(() => {
     const tris = objectToTriangles(THREE, object);
     if (!tris.length) { setStatus('That model has no triangles to voxelize.'); return; }
-    const vox = voxelizeTriangles(tris, { cell_m: cellM || 0.3, barrierClass: 2, pad: 1 });
+    // Fit ~160 voxels on the longest axis (robust to the model's units); real_longest_m sets
+    // the physical scale so path loss / distances come out in real metres.
+    const vox = voxelizeTriangles(tris, { resolution: 160, real_longest_m: realSizeM || 80,
+      barrierClass: 2, pad: 1 });
     if (!vox) { setStatus('Voxelization produced an empty grid.'); return; }
     setRuntimeScene(vox, name);
   }, 0);
 }
+
+// Load a model file (.glb/.gltf with Draco, or .obj) and switch the sim to solving on it.
+async function loadModelFile(file, realSizeM) {
+  if (!ensureInit() || !file) return;
+  const name = file.name, ext = name.toLowerCase().split('.').pop();
+  setStatus('Loading “' + name + '” …');
+  const url = URL.createObjectURL(file);
+  try {
+    let object;
+    if (ext === 'glb' || ext === 'gltf') {
+      const [{ GLTFLoader }, { DRACOLoader }] = await Promise.all([
+        import('three/addons/loaders/GLTFLoader.js'),
+        import('three/addons/loaders/DRACOLoader.js'),
+      ]);
+      const loader = new GLTFLoader();
+      loader.setDRACOLoader(new DRACOLoader()
+        .setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/libs/draco/'));
+      object = (await loader.loadAsync(url)).scene;
+    } else if (ext === 'obj') {
+      const { OBJLoader } = await import('three/addons/loaders/OBJLoader.js');
+      object = await new OBJLoader().loadAsync(url);
+    } else {
+      setStatus('Unsupported format “.' + ext + '” — use .glb, .gltf or .obj.'); return;
+    }
+    simulateModel(object, name, realSizeM);
+    if (modelRevert) modelRevert.style.display = '';
+    if (modelNote) modelNote.textContent = 'Simulating “' + name + '” (analytic tier — new scene, no cache).';
+  } catch (e) {
+    setStatus('Could not load “' + name + '”: ' + (e && e.message || e));
+  } finally { URL.revokeObjectURL(url); }
+}
+// Restore the built-in fixed scene (cached full physics).
+function revertToFixedScene() {
+  if (!RUNTIME_SCENE) return;
+  RUNTIME_SCENE = null;
+  GRID3 = null; GDIMS = null; INSIDE3 = null;   // decodeGrid/decodeInside re-decode the fixed asset
+  CELL_M = MANIFEST.cell_size_m || 0.3;
+  extent = COLLISION.extent_m;
+  center = new THREE.Vector3(extent[0] / 2, extent[1] / 2, extent[2] / 2);
+  disposeField(); disposeSurface();
+  DISPLAY.smooth = false; if (dispSmooth) dispSmooth.checked = false;
+  for (const m of wallMeshes) m.visible = true;
+  if (controls) { controls.target.copy(center); controls.update(); }
+  refreshMeta();
+  if (vizMode) runVizMode(vizMode.value);
+  if (modelRevert) modelRevert.style.display = 'none';
+  if (modelNote) modelNote.textContent = 'Built-in 7th floor (cached full physics).';
+  setStatus('Back to the built-in 7th-floor scene.');
+}
+if (modelFile) modelFile.addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (f) loadModelFile(f, Number(modelCell && modelCell.value) || 80);
+  e.target.value = '';                          // allow re-loading the same file
+});
+if (modelRevert) modelRevert.addEventListener('click', revertToFixedScene);
 
 function buildAntennaMesh(entry) {
   const g = new THREE.BufferGeometry();

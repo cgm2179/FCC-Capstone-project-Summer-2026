@@ -11,25 +11,37 @@
 
 // ---- core (pure; node-testable): world-space triangles → material grid + inside mask ----
 // `tris` is a flat Float32Array of world coords, 9 floats per triangle (v0.xyz, v1.xyz, v2.xyz).
-export function voxelizeTriangles(tris, { cell_m = 0.3, barrierClass = 2, pad = 1 } = {}) {
+// Imported models come in ARBITRARY units (a GLB may be thousands of "units" wide for an ~80 m
+// building), so the grid is fitted to `resolution` voxels on the longest axis (robust to any
+// scale, and caps memory). `real_longest_m` sets the true metres-per-voxel for the physics; if
+// omitted, `cell_m` (metres) is used directly (assumes the model is already in metres).
+export function voxelizeTriangles(tris, { resolution = 160, real_longest_m = null,
+    cell_m = null, barrierClass = 2, pad = 1 } = {}) {
   const nt = (tris.length / 9) | 0;
   if (nt < 1) return null;
 
   const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < tris.length; i += 3)
     for (let j = 0; j < 3; j++) { const v = tris[i + j]; if (v < mn[j]) mn[j] = v; if (v > mx[j]) mx[j] = v; }
+  const size = [mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]];
+  const longest = Math.max(size[0], size[1], size[2], 1e-9);
 
-  const origin = [mn[0] - pad * cell_m, mn[1] - pad * cell_m, mn[2] - pad * cell_m];
-  const NX = Math.max(2, Math.ceil((mx[0] - mn[0]) / cell_m) + 2 * pad + 1);
-  const NY = Math.max(2, Math.ceil((mx[1] - mn[1]) / cell_m) + 2 * pad + 1);
-  const NZ = Math.max(2, Math.ceil((mx[2] - mn[2]) / cell_m) + 2 * pad + 1);
+  // native voxel size in MODEL units, and physical metres per voxel for the engine
+  const nativeCell = (cell_m != null) ? cell_m : longest / resolution;
+  const nAcross = longest / nativeCell;                                    // voxels on the long axis
+  const cellM = real_longest_m ? (real_longest_m / nAcross) : nativeCell;  // metres/voxel (physics)
+
+  const origin = [mn[0] - pad * nativeCell, mn[1] - pad * nativeCell, mn[2] - pad * nativeCell];
+  const NX = Math.max(2, Math.ceil(size[0] / nativeCell) + 2 * pad + 1);
+  const NY = Math.max(2, Math.ceil(size[1] / nativeCell) + 2 * pad + 1);
+  const NZ = Math.max(2, Math.ceil(size[2] / nativeCell) + 2 * pad + 1);
   const grid = new Uint8Array(NX * NY * NZ);            // 0 = air; barrierClass = solid
   const idx = (x, y, z) => (x * NY + y) * NZ + z;
   const clamp = (v, n) => (v < 0 ? 0 : v >= n ? n - 1 : v);
 
   // Surface voxelization by dense barycentric sampling at ~half-cell spacing along the two
   // edges — conservative enough that thin walls are not missed at this resolution.
-  const half = cell_m * 0.5;
+  const half = nativeCell * 0.5;
   for (let t = 0; t < nt; t++) {
     const o = t * 9;
     const ax = tris[o],     ay = tris[o + 1], az = tris[o + 2];
@@ -42,9 +54,9 @@ export function voxelizeTriangles(tris, { cell_m = 0.3, barrierClass = 2, pad = 
       for (let k = 0; k <= n2; k++) {
         const v = k / n2;
         if (u + v > 1) continue;
-        const gx = clamp(Math.floor((ax + u * (bx - ax) + v * (cx - ax) - origin[0]) / cell_m), NX);
-        const gy = clamp(Math.floor((ay + u * (by - ay) + v * (cy - ay) - origin[1]) / cell_m), NY);
-        const gz = clamp(Math.floor((az + u * (bz - az) + v * (cz - az) - origin[2]) / cell_m), NZ);
+        const gx = clamp(Math.floor((ax + u * (bx - ax) + v * (cx - ax) - origin[0]) / nativeCell), NX);
+        const gy = clamp(Math.floor((ay + u * (by - ay) + v * (cy - ay) - origin[1]) / nativeCell), NY);
+        const gz = clamp(Math.floor((az + u * (bz - az) + v * (cz - az) - origin[2]) / nativeCell), NZ);
         grid[idx(gx, gy, gz)] = barrierClass;
       }
     }
@@ -53,8 +65,8 @@ export function voxelizeTriangles(tris, { cell_m = 0.3, barrierClass = 2, pad = 
   const inside = floodInside(grid, NX, NY, NZ, idx);
   let nSolid = 0, nInside = 0;
   for (let i = 0; i < grid.length; i++) { if (grid[i]) nSolid++; if (inside[i]) nInside++; }
-  return { grid, dims: [NX, NY, NZ], cell_m, origin,
-    extent: [NX * cell_m, NY * cell_m, NZ * cell_m], inside, n_solid: nSolid, n_inside: nInside };
+  return { grid, dims: [NX, NY, NZ], cell_m: cellM, origin,
+    extent: [NX * cellM, NY * cellM, NZ * cellM], inside, n_solid: nSolid, n_inside: nInside };
 }
 
 // Interior mask: flood-fill air inward from the grid boundary → exterior air; interior air is

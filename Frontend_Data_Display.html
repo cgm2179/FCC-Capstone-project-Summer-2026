@@ -521,6 +521,21 @@
             diffraction · absorption · scattering) is the next milestone.</p>
           <div class="sim3d-layout">
             <aside class="sim3d-rail">
+              <!-- Model source (Phase B). Solve on the built-in fixed scene (cached full
+                   physics) OR voxelize an imported model in the browser and solve on that.
+                   An imported model is a new scene, so it runs on the analytic tier — no
+                   cached volume / surrogate (voxelize_browser.js + setRuntimeScene). -->
+              <section class="sim3d-step">
+                <h3><span class="step-n">M</span> Model</h3>
+                <p id="sim3dModelNote" class="sim3d-modenote">Built-in 7th floor (cached full physics). Load your own model to simulate on it — voxelized in-browser, analytic tier (no cache).</p>
+                <label class="sim-btn ghost" style="display:block; text-align:center; cursor:pointer;">Load model to simulate…
+                  <input type="file" id="sim3dModelFile" accept=".glb,.gltf,.obj" style="display:none">
+                </label>
+                <label class="sim3d-field">Real-world width (longest side)
+                  <span class="sim3d-cell"><input type="number" id="sim3dModelCell" min="1" max="5000" step="1" value="80"> m</span>
+                </label>
+                <button type="button" id="sim3dModelRevert" class="sim-btn ghost" style="display:none;">← Back to built-in scene</button>
+              </section>
               <!-- Propagation mode (M3). Chooses the scene AND the source model, so it
                    comes before the transmitter: in O2I there is no Tx to place, the
                    source is a macro cell 416 m outside the grid. Registry and the
