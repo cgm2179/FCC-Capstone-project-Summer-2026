@@ -385,11 +385,20 @@ function tryLoadVolume(txVox, onReady) {
 // signal here is reflected?" and play the mechanism time-lapse. Fetched LAZILY, one
 // mechanism at a time: each is the same size as the total PL volume, so loading all of
 // them up front would multiply the initial download by the mechanism count for nothing.
+// Labels name the PHENOMENON, not the module. `Path_Loss_3D` is geometric spreading (S1)
+// plus the per-crossing transmission stack (S2–S7); `Reflection_3D` is specular multipath;
+// `Scattering_3D` is the diffuse tail. Reflection and diffuse scattering carry no S-number
+// because the v1 spatial catalog (S1–S12) is a single-arrival model and lists them as v2
+// forks — this engine implements them anyway, which is why the time-lapse can exist.
 const MECHS = [
-  { key: 'path_loss',   label: 'Path loss',   color: [1.00, 0.93, 0.42] },  // direct — warm
-  { key: 'reflection',  label: 'Reflection',  color: [0.32, 0.82, 0.94] },  // cyan
-  { key: 'diffraction', label: 'Diffraction', color: [0.93, 0.45, 0.85] },  // magenta
-  { key: 'scattering',  label: 'Scattering',  color: [0.48, 0.88, 0.52] },  // green
+  { key: 'path_loss',   label: 'Spreading + transmission', short: 'Direct',
+    color: [1.00, 0.93, 0.42] },                                            // direct — warm
+  { key: 'reflection',  label: 'Specular reflection / multipath', short: 'Reflected',
+    color: [0.32, 0.82, 0.94] },                                            // cyan
+  { key: 'diffraction', label: 'UTD diffraction', short: 'Diffracted',
+    color: [0.93, 0.45, 0.85] },                                            // magenta
+  { key: 'scattering',  label: 'Diffuse scattering', short: 'Diffuse',
+    color: [0.48, 0.88, 0.52] },                                            // green
 ];
 const MECH_BY_KEY = Object.fromEntries(MECHS.map((m) => [m.key, m]));
 
@@ -498,7 +507,7 @@ function showMechLegend(layers) {
   el.innerHTML = '<span class="lg-cap">arrival</span>' + layers.map((L) => {
     const c = L.color;
     return '<span class="lg-lab" style="color:rgb(' + Math.round(c[0] * 200) + ','
-      + Math.round(c[1] * 200) + ',' + Math.round(c[2] * 200) + ')">■ ' + L.label + '</span>';
+      + Math.round(c[1] * 200) + ',' + Math.round(c[2] * 200) + ')">■ ' + (L.short || L.label) + '</span>';
   }).join('');
   el.hidden = false;
 }
@@ -1138,8 +1147,8 @@ function runMechanismTimeLapse() {
       }
       if (!live) continue;                        // mechanism reaches nothing here
       const mesh = makeSweepMesh(lat.count);
-      layers.push({ key: want[li].key, label: want[li].label, color: want[li].color,
-        tNs, mesh, live });
+      layers.push({ key: want[li].key, label: want[li].label, short: want[li].short,
+        color: want[li].color, tNs, mesh, live });
       scene.add(mesh);
     }
     if (!layers.length) { noMechData({ label: 'Mechanism time-lapse' }, vol); return; }
@@ -1151,7 +1160,7 @@ function runMechanismTimeLapse() {
     showMechLegend(layers);
     const mixed = chans.some((c) => c && c.convention === 'eikonal' && !c.tauGeom);
     setStatus('Mechanism time-lapse · ' + layers.map((L) =>
-      L.label + ' ' + medianFinite(L.tNs).toFixed(0) + ' ns').join(' → ')
+      (L.short || L.label) + ' ' + medianFinite(L.tNs).toFixed(0) + ' ns').join(' → ')
       + ' (median arrival) · scrub / Play to watch the fronts arrive in sequence. '
       + (mixed
         ? 'NOTE: the direct path is on the eikonal clock (in-wall slowdown) and the others '
