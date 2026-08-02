@@ -4,6 +4,7 @@
  * state only through window.filtered / window.filteredTimeseries / window.idwGrid. */
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import * as georef from './georef.js';   // lon/lat → floor-plan pixel affine (rotation-correct)
 
     // Available floor models, newest first. To add an iteration, drop the
     // export folder in and add one line here (or just use "Load model file…"
@@ -995,7 +996,17 @@
       if (pixel) {
         pts = raw.map((o) => ({ x01: o.x/FLOOR_W, y01: o.y/FLOOR_H, v: o.v, t: o.t,
                                 elevFt: (o.e != null && isFinite(o.e)) ? o.e : null }));
-      } else {                                                       // fit arbitrary x/y to the floor box
+      } else if (/lon/.test(H[iX]) && /lat/.test(H[iY]) && georef.available()) {
+        // geographic lon/lat → floor-plan pixels via the real affine, which CARRIES the
+        // −7.33° map rotation. The old min/max rubber-sheet below dropped the rotation and
+        // stretched the walk's own extent onto the plan bbox, mis-registering any track
+        // that didn't exactly fill it. This is what an M5 scanner overlay needs.
+        pts = raw.map((o) => {
+          const p = georef.lonlatToPx(o.x, o.y);
+          return { x01: p.px / FLOOR_W, y01: p.py / FLOOR_H, v: o.v, t: o.t,
+                   elevFt: (o.e != null && isFinite(o.e)) ? o.e : null };
+        });
+      } else {                                                       // projected x/y: min-max fit (legacy)
         const xs = raw.map((o) => o.x), ys = raw.map((o) => o.y);
         const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
         pts = raw.map((o) => ({ x01: x1 > x0 ? (o.x-x0)/(x1-x0) : 0.5, y01: y1 > y0 ? (o.y-y0)/(y1-y0) : 0.5,
