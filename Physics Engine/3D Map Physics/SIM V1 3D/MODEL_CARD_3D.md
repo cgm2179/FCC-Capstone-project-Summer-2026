@@ -10,12 +10,12 @@ a first version.
 
 | | |
 |---|---|
-| Grid | `262 × 11 × 118` voxels (X, Y-up, Z), cubic **0.30 m** |
-| Scale | `m_per_unit ≈ 0.018307`, from registering the OBJ X-span to the floor-plan width (1150 px × 0.0679 m/px, QGIS GCP calibration in `SIM/manifest.json`) → ceiling ≈ **2.85 m** |
-| Interior | façade-footprint fill; room band iy≈3–9; ~45 % of volume |
-| Materials | 6 classes (air, drywall 4 dB, concrete 15, core 20, furniture 0.3 dB/m, glass 3) |
-| Bands | 2442 / 3500 / 5500 / 6125 MHz, per-band loss multiplier |
-| Norm | PL → `(PL − 40)/130` clamped to [0,1] |
+| Grid | `262 × 17 × 132` voxels (X, Y-up, Z), cubic **0.30 m** — 587,928 total (post-M0.4 re-voxelization) |
+| Scale | `m_per_unit ≈ 0.018377`, from registering the OBJ X-span to the floor-plan width (1150 px × 0.0679 m/px, QGIS GCP calibration in `SIM/manifest.json`) |
+| Interior | façade-footprint fill; room band iy 3–8; **69,432 voxels** (11.8 % of the grid), `valid_tx` 2,510 |
+| Materials | 6 classes — air 72.73 %, drywall 11.53 %, concrete 11.33 %, core 0.93 %, furniture 2.17 %, glass 1.32 % |
+| Bands | 10: WiFi 2442 / 5500 / 6125 and the measured cellular set 619 / 627 / 1935 / 2510 / 2600 / 3500 / 3710 MHz |
+| Norm | PL → `(PL − 40)/130` clamped to [0,1]; `freq_log` window `[600, 6200]` MHz |
 
 ## Physics (`engine_3d.py` `SceneV3`)
 
@@ -109,6 +109,13 @@ S3–S7. Keeping FAF as well would double-count.
   inbound leg only, so diffuse power passes through structure unattenuated. On the
   production scene this makes the diffuse channel dominate coverage (median interior PL
   103 dB vs the direct field's 302 dB; diffuse wins in 94.6% of voxels).
+- **Saturating obstruction model** — `SceneV3.crossing_loss` sums every wall crossing along
+  a straight ray, and straight-ray tracing over-counts (~9 wall runs per cell on this floor
+  plate). The 2-D engine corrects this with `engine_v2.effective_obstruction`
+  (`ceiling·tanh(solidity·obs/ceiling)`, solidity 0.35, ceiling 55 dB); the 3-D port does
+  not. Direct path loss consequently reaches **1,791 dB**, and **79 % of interior voxels at
+  3500 MHz (87 % at 6125 MHz)** exceed the 170 dB normalization ceiling. This is the binding
+  defect for the surrogate — see `PLAN_3D_SIM.md` Pre-M4 §P1.
 - **Floor/ceiling material split** — `FrontColor` lumps the floor slab with walls
   as drywall; splitting horizontal (concrete slab) from vertical (partition)
   faces by normal would be more accurate for near-vertical rays.
@@ -120,12 +127,16 @@ S3–S7. Keeping FAF as well would double-count.
 - **Ray "spokes."** Discrete per-voxel ray sampling produces faint radial streaks
   (same as the 2-D engine). Physical (wall shadows), and the surrogate smooths
   them; not a bug.
-- **Thin vertical axis.** One ~2.85 m floor is ~7 room voxels tall at 0.30 m, so
-  vertical detail is coarse — honest for a single floor. Lower `--cell` for more.
 - **Interior mask is a heuristic** (façade-footprint fill); it drives display and
   Tx sampling only, not the PL values (PL is computed for every voxel).
-- **Colab stages unrun here.** The training notebook was authored but not
-  executed locally (no GPU); treat RMSE targets as TBD from the first real run.
+- **No trained surrogate yet.** `phase_b3_dataset.ipynb` and `phase_c3_train_colab.ipynb`
+  are built and smoke-tested end to end (dataset → train → ONNX at 0.0000 dB parity), but
+  no full run has happened, so `web/pl_unet3d.onnx` does not exist and the browser's
+  surrogate tier reports its own absence. Treat the ≤ 5 dB RMSE target as unmet until the
+  first real run. Phase B additionally **refuses to generate** while the saturating-obstruction
+  defect above is unfixed; that gate is intentional.
+- **Vertical axis.** One ~2.85 m storey is ~6 room voxels tall at 0.30 m (room band iy 3–8),
+  so vertical detail is coarse — honest for a single floor. Lower `--cell` for more.
 
 ## Validation (`run_one_calc.py`, 3500 MHz, interior-centroid ceiling Tx)
 
