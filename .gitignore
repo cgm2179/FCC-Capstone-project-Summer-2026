@@ -8,6 +8,13 @@
 # Training dataset shards (regenerate with the phase_b notebooks, or `make dataset-fetch`)
 *.npz
 
+# 3-D surrogate shards are raw .npy so the trainer can memory-map them (a compressed
+# member cannot be mmap'd, and the dataset is ~8 GB against Colab's 12.7 GB of RAM).
+# Listed by name because *.npy as a whole is NOT ignored — material_grid.npy and the
+# masks are committed source.
+Physics Engine/3D Map Physics/SIM V1 3D/dataset/shard_*.npy
+Physics Engine/3D Map Physics/SIM V1 3D/dataset/*.part
+
 # Outdoor city voxel grids — ~347 MB each; regenerate with voxelize_city.py
 Physics Engine/3D Map Physics/SIM V1 3D/city/
 

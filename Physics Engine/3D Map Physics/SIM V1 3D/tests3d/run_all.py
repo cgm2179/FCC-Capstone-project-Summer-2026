@@ -22,7 +22,11 @@ SIM3D = HERE.parent
 MECH = SIM3D.parent / "Wave Behavior" / "Enivronmental Interaction"
 
 MECHANISMS = ["Path_Loss_3D", "Reflection_3D", "Refraction_3D",
-              "Diffraction_3D", "Absorption_3D", "Scattering_3D"]
+              "Diffraction_3D", "Absorption_3D", "Scattering_3D", "Combine_3D"]
+
+# Modules that keep the same `--test` convention but live in SIM V1 3D rather than
+# beside the mechanisms.
+ENGINE_SELFTESTS = ["dataset_3d"]
 
 
 def run_pytest(args: list[str]) -> int:
@@ -40,6 +44,14 @@ def run_selftests() -> int:
             print(f"  {name:18s} SKIP (not implemented yet)")
             continue
         r = subprocess.call([sys.executable, str(p), "--test"], cwd=str(MECH))
+        print(f"  {name:18s} {'OK' if r == 0 else 'FAIL'}")
+        rc |= r
+    for name in ENGINE_SELFTESTS:
+        p = SIM3D / f"{name}.py"
+        if not p.exists() or p.stat().st_size == 0:
+            print(f"  {name:18s} SKIP (not implemented yet)")
+            continue
+        r = subprocess.call([sys.executable, str(p), "--test"], cwd=str(SIM3D))
         print(f"  {name:18s} {'OK' if r == 0 else 'FAIL'}")
         rc |= r
     return rc
