@@ -50,7 +50,9 @@ usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
 
 import numpy as np
 from scipy import ndimage
@@ -160,6 +162,53 @@ def find_diffracting_edges_3d(M, inside, *, radius=3, n_angles=72, n_min=1.15,
     return kept
 
 
+def build_relay_cache(scene, edges, *, path=None, dtype=np.float32, progress=False):
+    """Precompute crossing_loss from every edge anchor ONCE, for reuse across all Tx.
+
+    This is the single biggest speedup in the stack, and it exists because of a profile
+    rather than a guess. Per transmitter the solver calls `crossing_loss` 17 times -- once
+    for the direct field and once per diffracting edge -- and at ~2.9 s each that is 96% of
+    the ~52 s per-Tx cost (the eikonal, by comparison, is 4%).
+
+    But an edge's second leg depends only on the EDGE, not on the transmitter: the map
+    "wall loss from this edge anchor to every voxel" is fixed geometry. So it can be solved
+    once and reused for every Tx forever, turning 16 solves PER TX into 16 solves TOTAL.
+    Over a 24-Tx precompute that is 384 solves reduced to 16.
+
+    Mirrors the relay cache in the 2D engine_v2. Returns (n_edges, nf, NX, NY, NZ).
+
+    dtype is float32, NOT float16: these are dB values reaching ~500, where float16 spacing
+    is ~0.5 dB, and the error compounds across the two legs -- measured at 2.32 dB against
+    the uncached path, far past the 0.01 dB parity bar. float32 costs 2x memory
+    (~380 MB at 16 edges x 10 bands on a 262x17x132 grid) and reproduces exactly.
+    """
+    n = len(edges)
+    out = np.empty((n, len(scene.freqs), scene.NX, scene.NY, scene.NZ), dtype)
+    for i, e in enumerate(edges):
+        out[i] = scene.crossing_loss((e["ax"], e["ay"], e["az"])).astype(dtype)
+        if progress:
+            print(f"  relay {i+1}/{n}", flush=True)
+    if path is not None:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        np.save(p, out)
+        (p.with_suffix(".edges.json")).write_text(json.dumps(
+            [{k: (list(v) if isinstance(v, tuple) else v) for k, v in e.items()}
+             for e in edges], indent=1))
+    return out
+
+
+def load_relay_cache(path):
+    """(cache array, edges) written by build_relay_cache, or (None, None)."""
+    p = Path(path)
+    if not p.exists():
+        return None, None
+    edges = json.loads(p.with_suffix(".edges.json").read_text())
+    for e in edges:
+        e["edge_dir"] = tuple(e["edge_dir"])
+    return np.load(p), edges
+
+
 def select_edges(edges, tx, n_edges=24):
     """Keep the n_edges sharpest edges, farthest-point sampled so they spread over the
     scene instead of clustering on one doorway (mirrors the 2D relay-cache selection)."""
@@ -197,7 +246,7 @@ def _angles_in_edge_frame(vec, edge_dir, face0):
 
 def solve(scene, tx, *, bands=None, edges=None, n_edges=24, soft=True,
           modes=("vertical",), backend="numpy", max_edges_solve=None,
-          progress=False) -> "contracts.FieldGrid":
+          relay=None, progress=False) -> "contracts.FieldGrid":
     """Diffracted coherent field for one Tx.
 
     Each edge contributes a Tx->edge->Rx ray. Legs are charged for the walls they cross
@@ -231,6 +280,9 @@ def solve(scene, tx, *, bands=None, edges=None, n_edges=24, soft=True,
     for ei, e in enumerate(edges):
         ep = np.array([e["x"], e["y"], e["z"]], float)
         ap = (e["ax"], e["ay"], e["az"])
+        # Second leg from a PRECOMPUTED relay cache when available: it depends only on the
+        # edge, never on the transmitter, so solving it per-Tx is pure waste (96% of the
+        # per-Tx cost -- see build_relay_cache).
 
         v_tx = (np.asarray(tx, float) - ep)
         s_p = np.linalg.norm(v_tx) * cell
@@ -242,7 +294,8 @@ def solve(scene, tx, *, bands=None, edges=None, n_edges=24, soft=True,
         s = np.linalg.norm(v_rx, axis=-1) * cell
         phi, _b = _angles_in_edge_frame(v_rx, e["edge_dir"], e["face0"])
 
-        obs_edge = scene.crossing_loss(ap)                      # leg 2, per band
+        obs_edge = (relay[ei].astype(np.float32) if relay is not None
+                    else scene.crossing_loss(ap))          # leg 2, per band
         live = (s > cell) & inside
         if not live.any():
             continue
