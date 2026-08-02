@@ -344,20 +344,81 @@ const MODE_INFO = {
 function currentMode() { return (modeSel && modeSel.value) || 'indoor'; }
 function modeIsPointSource() { return (MODE_INFO[currentMode()] || {}).source !== 'plane_wave'; }
 
+// One half-float, decoded on read. The volumes are stored as float16 precisely to be
+// compact, and eagerly expanding them to Float32Array threw that away: a 10-band
+// production volume is 11.8 MB on disk and was becoming 23.5 MB of JS heap, doubled again
+// by every prefetched neighbour. Decoding per read costs a few arithmetic ops in loops
+// that already do far more work per voxel, and halves the resident footprint.
+function h2f(h) {
+  const s = (h & 0x8000) >> 15, e = (h & 0x7c00) >> 10, f = h & 0x03ff;
+  if (e === 0) return (s ? -1 : 1) * 5.960464477539063e-8 * f;      // 2^-24 * f
+  if (e === 0x1f) return f ? NaN : (s ? -Infinity : Infinity);
+  return (s ? -1 : 1) * Math.pow(2, e - 15) * (1 + f / 1024);
+}
+// Kept for callers that genuinely need a dense Float32Array; nothing on the hot path does.
 function f16ToF32(u16) {
   const out = new Float32Array(u16.length);
-  for (let i = 0; i < u16.length; i++) {
-    const h = u16[i], s = (h & 0x8000) >> 15, e = (h & 0x7c00) >> 10, f = h & 0x03ff;
-    if (e === 0) out[i] = (s ? -1 : 1) * Math.pow(2, -14) * (f / 1024);
-    else if (e === 0x1f) out[i] = f ? NaN : (s ? -Infinity : Infinity);
-    else out[i] = (s ? -1 : 1) * Math.pow(2, e - 15) * (1 + f / 1024);
-  }
+  for (let i = 0; i < u16.length; i++) out[i] = h2f(u16[i]);
   return out;
 }
+
+// ---- Browser-side LRU, mirroring the disk cache ----
+// volumeCache/mechCache grew without bound: open six transmitters and every decode stayed
+// resident until the tab died. Budget is in decoded bytes, evicting least-recently-used —
+// same rule as cache_index.py, for the same reason.
+const BROWSER_CACHE_BUDGET = 96 * 1024 * 1024;
+let cacheClock = 0;
+function cacheBytes() {
+  let n = 0;
+  for (const v of Object.values(volumeCache)) n += (v.pl.byteLength + v.t.byteLength);
+  for (const c of Object.values(mechCache)) {
+    n += c.pl.byteLength + c.tau.byteLength + (c.tauGeom ? c.tauGeom.byteLength : 0);
+  }
+  return n;
+}
+// `keep` is the volume being displayed and `keepMech` the channel just loaded — evicting
+// either would make the very next read refetch what we just paid for.
+function evictToBudget(keep, keepMech) {
+  let guard = 64;
+  while (cacheBytes() > BROWSER_CACHE_BUDGET && guard-- > 0) {
+    let victim = null, oldest = Infinity, store = null;
+    for (const [k, v] of Object.entries(mechCache)) {     // mechanism channels go first:
+      if (k === keepMech) continue;                       // they are the easiest to refetch
+      if (v.used < oldest) { oldest = v.used; victim = k; store = mechCache; }
+    }
+    if (!victim) {                                       // …then whole volumes
+      for (const [k, v] of Object.entries(volumeCache)) {
+        if (k === keep) continue;
+        if (v.used < oldest) { oldest = v.used; victim = k; store = volumeCache; }
+      }
+    }
+    if (!victim) break;                                  // nothing evictable left
+    delete store[victim];
+  }
+}
+// file:// blocks fetch, so the whole cached tier is unavailable there — and reporting
+// that as "nothing cached" sends you off to run an export you have already run. Say which
+// it is.
+const ON_FILE_PROTOCOL = location.protocol === 'file:';
+let volumeIndexError = null;
 async function loadVolumeIndex() {
   if (volumeIndex !== null) return volumeIndex;
-  try { const r = await fetch('SIM3D/web/volumes/index.json'); volumeIndex = r.ok ? ((await r.json()).volumes || []) : []; }
-  catch (e) { volumeIndex = []; }
+  if (ON_FILE_PROTOCOL) {
+    volumeIndex = [];
+    volumeIndexError = 'opened over file:// — the browser blocks fetch(), so precomputed '
+      + 'volumes cannot load. Serve the folder over http (e.g. `python3 -m http.server 8777`) '
+      + 'and open http://localhost:8777/Frontend_Data_Display.html';
+    console.warn('[sim3d] ' + volumeIndexError);
+    return volumeIndex;
+  }
+  try {
+    const r = await fetch('SIM3D/web/volumes/index.json');
+    volumeIndex = r.ok ? ((await r.json()).volumes || []) : [];
+    if (!r.ok) volumeIndexError = 'index.json returned HTTP ' + r.status;
+  } catch (e) {
+    volumeIndex = [];
+    volumeIndexError = 'could not fetch index.json — ' + e.message;
+  }
   return volumeIndex;
 }
 // Volumes written before M3 carry no `mode`; they were all the indoor floor.
@@ -382,17 +443,22 @@ function matchVolume(txVox, mode) {
 // volume the user is currently looking at.
 async function loadVolume(entry, { setCurrent = true } = {}) {
   if (volumeCache[entry.txid]) {
-    if (setCurrent) window.SIM3D_VOLUME = volumeCache[entry.txid];
-    return volumeCache[entry.txid];
+    const hit = volumeCache[entry.txid];
+    hit.used = ++cacheClock;
+    if (setCurrent) window.SIM3D_VOLUME = hit;
+    return hit;
   }
   const base = 'SIM3D/web/volumes/';
   const [plBuf, tBuf] = await Promise.all([
     fetch(base + entry.pl_file).then((r) => r.arrayBuffer()),
     fetch(base + entry.t_file).then((r) => r.arrayBuffer()),
   ]);
-  const vol = { pl: f16ToF32(new Uint16Array(plBuf)), t: f16ToF32(new Uint16Array(tBuf)),
-    dims: entry.grid_shape, bands: entry.bands, tx_vox: entry.tx_vox, t_max_ns: entry.t_max_ns, entry };
+  // kept as float16; h2f() decodes per read (see the note on h2f)
+  const vol = { pl: new Uint16Array(plBuf), t: new Uint16Array(tBuf),
+    dims: entry.grid_shape, bands: entry.bands, tx_vox: entry.tx_vox,
+    t_max_ns: entry.t_max_ns, entry, used: ++cacheClock };
   volumeCache[entry.txid] = vol;
+  evictToBudget(entry.txid);
   if (setCurrent) { window.SIM3D_VOLUME = vol; prefetchNeighbours(entry); }
   return vol;
 }
@@ -408,6 +474,9 @@ const PREFETCH_MAX = 3;
 let prefetching = false;
 function prefetchNeighbours(entry) {
   if (prefetching || !entry) return;
+  // Never prefetch into an over-budget cache. Warming neighbours is a convenience; it
+  // must not be what pushes the renderer over, and each volume is ~12 MB decoded.
+  if (cacheBytes() > BROWSER_CACHE_BUDGET * 0.6) return;
   const pool = volumesForMode(entry.mode || 'indoor')
     .filter((e) => e.txid !== entry.txid && !volumeCache[e.txid]);
   if (!pool.length) return;
@@ -419,14 +488,15 @@ function prefetchNeighbours(entry) {
   const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 400));
   idle(() => {
     // sequential, not Promise.all: these are background fetches and must not contend
-    // with whatever the user is actively waiting for
-    want.reduce((p, e) => p.then(() => loadVolume(e, { setCurrent: false })
-      .catch(() => {})), Promise.resolve())
+    // with whatever the user is actively waiting for. Re-check the budget between each,
+    // since the user may have loaded mechanism channels in the meantime.
+    want.reduce((p, e) => p.then(() => (cacheBytes() > BROWSER_CACHE_BUDGET * 0.6
+      ? null : loadVolume(e, { setCurrent: false }).catch(() => {}))), Promise.resolve())
       .then(() => { prefetching = false; });
   });
 }
-function plAt(vol, band, x, y, z) { const NY = vol.dims[1], NZ = vol.dims[2]; return vol.pl[((band * vol.dims[0] + x) * NY + y) * NZ + z]; }
-function tAt(vol, x, y, z) { const NY = vol.dims[1], NZ = vol.dims[2]; return vol.t[(x * NY + y) * NZ + z]; }
+function plAt(vol, band, x, y, z) { const NY = vol.dims[1], NZ = vol.dims[2]; return h2f(vol.pl[((band * vol.dims[0] + x) * NY + y) * NZ + z]); }
+function tAt(vol, x, y, z) { const NY = vol.dims[1], NZ = vol.dims[2]; return h2f(vol.t[(x * NY + y) * NZ + z]); }
 function nearestBandIndex(vol, fMHz) {
   let bi = 0, bd = Infinity;
   for (let i = 0; i < vol.bands.length; i++) { const d = Math.abs(vol.bands[i] - fMHz); if (d < bd) { bd = d; bi = i; } }
@@ -493,6 +563,10 @@ function reportNoVolume(txVox) {
   const pool = volumesForMode(m);
   const solveHint = ' — run: python "SIM V1 3D/export_pl_volume.py" --mode ' + m
     + ' --mechanisms path_loss,reflection,diffraction,scattering';
+  if (volumeIndexError) {
+    setStatus(label + ' · showing the analytic tier only — ' + volumeIndexError);
+    return;
+  }
   if (!pool.length) {
     setStatus(label + ' · nothing cached for this mode yet ('
       + (volumeIndex || []).length + ' cached in others)' + solveHint);
@@ -546,7 +620,7 @@ async function loadMechanism(vol, mech) {
   const info = mechEntry(vol, mech);
   if (!info) return null;
   const key = vol.entry.txid + '|' + mech;
-  if (mechCache[key]) return mechCache[key];
+  if (mechCache[key]) { mechCache[key].used = ++cacheClock; return mechCache[key]; }
   const base = 'SIM3D/web/volumes/';
   const [plBuf, tauBuf, geomBuf] = await Promise.all([
     fetch(base + info.pl_file).then((r) => r.arrayBuffer()),
@@ -554,24 +628,25 @@ async function loadMechanism(vol, mech) {
     info.tau_geom_file ? fetch(base + info.tau_geom_file).then((r) => r.arrayBuffer()) : null,
   ]);
   const bands = vol.entry.mech_bands || vol.bands;
-  const ch = { mech, pl: f16ToF32(new Uint16Array(plBuf)), tau: f16ToF32(new Uint16Array(tauBuf)),
+  const ch = { mech, pl: new Uint16Array(plBuf), tau: new Uint16Array(tauBuf),
     dims: vol.dims, bands, t_max_ns: info.t_max_ns, combine_as: info.combine_as,
-    convention: info.tau_convention || 'geometric', info };
+    convention: info.tau_convention || 'geometric', info, used: ++cacheClock };
   // Second clock (path loss only): vacuum d/c, so every layer of the time-lapse can be
   // compared on one convention. See write_mechanism_channels' "TWO CLOCKS" note — the
   // eikonal charges the direct path for in-wall slowdown and the other mechanisms do not,
   // so mixing them makes the reflected front appear to beat line of sight.
-  if (geomBuf) { ch.tauGeom = f16ToF32(new Uint16Array(geomBuf)); ch.tauGeomMax = info.tau_geom_max_ns; }
+  if (geomBuf) { ch.tauGeom = new Uint16Array(geomBuf); ch.tauGeomMax = info.tau_geom_max_ns; }
   mechCache[key] = ch;
+  evictToBudget(vol.entry.txid, key);
   return ch;
 }
 // Same C-order (band, x, y, z) addressing as plAt — mechanism channels may carry a
 // SUBSET of the total volume's bands, so they index with their own band list.
-function chanAt(ch, band, x, y, z) { const NY = ch.dims[1], NZ = ch.dims[2]; return ch.pl[((band * ch.dims[0] + x) * NY + y) * NZ + z]; }
+function chanAt(ch, band, x, y, z) { const NY = ch.dims[1], NZ = ch.dims[2]; return h2f(ch.pl[((band * ch.dims[0] + x) * NY + y) * NZ + z]); }
 function tauAt(ch, x, y, z, useGeom) {
   const NY = ch.dims[1], NZ = ch.dims[2];
   const src = (useGeom && ch.tauGeom) ? ch.tauGeom : ch.tau;
-  return src[(x * NY + y) * NZ + z];
+  return h2f(src[(x * NY + y) * NZ + z]);
 }
 function chanBandIndex(ch, fMHz) {
   let bi = 0, bd = Infinity;
@@ -1556,4 +1631,7 @@ window.__sim3d = {
   get tier() { return window.SIM3D_TIER || null; },
   get surrogate() { return { state: SURROGATE.state, note: SURROGATE.note }; },
   get warmVolumes() { return Object.keys(volumeCache); },
+  get cacheBytes() { return cacheBytes(); },
+  get cacheBudget() { return BROWSER_CACHE_BUDGET; },
+  get indexError() { return volumeIndexError; },
 };
