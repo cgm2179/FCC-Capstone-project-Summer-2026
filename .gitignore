@@ -35,6 +35,9 @@ Sandbox_Version_3D_Simulation_1.obj/
 claude-colab-main/
 colab-mcp-main/
 
+# Local development virtualenv (created by the environment update script)
+.venv/
+
 # ---- OS / Python junk ----
 __pycache__/
 *.pyc
