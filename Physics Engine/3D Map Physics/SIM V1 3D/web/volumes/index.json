@@ -2,6 +2,7 @@
  "version": "vol3d-v3",
  "modes": [
   "indoor",
+  "o2i",
   "vacuum"
  ],
  "grid_shape": [
@@ -23,12 +24,15 @@
   6125.0
  ],
  "mechanisms": [
-  "path_loss"
+  "o2i_facade",
+  "reflection",
+  "diffraction",
+  "scattering"
  ],
  "pl_layout": "band,x,y,z  float16 dB",
  "t_layout": "x,y,z  float16 NANOSECONDS (sentinel 65504 = unreachable)",
  "mech_layout": "m_<mech>_<txid>.bin = band,x,y,z float16 dB; tau_<mech>_<txid>.bin = x,y,z float16 ns",
- "count": 4,
+ "count": 5,
  "volumes": [
   {
    "txid": "tx_131-6-65",
@@ -125,6 +129,89 @@
    "t_max_ns": 199.38,
    "t_unreachable_ns": 65504.0,
    "mode": "indoor"
+  },
+  {
+   "txid": "tx_2-3-115",
+   "mode": "o2i",
+   "tx_vox": [
+    2,
+    3,
+    115
+   ],
+   "grid_shape": [
+    262,
+    17,
+    132
+   ],
+   "bands": [
+    619.0,
+    627.0,
+    1935.0,
+    2442.0,
+    2510.0,
+    2600.0,
+    3500.0,
+    3710.0,
+    5500.0,
+    6125.0
+   ],
+   "t_max_ns": 280.25,
+   "t_unreachable_ns": 65504.0,
+   "pl_file": "pl_volume_tx_2-3-115.bin",
+   "t_file": "t_volume_tx_2-3-115.bin",
+   "mechanisms": {
+    "o2i_facade": {
+     "pl_file": "m_o2i_facade_tx_2-3-115.bin",
+     "tau_file": "tau_o2i_facade_tx_2-3-115.bin",
+     "t_max_ns": 280.25,
+     "tau_convention": "geometric",
+     "combine_as": "incoherent",
+     "bytes": 4703424
+    },
+    "reflection": {
+     "pl_file": "m_reflection_tx_2-3-115.bin",
+     "tau_file": "tau_reflection_tx_2-3-115.bin",
+     "t_max_ns": 275.5,
+     "tau_convention": "geometric",
+     "combine_as": "coherent",
+     "bytes": 4703424
+    },
+    "diffraction": {
+     "pl_file": "m_diffraction_tx_2-3-115.bin",
+     "tau_file": "tau_diffraction_tx_2-3-115.bin",
+     "t_max_ns": 275.5,
+     "tau_convention": "geometric",
+     "combine_as": "coherent",
+     "bytes": 4703424
+    },
+    "scattering": {
+     "pl_file": "m_scattering_tx_2-3-115.bin",
+     "tau_file": "tau_scattering_tx_2-3-115.bin",
+     "t_max_ns": 275.0,
+     "tau_convention": "geometric",
+     "combine_as": "incoherent",
+     "bytes": 4703424
+    }
+   },
+   "mech_bands": [
+    2442.0,
+    3500.0,
+    5500.0
+   ],
+   "mechanism_names": [
+    "o2i_facade",
+    "reflection",
+    "diffraction",
+    "scattering"
+   ],
+   "t_freq_mhz": null,
+   "norm": {
+    "pl_min_db": 40.0,
+    "pl_range_db": 130.0,
+    "freq_log_lo_mhz": 600.0,
+    "freq_log_hi_mhz": 6200.0
+   },
+   "bytes": 31748112
   },
   {
    "tx_vox": [
