@@ -309,7 +309,7 @@ def _prepare_diffraction(scene, mechs, n_edges, cache_path):
 
     inside = scene.inside if scene.inside is not None else np.ones(scene.M.shape, bool)
     all_edges = DIF.find_diffracting_edges_3d(scene.M, inside, y_band=(1, scene.NY - 1))
-    edges = DIF.select_edges(all_edges, None, n_edges=n_edges)
+    edges = DIF.select_edges(all_edges, n_edges=n_edges)
     print(f"diffraction: building relay cache for {len(edges)} edges "
           f"(once for the whole run) -> {path}")
     t0 = time.time()

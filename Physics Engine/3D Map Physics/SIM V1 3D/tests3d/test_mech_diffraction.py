@@ -7,6 +7,7 @@ Keller-cone angle beta0, and keeping D COMPLEX so the combiner can interfere.
 """
 from __future__ import annotations
 
+import inspect
 import sys
 
 import numpy as np
@@ -79,6 +80,27 @@ def test_wedge_parameter_in_valid_range():
     M, _man, sc = _half_wall()
     for e in DIF.find_diffracting_edges_3d(M, sc.inside, y_band=(2, 10), y_step=3):
         assert 1.15 <= e["n"] <= 2.0
+
+
+def test_edge_selection_is_transmitter_independent_and_order_stable():
+    """What makes the relay cache shareable, and what keeps relay[ei] pointing at edge ei.
+
+    `build_relay_cache` solves one crossing-loss map per selected edge ONCE for every
+    transmitter in a run, and `solve` indexes it positionally. A selection that varied with
+    the transmitter would either force a per-Tx cache (96% of the per-Tx cost back) or
+    silently pair each edge with another edge's obstruction map.
+    """
+    edges = [dict(x=x, y=6, z=z, n=n) for x, z, n in
+             [(5, 5, 1.9), (30, 5, 1.4), (5, 30, 1.6), (30, 30, 1.2),
+              (6, 6, 1.8), (31, 31, 1.5), (18, 18, 1.7)]]
+    keys = lambda sel: [(e["x"], e["y"], e["z"]) for e in sel]
+    picked = keys(DIF.select_edges(edges, n_edges=4))
+    assert picked == keys(DIF.select_edges(edges, n_edges=4))
+    assert "tx" not in inspect.signature(DIF.select_edges).parameters, \
+        "a transmitter argument here is how Tx-dependent selection creeps back in"
+    # the spread is the point: four picks from a scene with two tight clusters must not
+    # all land in one cluster
+    assert len({(x > 15, z > 15) for x, _y, z in picked}) >= 3
 
 
 # --------------------------------------------------------------------------- field

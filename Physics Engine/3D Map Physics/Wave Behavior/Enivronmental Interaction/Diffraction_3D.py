@@ -209,9 +209,31 @@ def load_relay_cache(path):
     return np.load(p), edges
 
 
-def select_edges(edges, tx, n_edges=24):
-    """Keep the n_edges sharpest edges, farthest-point sampled so they spread over the
-    scene instead of clustering on one doorway (mirrors the 2D relay-cache selection)."""
+def select_edges(edges, n_edges=24):
+    """Pick n_edges edges: seed on the sharpest, then farthest-point sample so they spread
+    over the scene instead of clustering on one doorway.
+
+    DELIBERATELY TRANSMITTER-INDEPENDENT, unlike the 2D `SceneV2.select_edges`, which ranks
+    relays by how cheaply THIS transmitter reaches each anchor. Two reasons:
+
+      * n_edges is the RELAY CACHE budget, and the cache is what makes diffraction
+        affordable at all (96% of the per-Tx cost -- see build_relay_cache). Transmitters
+        rank the edges almost disjointly: on the production floor, two transmitters' top-16
+        by the 2D rule overlap by 4%, so 8 transmitters would need 109 of the 240 candidate
+        relays (2.6 GB, 317 s) instead of 16 (0.38 GB, 47 s, built once).
+      * Spending that same budget on MORE shared edges buys the same accuracy for every
+        transmitter at once. Measured on a four-room scene against an all-edges reference,
+        as delivered shadow power per relay cached: Tx-ranked n_edges=8 reaches 88% but
+        needs 22 relays for 5 transmitters, where the spread selection reaches 85% at 20
+        relays and 100% at 24 — for any transmitter, including ones not yet placed.
+
+    Transmitter relevance is not lost, it is charged in the physics instead: `solve` adds
+    the Tx->anchor crossing loss to every edge, so an edge this transmitter cannot see
+    contributes negligible power rather than a wrong one.
+
+    Order is part of the contract: `relay[ei]` is positional, so the same edge list must
+    come back in the same order for a cached relay to line up with its edge.
+    """
     if len(edges) <= n_edges:
         return list(edges)
     picked = [max(edges, key=lambda e: e["n"])]
@@ -266,7 +288,7 @@ def solve(scene, tx, *, bands=None, edges=None, n_edges=24, soft=True,
     if edges is None:
         edges = find_diffracting_edges_3d(scene.M, inside, modes=modes,
                                           y_band=(1, NY - 1))
-    edges = select_edges(edges, tx, n_edges=n_edges)
+    edges = select_edges(edges, n_edges=n_edges)
     if max_edges_solve:
         edges = edges[:max_edges_solve]
 
