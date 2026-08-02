@@ -15,6 +15,19 @@ Physics Engine/3D Map Physics/SIM V1 3D/city/
 # precompute_volumes.py on first run (~75 s), then reused by every transmitter.
 Physics Engine/3D Map Physics/SIM V1 3D/cache/
 
+# ---- Large local working data — NOT committable ----
+# GitHub rejects any single file over 100 MB at the pre-receive hook, and
+# Sandbox_Version_3D_Simulation_v1.obj/ holds a 328.77 MB .obj. These are listed
+# explicitly so VSCode's "Stage All Changes" cannot sweep them into a commit that
+# is then unpushable — which has already happened once.
+FCC_Walk_Outdoor_Indoor_Full/
+Sandbox_Version_3D_Simulation_v1.obj/
+Sandbox_Version_3D_Simulation_1.obj/
+
+# Cloned helper repos — check these out separately, they are not part of this project
+claude-colab-main/
+colab-mcp-main/
+
 # ---- OS / Python junk ----
 __pycache__/
 *.pyc
