@@ -116,12 +116,13 @@
     "ray_step_cells": 0.5,
     "crossing_loss_source": "physics_3d.CrossingLUT (physics_v2 Blocks A/B): per-crossing angle+thickness Fresnel/Airy transmission + Im(q) bulk absorption. NOT the flat materials[].loss_db table.",
     "arrival_time": "3-D eikonal fast-march (scikit-fmm) on slowness Re(sqrt(eps_r))/c with barrier classes masked; refraction (bending/lag) and corner wraparound emerge from the single solve. NOT geometric d/c.",
-    "note": "engine_3d.py SceneV3: PL(x,y,z) = Motley-Keenan spreading [fspl_1m(f) + 10*n_exp*log10(max(d,d0))] + Sigma per-crossing slab loss from the CrossingLUT (real Fresnel/Airy + absorption). T(x,y,z) = 3-D eikonal (skfmm). n_exp/d0_m/fspl_const_db are read by SceneV3; the flat obstruction_*/satObs params and the materials[].loss_db table are NOT used by the engine -- they are the browser display + in-browser analytic-fallback model (Frontend/simulator/simulation3d.js, Frontend/landing/landing.js preprocess). DEFERRED to later stages (power-summed onto the direct field): 3-D UTD diffraction (S8), reflection/scattering modules, correlated shadow field (S11).",
+    "note": "engine_3d.py SceneV3: PL(x,y,z) = Motley-Keenan spreading [fspl_1m(f) + 10*n_exp*log10(max(d,d0))] + Sigma per-crossing slab loss from the CrossingLUT (real Fresnel/Airy + absorption). T(x,y,z) = 3-D eikonal (skfmm). n_exp/d0_m/fspl_const_db are read by SceneV3; the satObs cap (fallback_obstruction_db) IS now applied by SceneV3.pathloss_maps to the direct crossing loss (gated by use_satobs); the materials[].loss_db table is still NOT used by the engine -- it is the browser display + in-browser analytic-fallback model (Frontend/simulator/simulation3d.js, Frontend/landing/landing.js preprocess). DEFERRED to later stages (power-summed onto the direct field): 3-D UTD diffraction (S8), reflection/scattering modules, correlated shadow field (S11).",
+    "use_satobs": true,
     "fallback_obstruction_db": {
       "obstruction_linear_db": 40.0,
       "obstruction_sat_extra_db": 50.0,
       "obstruction_cap_db": 90.0,
-      "note": "flat-dB saturation stand-in from the old v1 model; used only by the browser analytic fallback, not by SceneV3."
+      "note": "Saturating obstruction cap: loss grows linearly to T=obstruction_linear_db then asymptotes to T+S (obstruction_sat_extra_db). Now applied by SceneV3.pathloss_maps to the summed DIRECT crossing loss (engine_3d.sat_obs), gated by physics.use_satobs; also the browser analytic fallback. Caps the direct transmission runaway (was 300-500 dB straight through the core) so diffraction/scattering fill deep shadows instead."
     }
   },
   "freqs_mhz": [

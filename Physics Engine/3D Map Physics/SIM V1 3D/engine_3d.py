@@ -33,6 +33,23 @@ K_QUANTUM = 32           # quantize per-ray sample count → few unique-K groups
 MEM_CAP = 3_000_000      # cap (K × chunk) samples held at once
 
 
+def sat_obs(x, T, S):
+    """Saturating obstruction stand-in for the summed direct wall loss (dB).
+
+    Loss grows linearly up to T, then asymptotes to T + S:
+        x <= T  ->  x
+        x >  T  ->  T + S * (1 - exp(-(x - T) / S))
+
+    Ported verbatim from the 2-D browser model (SIM/web/simulator_tab.js:31). The flat
+    per-crossing dB stack in `crossing_loss` has no upper bound, so a ray that clips many
+    voxels of thick structure (straight through the core) runs away to 300-500 dB — which
+    made the diffuse channel appear to dominate 94.6 % of interior voxels. A real signal
+    stops attenuating once it is buried; the diffracted/scattered fields, not an unbounded
+    transmission stack, are what fill deep shadows. Applied to the crossing sum ONLY, never
+    to free space (sat_obs(0) == 0, so vacuum/FSPL is untouched)."""
+    return np.where(x <= T, x, T + S * (1.0 - np.exp(-(x - T) / S)))
+
+
 class SceneV3:
     def __init__(self, M, manifest, materials=P3.MATERIALS, barrier_classes=(3,)):
         self.M = np.ascontiguousarray(M.astype(np.int8))
@@ -45,6 +62,13 @@ class SceneV3:
         self.n_exp = float(phys["n_exp"])
         self.d0 = float(phys["d0_m"])
         self.fspl1 = 20.0 * np.log10(self.freqs) + float(phys["fspl_const_db"])
+        # Saturating obstruction cap for the DIRECT path (see sat_obs). Params come from
+        # physics.fallback_obstruction_db; the engine now uses them (they were previously
+        # browser-only). Off only if the manifest sets physics.use_satobs = false.
+        _obs = phys.get("fallback_obstruction_db", {})
+        self.use_satobs = bool(phys.get("use_satobs", True))
+        self.obs_T = float(_obs.get("obstruction_linear_db", 40.0))
+        self.obs_S = float(_obs.get("obstruction_sat_extra_db", 50.0))
 
         # geometry + material machinery (all reused / ported)
         self.lut = P3.CrossingLUT(materials, self.freqs)
@@ -140,12 +164,15 @@ class SceneV3:
         return out.reshape(nf, self.NX, self.NY, self.NZ)
 
     def pathloss_maps(self, tx):
-        """PL(nf, NX, NY, NZ) = free-space spreading + direct crossing loss."""
+        """PL(nf, NX, NY, NZ) = free-space spreading + (saturated) direct crossing loss."""
         tx = np.asarray(tx, np.float32)
         d_m = np.maximum(np.linalg.norm(self.P - tx, axis=1) * self.cell, self.d0)
         fs = (self.fspl1[:, None] + 10.0 * self.n_exp * np.log10(d_m)[None, :]).astype(np.float32)
         fs = fs.reshape(len(self.freqs), self.NX, self.NY, self.NZ)
-        return fs + self.crossing_loss(tx)
+        cl = self.crossing_loss(tx)
+        if self.use_satobs:                       # cap the direct transmission runaway
+            cl = sat_obs(cl, self.obs_T, self.obs_S).astype(np.float32)
+        return fs + cl
 
     def pathloss_map(self, tx, f_mhz):
         return self.pathloss_maps(tx)[self.band_index(f_mhz)]
