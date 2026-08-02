@@ -141,7 +141,22 @@ function ensureInit() {
   antennaMaterialC = new CANNON.Material('antenna');
   world.addContactMaterial(new CANNON.ContactMaterial(wallMaterialC, antennaMaterialC, { friction: 0.6, restitution: 0.1 }));
 
-  buildBuilding();
+  // Building the scene is thousands of instanced boxes plus a static rigid body each, all
+  // synchronous — the tab just sits there looking hung. Say what is happening, and hand
+  // the browser a frame to paint that message on before the work starts.
+  const nBoxes = COLLISION.boxes.length;
+  setStatus('Building the 3D scene · ' + nBoxes.toLocaleString()
+    + ' voxel boxes across ' + ((COLLISION.materials || []).length || 1)
+    + ' materials · one moment…');
+  // setTimeout, not requestAnimationFrame: rAF is throttled to zero in a backgrounded or
+  // non-compositing tab, and deferring the build onto a callback that may never fire
+  // would turn "slow to appear" into "never appears".
+  const t0 = performance.now();
+  setTimeout(() => {
+    buildBuilding();
+    buildMs = Math.round(performance.now() - t0);
+    setStatus(readyStatus());
+  }, 0);
   window.addEventListener('resize', onResize);
 
   renderer.init().then(() => {
@@ -157,28 +172,106 @@ function ensureInit() {
       controls.update();
       renderer.render(scene, camera);
     });
-    setStatus(COLLISION.n_boxes.toLocaleString() + ' collision voxels · ' +
-      extent.map((e) => e.toFixed(1)).join(' × ') + ' m' + voxTarget() +
-      ' — click “Place on model”, then click a surface.');
+    // only claim ready once the geometry is actually up (the build is deferred)
+    if (wallMeshes.length) setStatus(readyStatus());
   }).catch((err) => setStatus('3D backend failed to initialize: ' + (err && err.message || err)));
   return true;
 }
 
+// Per-class look. Concrete and the service core read as structure, drywall as
+// partitions, glass as the envelope, furniture as soft clutter. Colours come from the
+// exporter (which takes them from manifest_3d.json, shared with the 2D pipeline) so the
+// floor plan and both simulators render the same building; only the surface treatment —
+// opacity, roughness, metalness — is decided here.
+const CLASS_STYLE = {
+  1: { opacity: 0.40, roughness: 0.95, metalness: 0.00 },  // drywall_partition
+  2: { opacity: 0.85, roughness: 0.95, metalness: 0.00 },  // concrete_masonry
+  3: { opacity: 0.90, roughness: 0.55, metalness: 0.35 },  // core_service_area (metal)
+  4: { opacity: 0.55, roughness: 0.85, metalness: 0.00 },  // furniture_clutter
+  5: { opacity: 0.22, roughness: 0.08, metalness: 0.10 },  // exterior_glass
+};
+const DEFAULT_STYLE = { opacity: 0.55, roughness: 0.9, metalness: 0.04 };
+
+// One InstancedMesh PER CLASS rather than one for everything. A single mesh forces one
+// material on the whole building, which is why it used to render as undifferentiated
+// grey — you cannot make glass translucent and concrete solid in the same draw call.
+// Six draw calls is nothing next to being able to see what the RF engine is solving on.
+let wallMeshes = [];
+let buildMs = 0;
+
+// What the tab says once the scene is up. The material breakdown is the quickest way to
+// see whether the voxelization actually produced the building you expect.
+function readyStatus() {
+  const counts = wallMeshes.map((m) => {
+    const mat = (COLLISION.materials || []).find((x) => x.id === m.userData.materialClass);
+    return (mat ? mat.name.replace(/_/g, ' ') : 'class ' + m.userData.materialClass)
+      + ' ' + m.count.toLocaleString();
+  });
+  return COLLISION.n_boxes.toLocaleString() + ' voxel boxes · '
+    + extent.map((e) => e.toFixed(1)).join(' × ') + ' m' + voxTarget()
+    + (buildMs ? ' · built in ' + buildMs + ' ms' : '')
+    + (counts.length ? ' · ' + counts.join(', ') : '')
+    + ' — click “Place on model”, then click a surface.';
+}
+
 function buildBuilding() {
-  const n = COLLISION.boxes.length;
+  const boxes = COLLISION.boxes;
+  const classes = COLLISION.classes || boxes.map(() => 1);
+  const palette = {};
+  for (const m of (COLLISION.materials || [])) {
+    if (m.color) palette[m.id] = new THREE.Color(m.color);
+  }
+
+  // group box indices by class (skip -1: the synthetic ground pad is physics-only —
+  // drawing a floor-sized slab would hide the whole building from above)
+  const byClass = new Map();
+  for (let i = 0; i < boxes.length; i++) {
+    const c = classes[i];
+    if (c < 0) continue;
+    if (!byClass.has(c)) byClass.set(c, []);
+    byClass.get(c).push(i);
+  }
+
   const geo = new THREE.BoxGeometry(1, 1, 1);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x9fb0bf, transparent: true, opacity: 0.55, roughness: 0.9, metalness: 0.04 });
-  wallMesh = new THREE.InstancedMesh(geo, mat, n);
   const dummy = new THREE.Object3D();
-  for (let i = 0; i < n; i++) {
-    const b = COLLISION.boxes[i];
-    dummy.position.set(b[0], b[1], b[2]); dummy.scale.set(b[3] * 2, b[4] * 2, b[5] * 2); dummy.updateMatrix();
-    wallMesh.setMatrixAt(i, dummy.matrix);
+  wallMeshes = [];
+  for (const [cls, idxs] of byClass) {
+    const st = CLASS_STYLE[cls] || DEFAULT_STYLE;
+    const mat = new THREE.MeshStandardMaterial({
+      color: palette[cls] || new THREE.Color(0x9fb0bf),
+      transparent: st.opacity < 1, opacity: st.opacity,
+      roughness: st.roughness, metalness: st.metalness,
+      depthWrite: st.opacity > 0.6,
+    });
+    const mesh = new THREE.InstancedMesh(geo, mat, idxs.length);
+    for (let k = 0; k < idxs.length; k++) {
+      const b = boxes[idxs[k]];
+      dummy.position.set(b[0], b[1], b[2]);
+      dummy.scale.set(b[3] * 2, b[4] * 2, b[5] * 2);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(k, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.userData.materialClass = cls;
+    // glass last so it composites over the structure behind it
+    mesh.renderOrder = cls === 5 ? 2 : 1;
+    scene.add(mesh);
+    wallMeshes.push(mesh);
+  }
+  // `wallMesh` stays the raycast target for antenna placement. Point it at the opaque
+  // structure (concrete/core/drywall) so clicking lands on a wall rather than on the
+  // glass envelope in front of it.
+  wallMesh = wallMeshes.find((m) => m.userData.materialClass === 2)
+    || wallMeshes.find((m) => m.userData.materialClass === 1) || wallMeshes[0];
+
+  // Physics: every box including the ground pad. Static bodies with SAPBroadphase +
+  // allowSleep, so the per-frame cost is the broadphase insert, not n^2 pair checks.
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i];
     const body = new CANNON.Body({ mass: 0, material: wallMaterialC });
     body.addShape(new CANNON.Box(new CANNON.Vec3(b[3], b[4], b[5])));
     body.position.set(b[0], b[1], b[2]); world.addBody(body);
   }
-  scene.add(wallMesh);
 }
 
 function buildAntennaMesh(entry) {
@@ -207,9 +300,11 @@ function onPointerDown(ev) {
   ndc.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
   ndc.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
   raycaster.setFromCamera(ndc, camera);
-  const hit = raycaster.intersectObject(wallMesh, false)[0];
+  // Test every class mesh, not just one: the building is now several InstancedMeshes, so
+  // raycasting a single one would make whole materials unclickable.
+  const hit = raycaster.intersectObjects(wallMeshes.length ? wallMeshes : [wallMesh], false)[0];
   if (!hit) return;
-  const normal = hit.face.normal.clone().transformDirection(wallMesh.matrixWorld).normalize();
+  const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
   const pos = hit.point.clone().addScaledVector(normal, 0.4);
   const sel = (armed === 'tx') ? txType : rxType;
   const entry = CATALOG.entries[sel.value];
@@ -1618,7 +1713,8 @@ window.__sim3d = {
   ensureInit, onResize,
   // debug/verification handles (mirrors the sandbox's window.__debug)
   get scene() { return scene; }, get camera() { return camera; }, get renderer() { return renderer; },
-  get wallMesh() { return wallMesh; }, get field() { return fieldObj; }, get wave() { return waveObj; },
+  get wallMesh() { return wallMesh; }, get wallMeshes() { return wallMeshes; },
+  get field() { return fieldObj; }, get wave() { return waveObj; },
   get lobe() { return lobeGroup; }, get vectors() { return vectorState; },
   get interference() { return interferenceState; }, get sweep() { return sweepState; },
   get volume() { return window.SIM3D_VOLUME || null; }, placed,

@@ -31,37 +31,43 @@
       "id": 0,
       "name": "air",
       "loss_db": 0.0,
-      "loss_per_m_db": 0.0
+      "loss_per_m_db": 0.0,
+      "color": "#ffffff"
     },
     {
       "id": 1,
       "name": "drywall_partition",
       "loss_db": 4.0,
-      "loss_per_m_db": 0.0
+      "loss_per_m_db": 0.0,
+      "color": "#f5a623"
     },
     {
       "id": 2,
       "name": "concrete_masonry",
       "loss_db": 15.0,
-      "loss_per_m_db": 0.0
+      "loss_per_m_db": 0.0,
+      "color": "#404040"
     },
     {
       "id": 3,
       "name": "core_service_area",
       "loss_db": 20.0,
-      "loss_per_m_db": 0.0
+      "loss_per_m_db": 0.0,
+      "color": "#c81e1e"
     },
     {
       "id": 4,
       "name": "furniture_clutter",
       "loss_db": 0.0,
-      "loss_per_m_db": 0.3
+      "loss_per_m_db": 0.3,
+      "color": "#bed2ff"
     },
     {
       "id": 5,
       "name": "exterior_glass",
       "loss_db": 3.0,
-      "loss_per_m_db": 0.0
+      "loss_per_m_db": 0.0,
+      "color": "#1e3ca0"
     }
   ],
   "obj_material_map": [
@@ -309,5 +315,6 @@
       "building_class": 3,
       "note": "gitignored (~350 MB per grid); rebuild with voxelize_city.py. Ground reflection and terrain diffraction are Reflection_3D / Diffraction_3D on a scene whose walls are buildings, not new modules."
     }
-  }
+  },
+  "_material_color_note": "colours mirror Physics Engine/2D/SIM/manifest.json so the 2D and 3D views render the same 6-class scheme"
 }
