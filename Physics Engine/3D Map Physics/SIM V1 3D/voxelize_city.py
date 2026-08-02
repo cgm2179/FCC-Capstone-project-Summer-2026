@@ -173,9 +173,13 @@ def exterior_air(M):
     return np.isin(lbl, border)
 
 
-def build_25d(verts_vox, tris, shape, cls):
+def build_25d(verts_vox, tris, shape, cls, terrain_v=None):
     """2.5-D column fill. Roof heightmap from projected triangles (Y is up),
-    footprint holes filled per-building, then each column solid ground->roof."""
+    footprint holes filled per-building, then each column solid ground->roof.
+
+    terrain_v (nx,nz) optional: per-(x,z) GROUND voxel height from a real DEM. When given, the
+    ground follows the terrain EVERYWHERE (not a flat plane under footprints only) and buildings
+    extrude from the terrain surface — this is the outdoor 'real ground level'."""
     nx, ny, nz = shape
     hm = np.full(nx * nz, -1.0, np.float64)        # roof height (voxel-Y) per (x,z)
     for t in tris:
@@ -195,10 +199,17 @@ def build_25d(verts_vox, tris, shape, cls):
         hm[need] = cmax[lbl[need] - 1]
         foot = filled
 
-    hcol = np.floor(np.clip(hm, 0, ny - 1)).astype(np.int32)   # roof voxel index
+    hcol = np.floor(np.clip(hm, 0, ny - 1)).astype(np.int32)   # roof voxel index (building height)
     M = np.zeros((nx, ny, nz), np.int8)
-    for iy in range(ny):                            # y-loop keeps peak RAM at one slice
-        M[:, iy, :][foot & (hcol >= iy)] = cls
+    if terrain_v is None:
+        for iy in range(ny):                        # y-loop keeps peak RAM at one slice
+            M[:, iy, :][foot & (hcol >= iy)] = cls
+    else:
+        # ground follows the terrain EVERYWHERE; buildings extrude from the terrain surface
+        gv = np.clip(terrain_v, 0, ny - 1).astype(np.int32)
+        topcol = np.clip(gv + np.where(foot, hcol, 0), 0, ny - 1)   # terrain (+ building) top
+        for iy in range(ny):
+            M[:, iy, :][topcol >= iy] = cls
     return M
 
 
@@ -232,6 +243,20 @@ def build_3d(verts_vox, tris, shape, cls):
     interior = (M == 0) & ~exterior_air(M)          # enclosed voids -> solid
     M[interior] = cls
     return M, float((M > 0).sum() / max(ref, 1))
+
+
+def load_terrain(path, nx, nz, cell_m):
+    """Load a DEM heightmap (.npy 2-D elevations in metres) and resample to the (nx,nz) grid,
+    returning per-(x,z) GROUND voxel heights (normalised so the lowest point is 0). This is what
+    replaces the flat artificial ground with real terrain — the outdoor 'ground level'. Fetch a
+    DEM for the scene bbox with fetch_terrain_opentopo.py (needs an OpenTopography API key)."""
+    dem = np.load(path).astype(np.float64)
+    if dem.ndim != 2:
+        raise SystemExit(f"--terrain {path}: expected a 2-D heightmap, got shape {dem.shape}")
+    zy, zx = nx / dem.shape[0], nz / dem.shape[1]
+    dem_g = ndimage.zoom(dem, (zy, zx), order=1)[:nx, :nz]
+    dem_g = dem_g - float(np.nanmin(dem_g))                 # lowest point -> 0
+    return np.nan_to_num(dem_g / cell_m).round().astype(np.int32)   # metres -> voxel heights
 
 
 def make_masks(M, cls, tx_band_m, cell_m):
@@ -280,6 +305,10 @@ def main():
                     help="Web-Mercator latitude for horizontal scale correction; 0 disables")
     ap.add_argument("--tx-band", type=float, nargs=2, default=(4.0, 12.0),
                     help="fallback Tx height band (m) if no roofs (default 4 12)")
+    ap.add_argument("--terrain", default=None,
+                    help="DEM heightmap .npy (metres) — outdoor ground follows REAL terrain "
+                         "instead of a flat plane (2.5d mode). Fetch for the scene bbox with "
+                         "fetch_terrain_opentopo.py (needs an OpenTopography API key).")
     ap.add_argument("--no-preview", action="store_true", help="skip the preview PNG")
     args = ap.parse_args()
 
@@ -316,10 +345,23 @@ def main():
               f"(coords alone ~{nvox*12/1e9:.1f} GB). The grid saves fine, but for "
               f"per-Tx engine runs use a coarser --cell (2-3 m) or a cropped tile.")
 
+    terrain_v = None
+    if args.terrain:
+        tpath = Path(args.terrain)
+        if not tpath.is_absolute():
+            tpath = ROOT / tpath
+        terrain_v = load_terrain(tpath, nx, nz, args.cell)
+        extra = int(terrain_v.max())
+        ny += extra                    # grow the domain to fit terrain + tallest building
+        print(f"  terrain: ground follows the DEM · +{extra} voxels ({extra*args.cell:.0f} m relief)"
+              f" · grid Y now {ny}")
+        if args.mode == "3d":
+            print("  ! terrain is applied in 2.5d fill only; --mode 3d ignores it for now.")
+
     verts_vox = (verts - lo) / pitch
     t0 = time.time()
     if args.mode == "2.5d":
-        M = build_25d(verts_vox, tris, (nx, ny, nz), cls)
+        M = build_25d(verts_vox, tris, (nx, ny, nz), cls, terrain_v=terrain_v)
     else:
         M, watertight = build_3d(verts_vox, tris, (nx, ny, nz), cls)
         if watertight < 0.8:
@@ -343,6 +385,7 @@ def main():
         source_obj=src_rel, domain="city_outdoor", mode=args.mode,
         building_class=cls, cell_size_m=round(args.cell, 6), m_per_unit=1.0,
         merc_lat=args.merc_lat, merc_scale=round(merc, 6),
+        terrain=bool(args.terrain), terrain_source=(str(args.terrain) if args.terrain else None),
         grid_shape=[nx, ny, nz],
         origin_units=[round(float(x), 4) for x in lo],
         ceiling_height_m=round(float(span[1]), 3),          # domain top (tallest bldg)
