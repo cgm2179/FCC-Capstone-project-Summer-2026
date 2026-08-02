@@ -567,13 +567,19 @@
                     <option value="interference">Interference &amp; multipath</option>
                     <option value="coverage">Propagation &amp; coverage</option>
                     <option value="sweep">Wavefront sweep (eikonal T)</option>
-                    <optgroup label="RF physics — coming soon">
-                      <option disabled>Path loss</option>
-                      <option disabled>Reflection</option>
-                      <option disabled>Refraction</option>
-                      <option disabled>Diffraction</option>
-                      <option disabled>Absorption</option>
-                      <option disabled>Scattering</option>
+                    <option value="mechlapse">Mechanism time-lapse</option>
+                    <!-- Per-mechanism views read the m_<mech>_*.bin channels written by
+                         export_pl_volume.py --mechanisms. Path loss shows absolute dB;
+                         the rest show each mechanism's share of the total power. -->
+                    <optgroup label="RF physics — per mechanism">
+                      <option value="path_loss">Path loss</option>
+                      <option value="reflection">Reflection</option>
+                      <option value="diffraction">Diffraction</option>
+                      <option value="scattering">Scattering (diffuse)</option>
+                    </optgroup>
+                    <optgroup label="RF physics — module not built">
+                      <option value="refraction" disabled>Refraction</option>
+                      <option value="absorption" disabled>Absorption</option>
                     </optgroup>
                   </select>
                 </label>

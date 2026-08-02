@@ -219,13 +219,7 @@ function onPointerDown(ev) {
   world.addBody(body);
   placed.push({ mesh, body, role: armed, kind: sel.value });
   refreshLists();
-  if (armed === 'tx' && vizMode) {
-    if (vizMode.value === 'radiation') runRadiationPattern();
-    else if (vizMode.value === 'field') runFieldVectors();
-    else if (vizMode.value === 'interference') runInterference();
-    else if (vizMode.value === 'coverage') runStaticField();
-    else if (vizMode.value === 'sweep') runWavefrontSweep();
-  }
+  if (armed === 'tx' && vizMode) runVizMode(vizMode.value);
 }
 
 function refreshLists() {
@@ -301,6 +295,24 @@ function decodeInside() {
   INSIDE3 = a;
   return INSIDE3;
 }
+// The interior mask is addressed with the MANIFEST grid, and a precomputed volume is
+// addressed with its own. Those are the same grid only while sim_assets_3d.js and
+// web/volumes/ come from the same voxelization — they did not once (the assets were a
+// re-voxelization behind), and indexing one array with the other's strides silently
+// rejects almost every voxel instead of failing. So check, and skip the mask rather than
+// mis-address it.
+function insideMaskFor(dims) {
+  const g = MANIFEST.grid_shape;
+  if (!g || !dims || g[0] !== dims[0] || g[1] !== dims[1] || g[2] !== dims[2]) {
+    if (!insideMaskFor._warned) {
+      console.warn('[sim3d] interior mask is ' + (g || []).join('×') + ' but the volume is '
+        + dims.join('×') + ' — mask ignored. Re-run SIM V1 3D/export_web3.py.');
+      insideMaskFor._warned = true;
+    }
+    return null;
+  }
+  return decodeInside();
+}
 const clampi = (v, n) => (v < 0 ? 0 : v >= n ? n - 1 : v);
 
 // ---- Precomputed full-physics volumes (real SceneV3 PL + eikonal T) ----
@@ -367,6 +379,65 @@ function tryLoadVolume(txVox, onReady) {
   });
 }
 
+// ---- Per-mechanism channels (m_<mech>_<txid>.bin + tau_<mech>_<txid>.bin) ----
+// Written by precompute_volumes.py --mech-channels. Each mechanism carries its own dB
+// volume and its own first-arrival time, so the browser can answer "how much of the
+// signal here is reflected?" and play the mechanism time-lapse. Fetched LAZILY, one
+// mechanism at a time: each is the same size as the total PL volume, so loading all of
+// them up front would multiply the initial download by the mechanism count for nothing.
+const MECHS = [
+  { key: 'path_loss',   label: 'Path loss',   color: [1.00, 0.93, 0.42] },  // direct — warm
+  { key: 'reflection',  label: 'Reflection',  color: [0.32, 0.82, 0.94] },  // cyan
+  { key: 'diffraction', label: 'Diffraction', color: [0.93, 0.45, 0.85] },  // magenta
+  { key: 'scattering',  label: 'Scattering',  color: [0.48, 0.88, 0.52] },  // green
+];
+const MECH_BY_KEY = Object.fromEntries(MECHS.map((m) => [m.key, m]));
+
+function mechEntry(vol, mech) {
+  const m = vol && vol.entry && vol.entry.mechanisms;
+  return (m && !Array.isArray(m) && m[mech]) || null;   // pre-v3 wrote a bare name list
+}
+function mechList(vol) { return MECHS.filter((m) => mechEntry(vol, m.key)); }
+
+// Decoded channel cache, keyed txid|mech so switching mechanisms back and forth is free.
+const mechCache = {};
+async function loadMechanism(vol, mech) {
+  const info = mechEntry(vol, mech);
+  if (!info) return null;
+  const key = vol.entry.txid + '|' + mech;
+  if (mechCache[key]) return mechCache[key];
+  const base = 'SIM3D/web/volumes/';
+  const [plBuf, tauBuf, geomBuf] = await Promise.all([
+    fetch(base + info.pl_file).then((r) => r.arrayBuffer()),
+    fetch(base + info.tau_file).then((r) => r.arrayBuffer()),
+    info.tau_geom_file ? fetch(base + info.tau_geom_file).then((r) => r.arrayBuffer()) : null,
+  ]);
+  const bands = vol.entry.mech_bands || vol.bands;
+  const ch = { mech, pl: f16ToF32(new Uint16Array(plBuf)), tau: f16ToF32(new Uint16Array(tauBuf)),
+    dims: vol.dims, bands, t_max_ns: info.t_max_ns, combine_as: info.combine_as,
+    convention: info.tau_convention || 'geometric', info };
+  // Second clock (path loss only): vacuum d/c, so every layer of the time-lapse can be
+  // compared on one convention. See write_mechanism_channels' "TWO CLOCKS" note — the
+  // eikonal charges the direct path for in-wall slowdown and the other mechanisms do not,
+  // so mixing them makes the reflected front appear to beat line of sight.
+  if (geomBuf) { ch.tauGeom = f16ToF32(new Uint16Array(geomBuf)); ch.tauGeomMax = info.tau_geom_max_ns; }
+  mechCache[key] = ch;
+  return ch;
+}
+// Same C-order (band, x, y, z) addressing as plAt — mechanism channels may carry a
+// SUBSET of the total volume's bands, so they index with their own band list.
+function chanAt(ch, band, x, y, z) { const NY = ch.dims[1], NZ = ch.dims[2]; return ch.pl[((band * ch.dims[0] + x) * NY + y) * NZ + z]; }
+function tauAt(ch, x, y, z, useGeom) {
+  const NY = ch.dims[1], NZ = ch.dims[2];
+  const src = (useGeom && ch.tauGeom) ? ch.tauGeom : ch.tau;
+  return src[(x * NY + y) * NZ + z];
+}
+function chanBandIndex(ch, fMHz) {
+  let bi = 0, bd = Infinity;
+  for (let i = 0; i < ch.bands.length; i++) { const d = Math.abs(ch.bands[i] - fMHz); if (d < bd) { bd = d; bi = i; } }
+  return bi;
+}
+
 // PL(dB) from Tx voxel to sample voxel: Motley-Keenan spreading + per-crossing
 // wall loss (R3 runs count once) + Beer-Lambert furniture + satObs. Direct port
 // of pathlossPhysics's inner loop (simulator_tab.js:42-55). L/Ap = dB × band mult.
@@ -401,7 +472,11 @@ function ensureLegend() {
   wrap.appendChild(legendEl);
   return legendEl;
 }
-function showLegend(loMin, loMax) {
+// The ramp always runs weak -> strong left to right, so the caller names the two ENDS
+// rather than a min/max: a path-loss scale (high dB = weak, on the left) and a share
+// scale (high dB = strong, on the right) both read correctly without inverting colours.
+function showLegend(strongLabel, weakLabel, caption, unit) {
+  const loMin = strongLabel, loMax = weakLabel;
   const el = ensureLegend();
   if (!el) return;
   const stops = [];
@@ -409,10 +484,22 @@ function showLegend(loMin, loMax) {
     const c = ramp(i / 6);
     stops.push('rgb(' + Math.round(c[0] * 255) + ',' + Math.round(c[1] * 255) + ',' + Math.round(c[2] * 255) + ') ' + Math.round(i / 6 * 100) + '%');
   }
-  el.innerHTML = '<span class="lg-cap">path loss</span>'
+  el.innerHTML = '<span class="lg-cap">' + (caption || 'path loss') + '</span>'
     + '<span class="lg-lab">' + loMax + '</span>'
     + '<span class="lg-bar" style="background:linear-gradient(90deg,' + stops.join(',') + ')"></span>'
-    + '<span class="lg-lab">' + loMin + ' dB</span>';
+    + '<span class="lg-lab">' + loMin + (unit === undefined ? ' dB' : unit) + '</span>';
+  el.hidden = false;
+}
+// Legend for the mechanism time-lapse: a swatch per mechanism, since colour there is
+// identity (which mechanism) rather than magnitude.
+function showMechLegend(layers) {
+  const el = ensureLegend();
+  if (!el) return;
+  el.innerHTML = '<span class="lg-cap">arrival</span>' + layers.map((L) => {
+    const c = L.color;
+    return '<span class="lg-lab" style="color:rgb(' + Math.round(c[0] * 200) + ','
+      + Math.round(c[1] * 200) + ',' + Math.round(c[2] * 200) + ')">■ ' + L.label + '</span>';
+  }).join('');
   el.hidden = false;
 }
 function hideLegend() { if (legendEl) legendEl.hidden = true; }
@@ -480,7 +567,7 @@ function runStaticField() {
   fieldObj.instanceMatrix.needsUpdate = true;
   if (fieldObj.instanceColor) fieldObj.instanceColor.needsUpdate = true;
   scene.add(fieldObj);
-  showLegend(lossMin, lossMax);
+  showLegend(lossMin, lossMax, 'path loss');
   const srcLabel = vol ? 'full-physics solve (SceneV3 eikonal/Fresnel)'
     : GRID ? 'analytic Motley-Keenan (in-browser)' : 'FSPL (grid unavailable)';
   setStatus('Static field · ' + srcLabel + ' @ ' + freqMHz + ' MHz · ' + samples.length.toLocaleString() + ' samples'
@@ -490,6 +577,110 @@ function disposeField() {
   if (!fieldObj) return;
   scene.remove(fieldObj); fieldObj.geometry.dispose(); fieldObj.material.dispose(); fieldObj = null;
   hideLegend();
+}
+
+// ---- Per-mechanism field: one EM mechanism's own contribution ----
+// Path loss is shown in absolute dB (it IS the level). The other mechanisms are shown as
+// a CONTRIBUTION SHARE, because "reflection = 118 dB" on its own is not interpretable —
+// what matters is how much of the signal standing at that voxel got there by reflecting.
+// share = P_mech / P_total = 10^((PL_total - PL_mech)/10), both already in the cache.
+//
+// The share is coloured in dB, not percent. A mechanism that carries 0.1% of the power
+// still has spatial structure worth seeing, and a linear 0–100% ramp collapses every such
+// mechanism to a single empty colour — on the production scene that left 18 voxels on
+// screen out of 588k. SHARE_DB_LO sets how far down the ramp reaches.
+const SHARE_DB_LO = -50;      // dB below the total power at the same voxel
+const SHARE_DB_HI = 0;        // this mechanism alone accounts for the whole level
+function runMechanismField(mech) {
+  if (!ensureInit()) return;
+  const meta = MECH_BY_KEY[mech];
+  const freqMHz = Number(wfBand && wfBand.value) || 2437;
+  disposeField(); disposeLobes(); disposeVectors(); disposeInterference(); disposeSweep();
+
+  const GRID = decodeGrid();
+  const tx = firstTx();
+  const src = tx ? tx.body.position : center;
+  const D = GDIMS || MANIFEST.grid_shape;
+  const txVox = D ? [clampi(Math.floor(src.x / CELL_M), D[0]),
+                     clampi(Math.floor(src.y / CELL_M), D[1]),
+                     clampi(Math.floor(src.z / CELL_M), D[2])] : null;
+
+  const vol = window.SIM3D_VOLUME || null;
+  if (!vol) {
+    setStatus(meta.label + ' · loading the precomputed volume…');
+    const done = () => { if (vizMode && vizMode.value === mech) runMechanismField(mech); };
+    if (txVox) tryLoadVolume(txVox, done);
+    else loadVolumeIndex().then(() => { const e = volumeIndex[0]; if (e) loadVolume(e).then(done); else noMechData(meta); });
+    return;
+  }
+  if (!mechEntry(vol, mech)) { noMechData(meta, vol); return; }
+
+  loadMechanism(vol, mech).then((ch) => {
+    if (!ch || (vizMode && vizMode.value !== mech)) return;
+    const cbi = chanBandIndex(ch, freqMHz);          // channel bands may be a subset
+    const tbi = nearestBandIndex(vol, ch.bands[cbi]); // matching band in the total volume
+    const isShare = mech !== 'path_loss';
+    const step = Math.max(extent[0], extent[2]) / 46;
+    const inside = insideMaskFor(vol.dims);
+    const NY = vol.dims[1], NZ = vol.dims[2];
+    const samples = [];
+    const lossMin = 45, lossMax = 130;
+    let maxShare = -Infinity;                        // dB, so 0 is a real value not a floor
+    for (let x = step * 0.5; x < extent[0]; x += step)
+      for (let y = step * 0.5; y < extent[1]; y += step)
+        for (let z = step * 0.5; z < extent[2]; z += step) {
+          const ix = clampi(Math.floor(x / CELL_M), vol.dims[0]);
+          const iy = clampi(Math.floor(y / CELL_M), NY);
+          const iz = clampi(Math.floor(z / CELL_M), NZ);
+          if (inside && !inside[(ix * NY + iy) * NZ + iz]) continue;
+          const plM = chanAt(ch, cbi, ix, iy, iz);
+          if (!isFinite(plM) || plM >= 65504) continue;
+          let t;
+          if (isShare) {
+            const plT = plAt(vol, tbi, ix, iy, iz);
+            // >1 is physically possible where mechanisms interfere destructively; clamp
+            // for display but keep the raw peak for the status line.
+            const shareDb = plT - plM;
+            if (shareDb > maxShare) maxShare = shareDb;
+            if (shareDb < SHARE_DB_LO) continue;     // drop where this mechanism is absent
+            t = (Math.min(shareDb, SHARE_DB_HI) - SHARE_DB_LO) / (SHARE_DB_HI - SHARE_DB_LO);
+          } else {
+            t = 1 - Math.min(1, Math.max(0, (plM - lossMin) / (lossMax - lossMin)));
+            if (t < 0.12) continue;
+          }
+          samples.push([x, y, z, t]);
+        }
+
+    const cube = new THREE.BoxGeometry(step * 0.42, step * 0.42, step * 0.42);
+    const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false });
+    fieldObj = new THREE.InstancedMesh(cube, mat, samples.length);
+    const dummy = new THREE.Object3D(), col = new THREE.Color();
+    for (let i = 0; i < samples.length; i++) {
+      const s = samples[i];
+      dummy.position.set(s[0], s[1], s[2]); dummy.scale.setScalar(0.5 + s[3] * 1.6); dummy.updateMatrix();
+      fieldObj.setMatrixAt(i, dummy.matrix);
+      const c = ramp(s[3]); col.setRGB(c[0], c[1], c[2]); fieldObj.setColorAt(i, col);
+    }
+    fieldObj.instanceMatrix.needsUpdate = true;
+    if (fieldObj.instanceColor) fieldObj.instanceColor.needsUpdate = true;
+    scene.add(fieldObj);
+
+    if (isShare) showLegend(SHARE_DB_HI, SHARE_DB_LO, meta.label + ' share', ' dB');
+    else showLegend(lossMin, lossMax, 'path loss');
+    setStatus(meta.label + ' · ' + (isShare
+      ? 'share of the total power at each voxel, in dB (0 = this mechanism carries all of '
+        + 'it; peak ' + maxShare.toFixed(1) + ' dB = ' + (Math.pow(10, maxShare / 10) * 100).toFixed(0) + ' %)'
+      : 'absolute path loss, this mechanism alone')
+      + ' @ ' + Math.round(ch.bands[cbi]) + ' MHz · ' + samples.length.toLocaleString() + ' voxels · '
+      + (ch.combine_as === 'incoherent' ? 'summed as power (uncorrelated)' : 'coherent complex field')
+      + ' · first arrival ≤ ' + ch.t_max_ns.toFixed(0) + ' ns.');
+  });
+}
+function noMechData(meta, vol) {
+  const have = vol ? mechList(vol).map((m) => m.label).join(', ') : '';
+  setStatus(meta.label + ' · no mechanism channel in the cached volume'
+    + (have ? ' (this Tx has: ' + have + ')' : '')
+    + ' — re-export with `python "SIM V1 3D/export_pl_volume.py" --mechanisms path_loss,reflection,diffraction,scattering`.');
 }
 
 // ---- Radiation pattern: analytic gain lobes at each Tx (closed-form by kind) ----
@@ -824,18 +1015,49 @@ function advanceInterference(dt) {
   if (S.mesh.instanceColor) S.mesh.instanceColor.needsUpdate = true;
 }
 
-// ---- Wavefront sweep: animate the eikonal T volume by scrubbing a threshold τ ----
+// ---- Wavefront sweep: animate an arrival-time volume by scrubbing a threshold τ ----
 // Voxels with T ≤ τ are "lit"; the shell T ∈ [τ−Δτ, τ+Δτ] is the moving front. It
 // bends around corners and lags inside walls because T is the eikonal first-arrival
 // (no per-frame solve, no frame stack). Needs a precomputed T volume.
+//
+// The state holds a LIST of layers, all sharing one voxel lattice and one τ clock. With a
+// single layer this is the eikonal sweep; with one layer per mechanism it is the mechanism
+// time-lapse, where each front moves on its own tau channel — so the direct arrives first,
+// the reflected after it, the diffracted after that and the diffuse halo last. Same clock,
+// same scrub wiring, no second animation path.
 let sweepState = null;
 function disposeSweep() {
   if (!sweepState) return;
-  scene.remove(sweepState.mesh);
-  sweepState.mesh.geometry.dispose(); sweepState.mesh.material.dispose();
+  for (const L of sweepState.layers) {
+    scene.remove(L.mesh); L.mesh.geometry.dispose(); L.mesh.material.dispose();
+  }
   sweepState = null;
   if (animCtl) animCtl.hidden = true;
 }
+
+// Voxel lattice shared by every sweep layer: subsampled to ~6k instances so the InstancedMesh
+// stays cheap, and restricted to interior voxels. Returns { pos, idx } (idx = grid indices).
+function sweepLattice(vol) {
+  const inside = insideMaskFor(vol.dims);
+  const NX = vol.dims[0], NY = vol.dims[1], NZ = vol.dims[2];
+  const frac = inside ? 0.45 : 1.0, sy = NY > 6 ? 2 : 1;
+  const sxz = Math.max(2, Math.round(Math.sqrt(NX * NZ * (NY / sy) * frac / 6000)));
+  const pos = [], idx = [];
+  for (let ix = 0; ix < NX; ix += sxz)
+    for (let iy = 0; iy < NY; iy += sy)
+      for (let iz = 0; iz < NZ; iz += sxz) {
+        if (inside && !inside[(ix * NY + iy) * NZ + iz]) continue;
+        pos.push((ix + 0.5) * CELL_M, (iy + 0.5) * CELL_M, (iz + 0.5) * CELL_M);
+        idx.push(ix, iy, iz);
+      }
+  return { pos: new Float32Array(pos), idx: new Int32Array(idx), count: idx.length / 3 };
+}
+function makeSweepMesh(count) {
+  const boxSz = Math.max(extent[0], extent[2]) / 46 * 0.6;
+  return new THREE.InstancedMesh(new THREE.BoxGeometry(boxSz, boxSz, boxSz),
+    new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.72, depthWrite: false }), count);
+}
+
 function runWavefrontSweep() {
   if (!ensureInit()) return;
   disposeSweep(); disposeField(); disposeLobes(); disposeVectors(); disposeInterference();
@@ -847,56 +1069,137 @@ function runWavefrontSweep() {
                       clampi(Math.floor(tx.body.position.z / CELL_M), D[2])] : null;
   const vol = window.SIM3D_VOLUME || null;                  // sweep uses any loaded T volume
   if (!vol) {
-    setStatus('Wavefront sweep · loading precomputed T volume… (needs `make volumes-3d`; falls back to a message if none).');
+    setStatus('Wavefront sweep · loading precomputed T volume…');
     const done = () => { if (vizMode && vizMode.value === 'sweep') runWavefrontSweep(); };
     if (txVox) tryLoadVolume(txVox, done);
-    else loadVolumeIndex().then(() => { const e = volumeIndex[0]; if (e) loadVolume(e).then(done); else setStatus('Wavefront sweep · no precomputed T volume found — run `make volumes-3d`.'); });
+    else loadVolumeIndex().then(() => { const e = volumeIndex[0]; if (e) loadVolume(e).then(done); else setStatus('Wavefront sweep · no precomputed T volume found — run `python "SIM V1 3D/export_pl_volume.py"`.'); });
     return;
   }
-  const inside = decodeInside();
-  const NX = vol.dims[0], NY = vol.dims[1], NZ = vol.dims[2];
-  const frac = inside ? 0.45 : 1.0, sy = NY > 6 ? 2 : 1;
-  const sxz = Math.max(2, Math.round(Math.sqrt(NX * NZ * (NY / sy) * frac / 6000)));
-  const at = (x, y, z) => inside[(x * NY + y) * NZ + z];
-  const pos = [], tNs = [];
-  for (let ix = 0; ix < NX; ix += sxz)
-    for (let iy = 0; iy < NY; iy += sy)
-      for (let iz = 0; iz < NZ; iz += sxz) {
-        if (inside && !at(ix, iy, iz)) continue;
-        const T = tAt(vol, ix, iy, iz);
-        if (!(T < vol.t_max_ns + 1)) continue;               // drop unreachable (65504 sentinel)
-        pos.push((ix + 0.5) * CELL_M, (iy + 0.5) * CELL_M, (iz + 0.5) * CELL_M); tNs.push(T);
-      }
-  const count = tNs.length;
-  const boxSz = Math.max(extent[0], extent[2]) / 46 * 0.6;
-  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(boxSz, boxSz, boxSz),
-    new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.72, depthWrite: false }), count);
-  sweepState = { mesh, count, tNs: new Float32Array(tNs), basePos: new Float32Array(pos),
+  const lat = sweepLattice(vol);
+  const tNs = new Float32Array(lat.count);
+  let live = 0;
+  for (let i = 0; i < lat.count; i++) {
+    const T = tAt(vol, lat.idx[i * 3], lat.idx[i * 3 + 1], lat.idx[i * 3 + 2]);
+    tNs[i] = (T < vol.t_max_ns + 1) ? T : Infinity;         // 65504 sentinel = unreachable
+    if (isFinite(tNs[i])) live++;
+  }
+  const mesh = makeSweepMesh(lat.count);
+  sweepState = { mode: 'eikonal', count: lat.count, basePos: lat.pos,
+    layers: [{ key: 'eikonal', label: 'first arrival', color: null, tNs, mesh }],
     tMax: vol.t_max_ns, tau: 0, dTau: vol.t_max_ns * 0.06, playing: true };
   scene.add(mesh);
+  startSweepUI();
+  hideLegend();
+  setStatus('Wavefront sweep · eikonal first-arrival T · ' + live.toLocaleString() +
+    ' voxels · scrub / Play to sweep the front (bends around corners, lags in walls). T_max ≈ ' + vol.t_max_ns.toFixed(0) + ' ns.');
+}
+
+// ---- Mechanism time-lapse: every mechanism's front on one clock ----
+// This is the payoff of the per-mechanism tau channels. Each mechanism gets its own
+// InstancedMesh driven by its own first-arrival volume, all sharing the τ scrub, so the
+// SEQUENCE is visible: direct, then specular reflections, then the diffracted field
+// creeping around corners, then the diffuse halo filling in behind.
+function runMechanismTimeLapse() {
+  if (!ensureInit()) return;
+  disposeSweep(); disposeField(); disposeLobes(); disposeVectors(); disposeInterference();
+  if (waveObj) { scene.remove(waveObj); waveObj.geometry.dispose(); waveObj.material.dispose(); waveObj = null; }
+
+  const tx = firstTx();
+  const D = GDIMS || MANIFEST.grid_shape;
+  const txVox = (tx && D) ? [clampi(Math.floor(tx.body.position.x / CELL_M), D[0]),
+                             clampi(Math.floor(tx.body.position.y / CELL_M), D[1]),
+                             clampi(Math.floor(tx.body.position.z / CELL_M), D[2])] : null;
+  const vol = window.SIM3D_VOLUME || null;
+  if (!vol) {
+    setStatus('Mechanism time-lapse · loading the precomputed volume…');
+    const done = () => { if (vizMode && vizMode.value === 'mechlapse') runMechanismTimeLapse(); };
+    if (txVox) tryLoadVolume(txVox, done);
+    else loadVolumeIndex().then(() => { const e = volumeIndex[0]; if (e) loadVolume(e).then(done); else setStatus('Mechanism time-lapse · no precomputed volume found.'); });
+    return;
+  }
+  const want = mechList(vol);
+  if (!want.length) { noMechData({ label: 'Mechanism time-lapse' }, vol); return; }
+
+  setStatus('Mechanism time-lapse · loading ' + want.length + ' arrival-time channels…');
+  Promise.all(want.map((m) => loadMechanism(vol, m.key))).then((chans) => {
+    if (vizMode && vizMode.value !== 'mechlapse') return;
+    const lat = sweepLattice(vol);
+    const layers = [];
+    let tMax = 0;
+    for (let li = 0; li < chans.length; li++) {
+      const ch = chans[li]; if (!ch) continue;
+      const tNs = new Float32Array(lat.count);
+      let live = 0;
+      for (let i = 0; i < lat.count; i++) {
+        // `true` = prefer the geometric clock, so all layers share one convention
+        const T = tauAt(ch, lat.idx[i * 3], lat.idx[i * 3 + 1], lat.idx[i * 3 + 2], true);
+        tNs[i] = (T < 65504 - 1) ? T : Infinity;
+        if (isFinite(tNs[i])) { live++; if (tNs[i] > tMax) tMax = tNs[i]; }
+      }
+      if (!live) continue;                        // mechanism reaches nothing here
+      const mesh = makeSweepMesh(lat.count);
+      layers.push({ key: want[li].key, label: want[li].label, color: want[li].color,
+        tNs, mesh, live });
+      scene.add(mesh);
+    }
+    if (!layers.length) { noMechData({ label: 'Mechanism time-lapse' }, vol); return; }
+    // Order by median arrival so the legend reads in the order the fronts actually appear.
+    layers.sort((a, b) => medianFinite(a.tNs) - medianFinite(b.tNs));
+    sweepState = { mode: 'mechanism', count: lat.count, basePos: lat.pos, layers,
+      tMax: tMax || vol.t_max_ns, tau: 0, dTau: (tMax || vol.t_max_ns) * 0.05, playing: true };
+    startSweepUI();
+    showMechLegend(layers);
+    const mixed = chans.some((c) => c && c.convention === 'eikonal' && !c.tauGeom);
+    setStatus('Mechanism time-lapse · ' + layers.map((L) =>
+      L.label + ' ' + medianFinite(L.tNs).toFixed(0) + ' ns').join(' → ')
+      + ' (median arrival) · scrub / Play to watch the fronts arrive in sequence. '
+      + (mixed
+        ? 'NOTE: the direct path is on the eikonal clock (in-wall slowdown) and the others '
+          + 'on vacuum path length, so the order understates the direct field — re-export '
+          + 'to get the matched geometric clock.'
+        : 'Clock: vacuum path length for every mechanism, so this is a like-for-like '
+          + 'comparison; the Wavefront sweep view shows the true eikonal arrival with '
+          + 'in-wall lag.'));
+  });
+}
+function medianFinite(a) {
+  const v = [];
+  for (let i = 0; i < a.length; i++) if (isFinite(a[i])) v.push(a[i]);
+  if (!v.length) return Infinity;
+  v.sort((x, y) => x - y);
+  return v[v.length >> 1];
+}
+function startSweepUI() {
   if (animCtl) animCtl.hidden = false;
   if (animPlay) animPlay.textContent = 'Pause';
   if (animScrub) animScrub.value = '0';
   setSweepTau(0);
-  hideLegend();
-  setStatus('Wavefront sweep · eikonal first-arrival T · ' + count.toLocaleString() +
-    ' voxels · scrub / Play to sweep the front (bends around corners, lags in walls). T_max ≈ ' + vol.t_max_ns.toFixed(0) + ' ns.');
 }
+
 function setSweepTau(tau) {
   const S = sweepState; if (!S) return;
   S.tau = tau;
   const lo = tau - S.dTau, hi = tau + S.dTau;
-  for (let i = 0; i < S.count; i++) {
-    const T = S.tNs[i]; let scale, r, g, b;
-    if (T > hi) { scale = 0.001; r = g = b = 0; }             // not yet reached → hidden
-    else if (T >= lo) { scale = 1.4; r = 1.0; g = 0.95; b = 0.3; } // the moving front → bright
-    else { scale = 0.55; const c = ramp(0.25 + 0.4 * (1 - T / S.tMax)); r = c[0] * 0.7; g = c[1] * 0.7; b = c[2] * 0.7; }
-    _sdummy.position.set(S.basePos[i * 3], S.basePos[i * 3 + 1], S.basePos[i * 3 + 2]);
-    _sdummy.scale.setScalar(scale); _sdummy.updateMatrix(); S.mesh.setMatrixAt(i, _sdummy.matrix);
-    _scol.setRGB(r, g, b); S.mesh.setColorAt(i, _scol);
+  for (const L of S.layers) {
+    for (let i = 0; i < S.count; i++) {
+      const T = L.tNs[i]; let scale, r, g, b;
+      if (!(T <= hi)) { scale = 0.001; r = g = b = 0; }        // not yet reached (or ∞) → hidden
+      else if (T >= lo) {                                      // the moving front → bright
+        scale = 1.4;
+        if (L.color) { r = L.color[0]; g = L.color[1]; b = L.color[2]; }
+        else { r = 1.0; g = 0.95; b = 0.3; }
+      } else {                                                 // already passed → dim trail
+        scale = 0.55;
+        if (L.color) { r = L.color[0] * 0.32; g = L.color[1] * 0.32; b = L.color[2] * 0.32; }
+        else { const c = ramp(0.25 + 0.4 * (1 - T / S.tMax)); r = c[0] * 0.7; g = c[1] * 0.7; b = c[2] * 0.7; }
+      }
+      _sdummy.position.set(S.basePos[i * 3], S.basePos[i * 3 + 1], S.basePos[i * 3 + 2]);
+      _sdummy.scale.setScalar(scale); _sdummy.updateMatrix(); L.mesh.setMatrixAt(i, _sdummy.matrix);
+      _scol.setRGB(r, g, b); L.mesh.setColorAt(i, _scol);
+    }
+    L.mesh.instanceMatrix.needsUpdate = true;
+    if (L.mesh.instanceColor) L.mesh.instanceColor.needsUpdate = true;
   }
-  S.mesh.instanceMatrix.needsUpdate = true;
-  if (S.mesh.instanceColor) S.mesh.instanceColor.needsUpdate = true;
 }
 const _sdummy = new THREE.Object3D(), _scol = new THREE.Color();
 function advanceSweep(dt) {
@@ -952,26 +1255,31 @@ if (animScrub) animScrub.addEventListener('input', () => {
   if (animPlay) animPlay.textContent = 'Play';
   u.r = (Number(animScrub.value) / 1000) * u.rMax; applyWave();
 });
-if (vizMode) vizMode.addEventListener('change', () => {
-  if (vizMode.value === 'field') { runFieldVectors(); return; }
-  if (vizMode.value === 'radiation') { runRadiationPattern(); return; }
-  if (vizMode.value === 'interference') { runInterference(); return; }
-  if (vizMode.value === 'coverage') { runStaticField(); return; }
-  if (vizMode.value === 'sweep') { runWavefrontSweep(); return; }
-  disposeLobes(); disposeVectors(); disposeInterference(); disposeSweep();
-  setStatus('Visualize: ' + vizMode.options[vizMode.selectedIndex].text +
-    ' — field, radiation, interference, coverage & wavefront sweep are live; other modes arrive with the physics engine.');
-});
+// Central dispatch — every viz mode routes through here so the Tx-placement and band
+// handlers below stay a one-liner instead of repeating the same if-chain three times.
+function runVizMode(mode) {
+  if (mode === 'field') { runFieldVectors(); return; }
+  if (mode === 'radiation') { runRadiationPattern(); return; }
+  if (mode === 'interference') { runInterference(); return; }
+  if (mode === 'coverage') { runStaticField(); return; }
+  if (mode === 'sweep') { runWavefrontSweep(); return; }
+  if (mode === 'mechlapse') { runMechanismTimeLapse(); return; }
+  if (MECH_BY_KEY[mode]) { runMechanismField(mode); return; }
+  disposeField(); disposeLobes(); disposeVectors(); disposeInterference(); disposeSweep();
+  setStatus('Visualize: ' + (vizMode ? vizMode.options[vizMode.selectedIndex].text : mode) +
+    ' — this mechanism module is not built yet (Refraction_3D.py / Absorption_3D.py are still stubs).');
+}
+if (vizMode) vizMode.addEventListener('change', () => runVizMode(vizMode.value));
 // changing the transmitter antenna type live-updates the lobe when in radiation mode
 if (txType) txType.addEventListener('change', () => {
   if (vizMode && vizMode.value === 'radiation') runRadiationPattern();
 });
-// changing the band re-runs the oscillating field (k and amplitude depend on it)
+// changing the band re-runs anything whose result depends on frequency (the oscillating
+// field, the coverage map, and the per-mechanism views, which read a band channel)
 if (wfBand) wfBand.addEventListener('change', () => {
   if (!vizMode) return;
-  if (vizMode.value === 'field') runFieldVectors();
-  else if (vizMode.value === 'interference') runInterference();
-  else if (vizMode.value === 'coverage') runStaticField();
+  const m = vizMode.value;
+  if (m === 'field' || m === 'interference' || m === 'coverage' || MECH_BY_KEY[m]) runVizMode(m);
 });
 
 function onResize() {
@@ -997,4 +1305,8 @@ window.__sim3d = {
   get lobe() { return lobeGroup; }, get vectors() { return vectorState; },
   get interference() { return interferenceState; }, get sweep() { return sweepState; },
   get volume() { return window.SIM3D_VOLUME || null; }, placed,
+  // mechanism-channel handles (verification: which channels a cached Tx actually carries)
+  runVizMode, loadVolumeIndex, loadVolume, loadMechanism, mechList, chanAt, tauAt,
+  get mechChannels() { return mechCache; },
+  get volumeIndex() { return volumeIndex; },
 };

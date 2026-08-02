@@ -135,17 +135,40 @@ be gated on eikonal reachability; phase falls back to d/c there.
   Supplies the delay-spread tail that the scanner's unused `Ref Signal - Delay Spread`
   column (5,951 samples) can validate. numpy + torch backends. **This is the mechanism that
   genuinely wants the A100** (O(n_patches × n_rx)).
-- ⬜ mechanism channels in `export_pl_volume.py --mechanisms` · enable the six `viz3dMode`
-  options · mechanism time-lapse
-- ⬜ `Refraction_3D.py`, `Absorption_3D.py` (both cheap, local)
+- ✅ **mechanism channels + the browser demo** — `export_pl_volume.py --mechanisms` and
+  `precompute_volumes.py --mech-channels` write `m_<mech>_<txid>.bin` (dB) and
+  `tau_<mech>_<txid>.bin` (ns) beside the total volume; `simulation3d.js` gained
+  `loadMechanism`/`chanAt`/`runMechanismField`/`runMechanismTimeLapse`; the four implemented
+  mechanisms are live in `viz3dMode` plus a **mechanism time-lapse** entry.
+  Per-mechanism colour is the **contribution share in dB** against the total, not percent —
+  a mechanism carrying 0.1 % of the power still has structure worth seeing, and a linear
+  0–100 % ramp collapsed it to 18 voxels out of 588 k on the production scene.
+- ⬜ `Refraction_3D.py`, `Absorption_3D.py` (both cheap, local) — until these land their two
+  `viz3dMode` options stay disabled and honestly labelled "module not built".
 
-`Diffraction_3D` → `Reflection_3D` → mechanism channels in `export_pl_volume.py --mechanisms` →
-enable the six disabled `viz3dMode` options → **mechanism time-lapse**.
+The time-lapse reuses the sweep's clock and scrub wiring; `sweepState` now holds a *list* of
+layers (one instanced mesh per mechanism) instead of a single mesh, so the eikonal sweep is
+just the one-layer case. No new render code, no second animation path.
 
-The time-lapse reuses `runWavefrontSweep`/`setSweepTau` unchanged: feed each mechanism's `tau_first`
-as another channel, one instanced mesh per mechanism. The reflected front genuinely arrives after the
-direct, the diffracted after that, the diffuse halo last — so playing them together *is* the
-mechanism time-lapse, with no new render code.
+**Two arrival-time clocks, on purpose.** `path_loss` reports the eikonal τ (charged for
+in-wall slowdown, ~+6 ns median on this scene); reflection, diffraction and scattering report
+vacuum path length. Mixing them put the direct front LAST in 99 % of interior voxels. So
+`path_loss` also exports `tau_geom_*.bin` (d/c) and the time-lapse runs every layer on that
+one convention — an honest path-length comparison in which direct ≤ reflected ≤ diffracted
+holds by construction. The **Wavefront sweep** view keeps the true eikonal arrival.
+Charging the other three mechanisms for in-wall slowdown is the real fix and is a physics
+change, not an export change.
+
+**Two findings the mechanism views surfaced** (both pre-existing, neither introduced here):
+1. *Diffuse scattering dominates the coverage map.* At tx_66-5-54 / 2442 MHz the direct field's
+   median interior PL is **302 dB** while the diffuse channel's is **103 dB** — diffuse beats
+   direct in **94.6 %** of interior voxels. The outbound patch→Rx leg is charged **no** wall
+   loss (`Scattering_3D._accumulate_*` applies `obs_tx` to the inbound leg only), so diffuse
+   power leaks through structure unattenuated. The direct path meanwhile has no saturating
+   obstruction model (the 2D engine's `satObs`), so it runs away to 300–500 dB.
+2. *The browser assets were a re-voxelization behind.* `sim_assets_3d.js` / `collision_3d.js`
+   still described the pre-M0.4 262×11×118 grid while the volumes were 262×17×132. Both are
+   regenerated; `insideMaskFor()` now refuses to index one grid with the other's strides.
 
 ### M3 — Four modes + offload/cache  ⬜
 Remaining mechanisms (`Refraction`, `Absorption`, `Scattering`) · mode selector ·

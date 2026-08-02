@@ -11,6 +11,10 @@
 # Outdoor city voxel grids — ~347 MB each; regenerate with voxelize_city.py
 Physics Engine/3D Map Physics/SIM V1 3D/city/
 
+# Diffraction relay cache — ~376 MB at 16 edges; rebuilt automatically by
+# precompute_volumes.py on first run (~75 s), then reused by every transmitter.
+Physics Engine/3D Map Physics/SIM V1 3D/cache/
+
 # ---- OS / Python junk ----
 __pycache__/
 *.pyc
