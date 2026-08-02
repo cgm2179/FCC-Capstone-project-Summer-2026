@@ -616,6 +616,17 @@
                   <input type="range" id="disp3dHeight" min="0" max="100" value="50" disabled>
                 </div>
                 <div class="sim-note" id="disp3dHeightVal">whole volume</div>
+                <!-- Geometry view (Phase A): the level slider above also cuts the building, and
+                     the model can be rendered as a smooth surface instead of voxel cubes. -->
+                <label class="sim3d-cbx"><input type="checkbox" id="disp3dClipGeom"> Cut model at this level</label>
+                <label class="sim3d-field">Cut direction
+                  <select id="disp3dClipAxis">
+                    <option value="y">Horizontal — ground ↔ roof</option>
+                    <option value="x">Vertical — along X</option>
+                    <option value="z">Vertical — along Z</option>
+                  </select>
+                </label>
+                <label class="sim3d-cbx"><input type="checkbox" id="disp3dSmooth"> Smooth surface (rebuild from voxels)</label>
                 <label class="sim3d-field">Transmit EIRP
                   <span class="sim3d-cell"><input type="number" id="disp3dEirp" min="-10" max="60" step="1" value="20"> dBm</span>
                 </label>

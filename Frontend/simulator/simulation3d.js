@@ -64,6 +64,9 @@ const dispScale     = document.getElementById('disp3dScale');
 const dispClasses   = document.getElementById('disp3dClasses');
 const dispThresh    = document.getElementById('disp3dThresh');
 const dispThreshVal = document.getElementById('disp3dThreshVal');
+const dispClipGeom  = document.getElementById('disp3dClipGeom');
+const dispClipAxis  = document.getElementById('disp3dClipAxis');
+const dispSmooth    = document.getElementById('disp3dSmooth');
 const metaEl        = document.getElementById('sim3dMeta');
 const probeEl       = document.getElementById('sim3dProbe');
 const probeBody     = document.getElementById('sim3dProbeBody');
@@ -75,7 +78,11 @@ function setStatus(msg) { if (statusEl) statusEl.textContent = msg || ''; }
 // How the solved volume is READ — never the physics. `plane`/`sliceY` cut a horizontal
 // prediction plane; `eirpDbm` turns path loss into RSRP so `classes`/`fixed` can show
 // received power in dBm the way WRAP's coverage view and the 2D sim do.
-const DISPLAY = { plane: false, sliceY: null, eirpDbm: 20, scale: 'auto', classes: false, threshDbm: -85 };
+const DISPLAY = { plane: false, sliceY: null, eirpDbm: 20, scale: 'auto', classes: false, threshDbm: -85,
+  // Geometry view (Phase A): cut the building at the level plane (clipGeom) along clipAxis
+  // ('y' = horizontal ground↔roof, 'x'/'z' = vertical elevation), and render the building as a
+  // smooth marching-cubes surface (smooth) instead of voxel cubes. Rendering only — cache-safe.
+  clipGeom: false, clipAxis: 'y', smooth: false };
 const RSRP_LO = -100, RSRP_HI = -40;                 // fixed received-power display window (dBm)
 const COV_GOOD = [0.13, 0.70, 0.29], COV_MARG = [0.98, 0.75, 0.18], COV_DEAD = [0.86, 0.28, 0.24];
 let lastSolveMs = 0;                                  // wall time of the last field solve
@@ -134,6 +141,7 @@ function ensureInit() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(w, h);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.localClippingEnabled = true;                    // per-material clip planes (geometry slice)
   viewport.appendChild(renderer.domElement);
   renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
@@ -222,6 +230,9 @@ const DEFAULT_STYLE = { opacity: 0.55, roughness: 0.9, metalness: 0.04 };
 // grey — you cannot make glass translucent and concrete solid in the same draw call.
 // Six draw calls is nothing next to being able to see what the RF engine is solving on.
 let wallMeshes = [];
+let surfaceMeshes = [];              // smooth marching-cubes surface (A2), one mesh per class
+const GEOM_CLIP = [];                // active geometry clip planes (0 or 1); shared by all meshes
+let clipPlane = null;                // the THREE.Plane cutting the building at the level
 let buildMs = 0;
 
 // What the tab says once the scene is up. The material breakdown is the quickest way to
@@ -267,6 +278,7 @@ function buildBuilding() {
       transparent: st.opacity < 1, opacity: st.opacity,
       roughness: st.roughness, metalness: st.metalness,
       depthWrite: st.opacity > 0.6,
+      clippingPlanes: GEOM_CLIP,          // geometry slice (empty until the cut is enabled)
     });
     const mesh = new THREE.InstancedMesh(geo, mat, idxs.length);
     for (let k = 0; k < idxs.length; k++) {
@@ -1019,23 +1031,63 @@ if (probeClose) probeClose.addEventListener('click', hideProbe);
 // ---- Display-control wiring ----
 function reRunViz() { if (vizMode) runVizMode(vizMode.value); }
 function heightFromSlider() { return extent ? (Number(dispHeight.value) / 100) * extent[1] : null; }
+function sliderFrac() { return dispHeight ? Number(dispHeight.value) / 100 : 0.5; }
+function syncHeightEnabled() { if (dispHeight) dispHeight.disabled = !(DISPLAY.plane || DISPLAY.clipGeom); }
 function updateHeightLabel() {
   if (!dispHeightVal) return;
-  dispHeightVal.textContent = (DISPLAY.plane && DISPLAY.sliceY != null)
-    ? 'y = ' + DISPLAY.sliceY.toFixed(1) + ' m' : 'whole volume';
+  const bits = [];
+  if (DISPLAY.plane && DISPLAY.sliceY != null) bits.push('field y = ' + DISPLAY.sliceY.toFixed(1) + ' m');
+  if (DISPLAY.clipGeom) bits.push('cut ' + DISPLAY.clipAxis + ' = ' + (sliderFrac() * clipExtent()).toFixed(1) + ' m');
+  dispHeightVal.textContent = bits.length ? bits.join(' · ') : 'whole volume';
 }
+
+// ---- Geometry cut plane (A1): cut the building at the level — horizontal (ground↔roof) or vertical ----
+function clipExtent() {
+  return !extent ? 1 : DISPLAY.clipAxis === 'x' ? extent[0] : DISPLAY.clipAxis === 'z' ? extent[2] : extent[1];
+}
+function updateClipPlane() {
+  if (!extent) return;
+  if (!clipPlane) clipPlane = new THREE.Plane();
+  const ax = DISPLAY.clipAxis;
+  const n = ax === 'x' ? new THREE.Vector3(-1, 0, 0)
+          : ax === 'z' ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, -1, 0);
+  clipPlane.set(n, sliderFrac() * clipExtent());           // keep the part below / before the level
+}
+function applyGeomClip() {
+  // GEOM_CLIP holds 0 or 1 planes; every building/field material references it, so changing the
+  // COUNT needs a shader recompile (needsUpdate) — moving the plane is a free per-frame uniform.
+  GEOM_CLIP.length = 0;
+  if (DISPLAY.clipGeom) { updateClipPlane(); GEOM_CLIP.push(clipPlane); }
+  for (const m of wallMeshes) if (m.material) m.material.needsUpdate = true;
+  for (const m of surfaceMeshes) if (m.material) m.material.needsUpdate = true;
+  if (fieldObj && fieldObj.material) fieldObj.material.needsUpdate = true;
+}
+
 if (dispPlaneBtn) dispPlaneBtn.addEventListener('click', () => {
   DISPLAY.plane = !DISPLAY.plane;
   dispPlaneBtn.textContent = DISPLAY.plane ? 'Plane' : 'Full volume';
   dispPlaneBtn.classList.toggle('active', DISPLAY.plane);
-  if (dispHeight) dispHeight.disabled = !DISPLAY.plane;
+  syncHeightEnabled();
   DISPLAY.sliceY = DISPLAY.plane ? heightFromSlider() : null;
   updateHeightLabel(); reRunViz(); refreshMeta();
 });
 if (dispHeight) {
-  dispHeight.addEventListener('input', () => { DISPLAY.sliceY = heightFromSlider(); updateHeightLabel(); refreshMeta(); });
-  dispHeight.addEventListener('change', reRunViz);            // re-solve on release, not per pixel
+  dispHeight.addEventListener('input', () => {
+    if (DISPLAY.plane) DISPLAY.sliceY = heightFromSlider();
+    if (DISPLAY.clipGeom) updateClipPlane();               // live: moving the cut plane is cheap
+    updateHeightLabel(); refreshMeta();
+  });
+  dispHeight.addEventListener('change', () => { if (DISPLAY.plane) reRunViz(); });   // re-solve field on release
 }
+if (dispClipGeom) dispClipGeom.addEventListener('change', () => {
+  DISPLAY.clipGeom = dispClipGeom.checked;
+  syncHeightEnabled(); applyGeomClip(); updateHeightLabel(); refreshMeta();
+});
+if (dispClipAxis) dispClipAxis.addEventListener('change', () => {
+  DISPLAY.clipAxis = dispClipAxis.value;
+  if (DISPLAY.clipGeom) updateClipPlane();
+  updateHeightLabel(); refreshMeta();
+});
 if (dispEirp) dispEirp.addEventListener('change', () => { DISPLAY.eirpDbm = Number(dispEirp.value) || 20; reRunViz(); });
 if (dispScale) dispScale.addEventListener('change', () => { DISPLAY.scale = dispScale.value; reRunViz(); });
 if (dispClasses) dispClasses.addEventListener('change', () => { DISPLAY.classes = dispClasses.checked; reRunViz(); });
@@ -1104,7 +1156,7 @@ function runStaticField() {
   // Instanced cubes (not THREE.Points — the WebGPU backend can't size points):
   // one small cube per sample, coloured/sized by the Display settings.
   const cube = new THREE.BoxGeometry(g * 0.42, g * 0.42, g * 0.42);
-  const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false });
+  const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, clippingPlanes: GEOM_CLIP });
   fieldObj = new THREE.InstancedMesh(cube, mat, samples.length);
   const dummy = new THREE.Object3D(), col = new THREE.Color();
   for (let i = 0; i < samples.length; i++) {
@@ -1218,7 +1270,7 @@ function runMechanismField(mech) {
         }
 
     const cube = new THREE.BoxGeometry(g * 0.42, g * 0.42, g * 0.42);
-    const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false });
+    const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, clippingPlanes: GEOM_CLIP });
     fieldObj = new THREE.InstancedMesh(cube, mat, samples.length);
     const dummy = new THREE.Object3D(), col = new THREE.Color();
     for (let i = 0; i < samples.length; i++) {
