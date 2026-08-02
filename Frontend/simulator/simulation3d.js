@@ -20,6 +20,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as CANNON from 'cannon-es';
+import { smoothSurfaceForClass } from './smooth_surface.js';   // A2: smooth surface from the voxels
 
 const COLLISION = window.SIM3D_COLLISION;
 const CATALOG   = window.SIM3D_ANTENNA_CATALOG;
@@ -311,6 +312,68 @@ function buildBuilding() {
   }
 }
 
+// ---- Smooth surface (A2): rebuild the building as a smooth iso-surface of the SAME voxel grid
+// (surface nets, smooth_surface.js), so the slice view reads as a clean model, not a block cloud.
+// Cache-safe: pure rendering. Built lazily on first "Smooth" toggle; the voxel cubes stay for
+// the fallback and as the raycast target.
+function buildSmoothSurface() {
+  const grid = decodeGrid();
+  if (!grid || !GDIMS) { setStatus('Smooth surface needs the material grid (SIM3D asset).'); return false; }
+  const [NX, NY, NZ] = GDIMS;
+  const palette = {};
+  for (const mm of (COLLISION.materials || [])) if (mm.color) palette[mm.id] = new THREE.Color(mm.color);
+  disposeSurface();
+  const t0 = performance.now();
+  for (const cls of [1, 2, 3, 4, 5]) {                 // structure classes; skip air (0)
+    const surf = smoothSurfaceForClass(grid, NX, NY, NZ, cls, CELL_M, 1);
+    if (!surf || !surf.positions.length) continue;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(surf.positions, 3));
+    g.setIndex(new THREE.BufferAttribute(surf.indices, 1));
+    g.computeVertexNormals();
+    const st = CLASS_STYLE[cls] || DEFAULT_STYLE;
+    const mat = new THREE.MeshStandardMaterial({
+      color: palette[cls] || new THREE.Color(0x9fb0bf),
+      transparent: st.opacity < 1, opacity: st.opacity,
+      roughness: st.roughness, metalness: st.metalness,
+      depthWrite: st.opacity > 0.6, side: THREE.DoubleSide,
+      clippingPlanes: GEOM_CLIP,
+    });
+    const mesh = new THREE.Mesh(g, mat);
+    mesh.userData.materialClass = cls;
+    mesh.renderOrder = cls === 5 ? 2 : 1;                // glass last
+    mesh.visible = false;
+    scene.add(mesh);
+    surfaceMeshes.push(mesh);
+  }
+  setStatus('Smooth surface · ' + surfaceMeshes.length + ' material shells · '
+    + Math.round(performance.now() - t0) + ' ms');
+  return surfaceMeshes.length > 0;
+}
+function disposeSurface() {
+  for (const m of surfaceMeshes) { scene.remove(m); m.geometry.dispose(); m.material.dispose(); }
+  surfaceMeshes = [];
+}
+function applyGeometryVisibility() {
+  for (const m of wallMeshes) m.visible = !DISPLAY.smooth;
+  for (const m of surfaceMeshes) m.visible = DISPLAY.smooth;
+}
+// Show either the voxel cubes or the smooth surface (built lazily on first use). The surface
+// build is ~1.5 s of synchronous surface-nets, so defer it behind a painted status message.
+function setGeometryMode() {
+  if (DISPLAY.smooth && !surfaceMeshes.length) {
+    setStatus('Building smooth surface…');
+    setTimeout(() => { buildSmoothSurface(); applyGeometryVisibility(); }, 0);
+    return;
+  }
+  applyGeometryVisibility();
+}
+// Raycast target for Tx/Rx placement — the VISIBLE geometry (surface in smooth mode, else cubes).
+function raycastTargets() {
+  if (DISPLAY.smooth && surfaceMeshes.length) return surfaceMeshes;
+  return wallMeshes.length ? wallMeshes : [wallMesh];
+}
+
 function buildAntennaMesh(entry) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(entry.vertices.flat()), 3));
@@ -340,7 +403,7 @@ function onPointerDown(ev) {
   raycaster.setFromCamera(ndc, camera);
   // Test every class mesh, not just one: the building is now several InstancedMeshes, so
   // raycasting a single one would make whole materials unclickable.
-  const hit = raycaster.intersectObjects(wallMeshes.length ? wallMeshes : [wallMesh], false)[0];
+  const hit = raycaster.intersectObjects(raycastTargets(), false)[0];
   if (!hit) return;
   const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
   const pos = hit.point.clone().addScaledVector(normal, 0.4);
@@ -941,7 +1004,7 @@ function probeAt(ev) {
     p = raycaster.ray.intersectPlane(
       new THREE.Plane(new THREE.Vector3(0, 1, 0), -DISPLAY.sliceY), new THREE.Vector3());
   } else {
-    const hit = raycaster.intersectObjects(wallMeshes.length ? wallMeshes : [wallMesh], false)[0];
+    const hit = raycaster.intersectObjects(raycastTargets(), false)[0];
     if (hit) p = hit.point.clone();
     else p = raycaster.ray.intersectPlane(
       new THREE.Plane(new THREE.Vector3(0, 1, 0), -(center ? center.y : extent[1] / 2)), new THREE.Vector3());
@@ -1087,6 +1150,10 @@ if (dispClipAxis) dispClipAxis.addEventListener('change', () => {
   DISPLAY.clipAxis = dispClipAxis.value;
   if (DISPLAY.clipGeom) updateClipPlane();
   updateHeightLabel(); refreshMeta();
+});
+if (dispSmooth) dispSmooth.addEventListener('change', () => {
+  DISPLAY.smooth = dispSmooth.checked;
+  setGeometryMode();                             // builds the surface lazily on first use
 });
 if (dispEirp) dispEirp.addEventListener('change', () => { DISPLAY.eirpDbm = Number(dispEirp.value) || 20; reRunViz(); });
 if (dispScale) dispScale.addEventListener('change', () => { DISPLAY.scale = dispScale.value; reRunViz(); });
@@ -2011,6 +2078,7 @@ window.__sim3d = {
   // debug/verification handles (mirrors the sandbox's window.__debug)
   get scene() { return scene; }, get camera() { return camera; }, get renderer() { return renderer; },
   get wallMesh() { return wallMesh; }, get wallMeshes() { return wallMeshes; },
+  get surfaceMeshes() { return surfaceMeshes; }, buildSmoothSurface, setGeometryMode,
   get field() { return fieldObj; }, get wave() { return waveObj; },
   get lobe() { return lobeGroup; }, get vectors() { return vectorState; },
   get interference() { return interferenceState; }, get sweep() { return sweepState; },
