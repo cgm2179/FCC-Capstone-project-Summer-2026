@@ -54,8 +54,32 @@ const animScrub = document.getElementById('anim3dScrub');
 const vizMode  = document.getElementById('viz3dMode');
 const modeSel  = document.getElementById('mode3dSelect');
 const modeNote = document.getElementById('mode3dNote');
+// Tier-1 display controls (prediction plane · received-power coverage classes) and the
+// viewport overlays they drive (context strip + point-probe readout).
+const dispPlaneBtn  = document.getElementById('disp3dPlaneBtn');
+const dispHeight    = document.getElementById('disp3dHeight');
+const dispHeightVal = document.getElementById('disp3dHeightVal');
+const dispEirp      = document.getElementById('disp3dEirp');
+const dispScale     = document.getElementById('disp3dScale');
+const dispClasses   = document.getElementById('disp3dClasses');
+const dispThresh    = document.getElementById('disp3dThresh');
+const dispThreshVal = document.getElementById('disp3dThreshVal');
+const metaEl        = document.getElementById('sim3dMeta');
+const probeEl       = document.getElementById('sim3dProbe');
+const probeBody     = document.getElementById('sim3dProbeBody');
+const probeClose    = document.getElementById('sim3dProbeClose');
 
 function setStatus(msg) { if (statusEl) statusEl.textContent = msg || ''; }
+
+// ---- Display state (Tier 1) ----
+// How the solved volume is READ — never the physics. `plane`/`sliceY` cut a horizontal
+// prediction plane; `eirpDbm` turns path loss into RSRP so `classes`/`fixed` can show
+// received power in dBm the way WRAP's coverage view and the 2D sim do.
+const DISPLAY = { plane: false, sliceY: null, eirpDbm: 20, scale: 'auto', classes: false, threshDbm: -85 };
+const RSRP_LO = -100, RSRP_HI = -40;                 // fixed received-power display window (dBm)
+const COV_GOOD = [0.13, 0.70, 0.29], COV_MARG = [0.98, 0.75, 0.18], COV_DEAD = [0.86, 0.28, 0.24];
+let lastSolveMs = 0;                                  // wall time of the last field solve
+let probeMarker = null;                               // little sphere at the probed voxel
 
 // The voxelization target chosen on the Preprocess screen (window.appVoxel),
 // surfaced here so the 2.5D/3D + cell choice is visible where the sim runs.
@@ -156,6 +180,7 @@ function ensureInit() {
     buildBuilding();
     buildMs = Math.round(performance.now() - t0);
     setStatus(readyStatus());
+    refreshMeta();
   }, 0);
   window.addEventListener('resize', onResize);
 
@@ -295,7 +320,8 @@ if (txPlace) txPlace.addEventListener('click', () => { if (ensureInit()) arm('tx
 if (rxPlace) rxPlace.addEventListener('click', () => { if (ensureInit()) arm('rx'); });
 
 function onPointerDown(ev) {
-  if (!armed || ev.button !== 0) return;
+  if (ev.button !== 0) return;
+  if (!armed) { probeAt(ev); return; }   // not placing → probe the clicked cell instead
   const r = renderer.domElement.getBoundingClientRect();
   ndc.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
   ndc.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
@@ -815,8 +841,207 @@ function showMechLegend(layers) {
 }
 function hideLegend() { if (legendEl) legendEl.hidden = true; }
 
+// ---- Coverage colouring (Tier 1) ----
+// auto → the original path-loss ramp (unchanged). fixed/classes → received power
+// (RSRP = EIRP − PL) shown in dBm, either on the fixed window or bucketed into
+// good / marginal / dead. When a prediction plane is active `sliced` fills the whole
+// plane (no weak-drop) so it reads as a continuous heatmap the way ProMan's does.
+function coverageSample(pl, sliced) {
+  if (DISPLAY.classes || DISPLAY.scale === 'fixed') {
+    const rsrp = DISPLAY.eirpDbm - pl;
+    if (DISPLAY.classes) {
+      if (rsrp >= DISPLAY.threshDbm + 10) return { keep: true, rgb: COV_GOOD, mag: 0.9 };
+      if (rsrp >= DISPLAY.threshDbm)      return { keep: true, rgb: COV_MARG, mag: 0.6 };
+      if (!sliced) return { keep: false };
+      return { keep: true, rgb: COV_DEAD, mag: 0.3 };
+    }
+    const t = (rsrp - RSRP_LO) / (RSRP_HI - RSRP_LO);
+    if (!sliced && t < 0.12) return { keep: false };
+    return { keep: true, rgb: ramp(t), mag: Math.min(1, Math.max(0, t)) };
+  }
+  const t = 1 - Math.min(1, Math.max(0, (pl - 45) / (130 - 45)));   // 1 = strong
+  if (!sliced && t < 0.12) return { keep: false };
+  return { keep: true, rgb: ramp(t), mag: t };
+}
+function coverageLegend() {
+  if (DISPLAY.classes) { showClassLegend(DISPLAY.threshDbm); return; }
+  if (DISPLAY.scale === 'fixed') { showLegend(RSRP_HI, RSRP_LO, 'received power', ' dBm'); return; }
+  showLegend(45, 130, 'path loss');
+}
+function showClassLegend(thresh) {
+  const el = ensureLegend(); if (!el) return;
+  const sw = (rgb, txt) => '<span class="lg-lab"><span class="lg-sw" style="background:rgb('
+    + rgb.map((c) => Math.round(c * 255)).join(',') + ')"></span>' + txt + '</span>';
+  el.innerHTML = '<span class="lg-cap">coverage</span>'
+    + sw(COV_GOOD, 'good ≥ ' + (thresh + 10))
+    + sw(COV_MARG, 'marginal ≥ ' + thresh)
+    + sw(COV_DEAD, 'dead < ' + thresh + ' dBm');
+  el.hidden = false;
+}
+
+// Sample-grid bounds shared by the coverage and per-mechanism clouds. Full volume marches
+// every height at the coarse step; a prediction plane samples one height on a finer grid.
+function sampleBounds() {
+  const sliced = DISPLAY.plane && DISPLAY.sliceY != null;
+  const step = Math.max(extent[0], extent[2]) / 46;
+  const g = sliced ? Math.max(extent[0], extent[2]) / 70 : step;
+  return { sliced, g,
+    yLo: sliced ? DISPLAY.sliceY : g * 0.5,
+    yHi: sliced ? DISPLAY.sliceY + 1e-3 : extent[1],
+    yInc: sliced ? 1e9 : g };
+}
+
+// ---- Context strip (WinProp status bar) ----
+function refreshMeta() {
+  if (!metaEl) return;
+  const D = GDIMS || MANIFEST.grid_shape || null;
+  const parts = [];
+  if (D) parts.push('grid ' + D.join('×'));
+  parts.push('cell ' + CELL_M.toFixed(2) + ' m');
+  if (extent) parts.push(extent.map((e) => e.toFixed(1)).join('×') + ' m');
+  parts.push('tier ' + (window.SIM3D_TIER || '—'));
+  parts.push((DISPLAY.plane && DISPLAY.sliceY != null)
+    ? 'plane y=' + DISPLAY.sliceY.toFixed(1) + ' m' : 'full volume');
+  if (lastSolveMs) parts.push(lastSolveMs + ' ms');
+  metaEl.textContent = parts.join('  ·  ');
+  metaEl.hidden = false;
+}
+
+// ---- Point probe (WRAP Spectrum-Viewer style) ----
+// Click a cell to read PL / RSRP / first-arrival delay + the dominant mechanism there.
+// With a prediction plane active the pick is exact (ray ∩ plane); otherwise it hits the
+// building, falling back to the mid-height plane.
+function probeAt(ev) {
+  if (!renderer || !camera) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
+  ndc.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+  let p = null;
+  if (DISPLAY.plane && DISPLAY.sliceY != null) {
+    p = raycaster.ray.intersectPlane(
+      new THREE.Plane(new THREE.Vector3(0, 1, 0), -DISPLAY.sliceY), new THREE.Vector3());
+  } else {
+    const hit = raycaster.intersectObjects(wallMeshes.length ? wallMeshes : [wallMesh], false)[0];
+    if (hit) p = hit.point.clone();
+    else p = raycaster.ray.intersectPlane(
+      new THREE.Plane(new THREE.Vector3(0, 1, 0), -(center ? center.y : extent[1] / 2)), new THREE.Vector3());
+  }
+  if (p) showProbe(p); else hideProbe();
+}
+function showProbe(p) {
+  if (!probeEl || !probeBody) return;
+  const vol = window.SIM3D_VOLUME || null;
+  const D = vol ? vol.dims : (GDIMS || MANIFEST.grid_shape);
+  if (!D) return;
+  const ix = clampi(Math.floor(p.x / CELL_M), D[0]);
+  const iy = clampi(Math.floor(p.y / CELL_M), D[1]);
+  const iz = clampi(Math.floor(p.z / CELL_M), D[2]);
+  const freqMHz = Number(wfBand && wfBand.value) || 2437;
+  let pl = null, tau = null;
+  if (vol) {
+    const bi = nearestBandIndex(vol, freqMHz);
+    pl = plAt(vol, bi, ix, iy, iz);
+    const tn = tAt(vol, ix, iy, iz);
+    if (isFinite(tn) && tn < 65504) tau = tn;
+  } else if (decodeGrid()) {
+    const tx = firstTx(); const s = tx ? tx.body.position : center;
+    const txv = [clampi(Math.floor(s.x / CELL_M), GDIMS[0]),
+                 clampi(Math.floor(s.y / CELL_M), GDIMS[1]),
+                 clampi(Math.floor(s.z / CELL_M), GDIMS[2])];
+    const mult = bandMult(freqMHz);
+    pl = marchPL(txv, ix, iy, iz, LOSS_DB.map((v) => v * mult), APM_DB.map((v) => v * mult),
+      20 * Math.log10(freqMHz) + FSPL_CONST);
+  } else {
+    const s = (firstTx() || { body: { position: center } }).body.position;
+    const d = Math.max(0.5, Math.hypot(p.x - s.x, p.y - s.y, p.z - s.z));
+    pl = 20 * Math.log10(d) + 20 * Math.log10(freqMHz) - 27.55;
+  }
+  if (pl == null || !isFinite(pl)) { hideProbe(); return; }
+  const rsrp = DISPLAY.eirpDbm - pl;
+  // A cell buried in solid structure (or beyond the solved field) carries a huge, real loss
+  // — 250+ dB. Reporting "-245 dBm RSRP" there is technically true but useless; say "no
+  // signal" instead, and don't try to name a mechanism where none arrives.
+  const noSignal = pl >= 180 || rsrp < -130;
+  // Dominant mechanism among the channels already resident (no forced fetch): the one whose
+  // own path loss is closest to the total — i.e. the biggest share of the power here. Apply
+  // the same floor the cloud render uses (SHARE_DB_LO) so a mechanism that doesn't reach
+  // this cell is not reported as "dominant".
+  let dom = null;
+  if (vol && !noSignal) {
+    let best = -Infinity;
+    for (const m of mechList(vol)) {
+      const ch = mechCache[vol.entry.txid + '|' + m.key];
+      if (!ch) continue;
+      const cbi = chanBandIndex(ch, freqMHz);
+      const plM = chanAt(ch, cbi, ix, iy, iz);
+      if (!isFinite(plM) || plM >= 65504) continue;
+      const share = pl - plM;                 // ≤ 0 dB; 0 = this mechanism carries it all
+      if (share < SHARE_DB_LO) continue;      // mechanism does not meaningfully reach here
+      if (share > best) { best = share; dom = { short: m.short, share, color: m.color }; }
+    }
+  }
+  const rows = ['<div class="pr-vx">voxel ' + ix + ',' + iy + ',' + iz + ' · y ' + p.y.toFixed(1) + ' m</div>'];
+  if (noSignal) {
+    rows.push('<div><b>no signal</b></div>');
+    rows.push('<div class="pr-hint">' + pl.toFixed(0) + ' dB loss — inside structure or beyond the solved field</div>');
+  } else {
+    const cov = rsrp >= DISPLAY.threshDbm + 10 ? 'good' : rsrp >= DISPLAY.threshDbm ? 'marginal' : 'dead';
+    rows.push('<div><b>' + pl.toFixed(1) + '</b> dB path loss</div>');
+    rows.push('<div><b>' + rsrp.toFixed(0) + '</b> dBm RSRP · <span class="pr-cov pr-' + cov + '">' + cov + '</span></div>');
+    if (tau != null) rows.push('<div>τ <b>' + tau.toFixed(0) + '</b> ns first arrival</div>');
+    if (dom) rows.push('<div>dominant <span style="color:rgb('
+      + dom.color.map((c) => Math.round(c * 200)).join(',') + ')">■</span> ' + dom.short
+      + ' (' + dom.share.toFixed(1) + ' dB)</div>');
+    else if (vol && mechList(vol).length) rows.push('<div class="pr-hint">open a mechanism view to load its share</div>');
+  }
+  probeBody.innerHTML = rows.join('');
+  probeEl.hidden = false;
+  if (!probeMarker) {
+    probeMarker = new THREE.Mesh(
+      new THREE.SphereGeometry(Math.max(extent[0], extent[2]) / 120, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xff3366 }));
+    scene.add(probeMarker);
+  }
+  probeMarker.position.copy(p); probeMarker.visible = true;
+}
+function hideProbe() { if (probeEl) probeEl.hidden = true; if (probeMarker) probeMarker.visible = false; }
+if (probeClose) probeClose.addEventListener('click', hideProbe);
+
+// ---- Display-control wiring ----
+function reRunViz() { if (vizMode) runVizMode(vizMode.value); }
+function heightFromSlider() { return extent ? (Number(dispHeight.value) / 100) * extent[1] : null; }
+function updateHeightLabel() {
+  if (!dispHeightVal) return;
+  dispHeightVal.textContent = (DISPLAY.plane && DISPLAY.sliceY != null)
+    ? 'y = ' + DISPLAY.sliceY.toFixed(1) + ' m' : 'whole volume';
+}
+if (dispPlaneBtn) dispPlaneBtn.addEventListener('click', () => {
+  DISPLAY.plane = !DISPLAY.plane;
+  dispPlaneBtn.textContent = DISPLAY.plane ? 'Plane' : 'Full volume';
+  dispPlaneBtn.classList.toggle('active', DISPLAY.plane);
+  if (dispHeight) dispHeight.disabled = !DISPLAY.plane;
+  DISPLAY.sliceY = DISPLAY.plane ? heightFromSlider() : null;
+  updateHeightLabel(); reRunViz(); refreshMeta();
+});
+if (dispHeight) {
+  dispHeight.addEventListener('input', () => { DISPLAY.sliceY = heightFromSlider(); updateHeightLabel(); refreshMeta(); });
+  dispHeight.addEventListener('change', reRunViz);            // re-solve on release, not per pixel
+}
+if (dispEirp) dispEirp.addEventListener('change', () => { DISPLAY.eirpDbm = Number(dispEirp.value) || 20; reRunViz(); });
+if (dispScale) dispScale.addEventListener('change', () => { DISPLAY.scale = dispScale.value; reRunViz(); });
+if (dispClasses) dispClasses.addEventListener('change', () => { DISPLAY.classes = dispClasses.checked; reRunViz(); });
+if (dispThresh) {
+  dispThresh.addEventListener('input', () => {
+    DISPLAY.threshDbm = Number(dispThresh.value);
+    if (dispThreshVal) dispThreshVal.textContent = dispThresh.value;
+  });
+  dispThresh.addEventListener('change', reRunViz);
+}
+
 function runStaticField() {
   if (!ensureInit()) return;
+  const _t0 = performance.now();
   const tx = firstTx();
   const src = tx ? tx.body.position : center;
   const freqMHz = Number(wfBand && wfBand.value) || 2437;
@@ -844,12 +1069,11 @@ function runStaticField() {
     tryLoadSurrogate();
   }
 
-  const step = Math.max(extent[0], extent[2]) / 46;        // ~46 samples on the long axis
-  const samples = [];                                       // [x, y, z, strength 0..1]
-  const lossMin = 45, lossMax = 130;                        // dB display window (analytic range)
-  for (let x = step * 0.5; x < extent[0]; x += step)
-    for (let y = step * 0.5; y < extent[1]; y += step)
-      for (let z = step * 0.5; z < extent[2]; z += step) {
+  const { sliced, g, yLo, yHi, yInc } = sampleBounds();     // full volume, or one prediction plane
+  const samples = [];                                       // [x, y, z, mag, r, g, b]
+  for (let x = g * 0.5; x < extent[0]; x += g)
+    for (let y = yLo; y < yHi; y += yInc)
+      for (let z = g * 0.5; z < extent[2]; z += g) {
         let pl;
         if (vol) {
           pl = plAt(vol, bandIdx, clampi(Math.floor(x / CELL_M), vol.dims[0]),
@@ -864,13 +1088,14 @@ function runStaticField() {
           const d = Math.max(0.5, Math.sqrt(dx * dx + dy * dy + dz * dz));
           pl = 20 * Math.log10(d) + 20 * Math.log10(freqMHz) - 27.55;   // FSPL fallback
         }
-        const t = 1 - Math.min(1, Math.max(0, (pl - lossMin) / (lossMax - lossMin)));  // 1 = strong
-        if (t < 0.12) continue;                              // drop the faint far field
-        samples.push([x, y, z, t]);
+        if (!isFinite(pl) || pl >= 65504) continue;
+        const cs = coverageSample(pl, sliced);               // colour/keep per Display settings
+        if (!cs.keep) continue;
+        samples.push([x, y, z, cs.mag, cs.rgb[0], cs.rgb[1], cs.rgb[2]]);
       }
   // Instanced cubes (not THREE.Points — the WebGPU backend can't size points):
-  // one small cube per sample, coloured by strength, larger/brighter near the Tx.
-  const cube = new THREE.BoxGeometry(step * 0.42, step * 0.42, step * 0.42);
+  // one small cube per sample, coloured/sized by the Display settings.
+  const cube = new THREE.BoxGeometry(g * 0.42, g * 0.42, g * 0.42);
   const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false });
   fieldObj = new THREE.InstancedMesh(cube, mat, samples.length);
   const dummy = new THREE.Object3D(), col = new THREE.Color();
@@ -878,12 +1103,12 @@ function runStaticField() {
     const s = samples[i];
     dummy.position.set(s[0], s[1], s[2]); dummy.scale.setScalar(0.5 + s[3] * 1.6); dummy.updateMatrix();
     fieldObj.setMatrixAt(i, dummy.matrix);
-    const c = ramp(s[3]); col.setRGB(c[0], c[1], c[2]); fieldObj.setColorAt(i, col);
+    col.setRGB(s[4], s[5], s[6]); fieldObj.setColorAt(i, col);
   }
   fieldObj.instanceMatrix.needsUpdate = true;
   if (fieldObj.instanceColor) fieldObj.instanceColor.needsUpdate = true;
   scene.add(fieldObj);
-  showLegend(lossMin, lossMax, 'path loss');
+  coverageLegend();
   // Name the tier that actually produced this picture — cached volume, surrogate, or the
   // analytic floor. Which engine drew it changes how much it should be trusted.
   const tier = vol ? TIER.CACHE : (GRID ? TIER.ANALYTIC : TIER.ANALYTIC);
@@ -897,6 +1122,8 @@ function runStaticField() {
     + (vol ? ' · curved eikonal shadows + in-wall lag.' : GRID ? ' · walls shadow the field.' : '.')
     + fell);
   window.SIM3D_TIER = tier;
+  lastSolveMs = Math.round(performance.now() - _t0);
+  refreshMeta();
 }
 function disposeField() {
   if (!fieldObj) return;
@@ -942,18 +1169,19 @@ function runMechanismField(mech) {
 
   loadMechanism(vol, mech).then((ch) => {
     if (!ch || (vizMode && vizMode.value !== mech)) return;
+    const _t0 = performance.now();
     const cbi = chanBandIndex(ch, freqMHz);          // channel bands may be a subset
     const tbi = nearestBandIndex(vol, ch.bands[cbi]); // matching band in the total volume
     const isShare = mech !== 'path_loss';
-    const step = Math.max(extent[0], extent[2]) / 46;
+    const { sliced, g, yLo, yHi, yInc } = sampleBounds();  // full volume, or one prediction plane
     const inside = insideMaskFor(vol.dims);
     const NY = vol.dims[1], NZ = vol.dims[2];
     const samples = [];
     const lossMin = 45, lossMax = 130;
     let maxShare = -Infinity;                        // dB, so 0 is a real value not a floor
-    for (let x = step * 0.5; x < extent[0]; x += step)
-      for (let y = step * 0.5; y < extent[1]; y += step)
-        for (let z = step * 0.5; z < extent[2]; z += step) {
+    for (let x = g * 0.5; x < extent[0]; x += g)
+      for (let y = yLo; y < yHi; y += yInc)
+        for (let z = g * 0.5; z < extent[2]; z += g) {
           const ix = clampi(Math.floor(x / CELL_M), vol.dims[0]);
           const iy = clampi(Math.floor(y / CELL_M), NY);
           const iz = clampi(Math.floor(z / CELL_M), NZ);
@@ -971,12 +1199,12 @@ function runMechanismField(mech) {
             t = (Math.min(shareDb, SHARE_DB_HI) - SHARE_DB_LO) / (SHARE_DB_HI - SHARE_DB_LO);
           } else {
             t = 1 - Math.min(1, Math.max(0, (plM - lossMin) / (lossMax - lossMin)));
-            if (t < 0.12) continue;
+            if (!sliced && t < 0.12) continue;       // a plane keeps its faint cells; the cloud drops them
           }
           samples.push([x, y, z, t]);
         }
 
-    const cube = new THREE.BoxGeometry(step * 0.42, step * 0.42, step * 0.42);
+    const cube = new THREE.BoxGeometry(g * 0.42, g * 0.42, g * 0.42);
     const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false });
     fieldObj = new THREE.InstancedMesh(cube, mat, samples.length);
     const dummy = new THREE.Object3D(), col = new THREE.Color();
@@ -999,6 +1227,9 @@ function runMechanismField(mech) {
       + ' @ ' + Math.round(ch.bands[cbi]) + ' MHz · ' + samples.length.toLocaleString() + ' voxels · '
       + (ch.combine_as === 'incoherent' ? 'summed as power (uncorrelated)' : 'coherent complex field')
       + ' · first arrival ≤ ' + ch.t_max_ns.toFixed(0) + ' ns.');
+    window.SIM3D_TIER = TIER.CACHE;                  // per-mechanism views are always the cached solve
+    lastSolveMs = Math.round(performance.now() - _t0);
+    refreshMeta();
   });
 }
 // ---- Vacuum mode: the invariant gate, checked in the browser ----
@@ -1669,6 +1900,7 @@ function refreshModeNote() {
 }
 function applyMode() {
   refreshModeNote();
+  hideProbe();                       // the probed point's values belong to the old scene
   // the Tx controls are meaningless when the source is a plane wave 416 m away
   const pt = modeIsPointSource();
   for (const el of [txPlace, txType]) if (el) el.disabled = !pt;
@@ -1730,4 +1962,7 @@ window.__sim3d = {
   get cacheBytes() { return cacheBytes(); },
   get cacheBudget() { return BROWSER_CACHE_BUDGET; },
   get indexError() { return volumeIndexError; },
+  // Tier-1 display handles (verification: prediction plane, coverage classes, probe)
+  get display() { return DISPLAY; }, refreshMeta, probeAt,
+  get lastSolveMs() { return lastSolveMs; },
 };
