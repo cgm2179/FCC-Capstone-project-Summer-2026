@@ -378,8 +378,13 @@ function matchVolume(txVox, mode) {
   }
   return bd <= VOL_TOL ? best : null;
 }
-async function loadVolume(entry) {
-  if (volumeCache[entry.txid]) { window.SIM3D_VOLUME = volumeCache[entry.txid]; return window.SIM3D_VOLUME; }
+// setCurrent=false is the prefetch path: decode into the cache without stealing the
+// volume the user is currently looking at.
+async function loadVolume(entry, { setCurrent = true } = {}) {
+  if (volumeCache[entry.txid]) {
+    if (setCurrent) window.SIM3D_VOLUME = volumeCache[entry.txid];
+    return volumeCache[entry.txid];
+  }
   const base = 'SIM3D/web/volumes/';
   const [plBuf, tBuf] = await Promise.all([
     fetch(base + entry.pl_file).then((r) => r.arrayBuffer()),
@@ -387,12 +392,38 @@ async function loadVolume(entry) {
   ]);
   const vol = { pl: f16ToF32(new Uint16Array(plBuf)), t: f16ToF32(new Uint16Array(tBuf)),
     dims: entry.grid_shape, bands: entry.bands, tx_vox: entry.tx_vox, t_max_ns: entry.t_max_ns, entry };
-  volumeCache[entry.txid] = vol; window.SIM3D_VOLUME = vol;
+  volumeCache[entry.txid] = vol;
+  if (setCurrent) { window.SIM3D_VOLUME = vol; prefetchNeighbours(entry); }
   return vol;
 }
 function volMatches(vol, txVox) {
   return !!(vol && txVox &&
     Math.hypot(vol.tx_vox[0] - txVox[0], vol.tx_vox[1] - txVox[1], vol.tx_vox[2] - txVox[2]) <= VOL_TOL);
+}
+
+// Warm the neighbours of the volume just loaded, so dragging the transmitter to the next
+// cached position is instant rather than a 13 MB stall. Idle-time only, and never more
+// than PREFETCH_MAX so a big cache does not turn one placement into a hundred fetches.
+const PREFETCH_MAX = 3;
+let prefetching = false;
+function prefetchNeighbours(entry) {
+  if (prefetching || !entry) return;
+  const pool = volumesForMode(entry.mode || 'indoor')
+    .filter((e) => e.txid !== entry.txid && !volumeCache[e.txid]);
+  if (!pool.length) return;
+  const d = (e) => Math.hypot(e.tx_vox[0] - entry.tx_vox[0],
+                              e.tx_vox[1] - entry.tx_vox[1],
+                              e.tx_vox[2] - entry.tx_vox[2]);
+  const want = pool.sort((a, b) => d(a) - d(b)).slice(0, PREFETCH_MAX);
+  prefetching = true;
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 400));
+  idle(() => {
+    // sequential, not Promise.all: these are background fetches and must not contend
+    // with whatever the user is actively waiting for
+    want.reduce((p, e) => p.then(() => loadVolume(e, { setCurrent: false })
+      .catch(() => {})), Promise.resolve())
+      .then(() => { prefetching = false; });
+  });
 }
 function plAt(vol, band, x, y, z) { const NY = vol.dims[1], NZ = vol.dims[2]; return vol.pl[((band * vol.dims[0] + x) * NY + y) * NZ + z]; }
 function tAt(vol, x, y, z) { const NY = vol.dims[1], NZ = vol.dims[2]; return vol.t[(x * NY + y) * NZ + z]; }
@@ -401,6 +432,48 @@ function nearestBandIndex(vol, fMHz) {
   for (let i = 0; i < vol.bands.length; i++) { const d = Math.abs(vol.bands[i] - fMHz); if (d < bd) { bd = d; bi = i; } }
   return bi;
 }
+// ---- Resolution order: cached volume → DL surrogate → analytic fallback ----
+// The analytic JS mirror is the guaranteed-correct floor, not a placeholder: the
+// simulator has to work without the surrogate, so the surrogate can only ever be an
+// accelerator. Tier is reported in the status line, because "which engine drew this"
+// changes how much you should trust the picture.
+const TIER = { CACHE: 'cached volume', SURROGATE: 'DL surrogate', ANALYTIC: 'analytic (in-browser)' };
+
+// The 3-D surrogate is not trained yet (M4). The slot is real, but it deliberately
+// refuses to guess: a network's input layout (channel order, normalization, blob sigma)
+// is decided by the training run, and a wrong guess does not fail loudly — it produces a
+// confident, wrong field. So the browser loads the model ONLY alongside a contract
+// sidecar that the trainer writes, and otherwise falls straight through to analytic.
+const SURROGATE = { session: null, spec: null, state: 'untried', note: '' };
+async function tryLoadSurrogate() {
+  if (SURROGATE.state !== 'untried') return SURROGATE;
+  SURROGATE.state = 'loading';
+  if (!window.ort || location.protocol === 'file:') {
+    SURROGATE.state = 'unavailable';
+    SURROGATE.note = window.ort ? 'needs http (file:// blocks fetch)' : 'onnxruntime-web not loaded';
+    return SURROGATE;
+  }
+  try {
+    const specRes = await fetch('SIM3D/web/pl_unet3d.json');
+    if (!specRes.ok) throw new Error('no input contract (pl_unet3d.json)');
+    SURROGATE.spec = await specRes.json();
+    for (const eps of [['webgpu'], ['wasm']]) {
+      try {
+        SURROGATE.session = await ort.InferenceSession.create('SIM3D/web/pl_unet3d.onnx',
+          { executionProviders: eps });
+        SURROGATE.state = 'ready';
+        SURROGATE.note = 'UNet3D (' + eps[0] + ')';
+        return SURROGATE;
+      } catch (e) { /* try the next execution provider */ }
+    }
+    throw new Error('model failed to load on every execution provider');
+  } catch (e) {
+    SURROGATE.state = 'unavailable';
+    SURROGATE.note = 'not trained yet (M4) — ' + e.message;
+  }
+  return SURROGATE;
+}
+
 // background-load the volume matching txVox in the current mode; call onReady() when it arrives
 function tryLoadVolume(txVox, onReady) {
   loadVolumeIndex().then(() => {
@@ -594,7 +667,12 @@ function runStaticField() {
   // otherwise render analytic now and upgrade in the background if one loads.
   const vol = volMatches(window.SIM3D_VOLUME, txVox) ? window.SIM3D_VOLUME : null;
   const bandIdx = vol ? nearestBandIndex(vol, freqMHz) : 0;
-  if (!vol && txVox) tryLoadVolume(txVox, () => { if (fieldObj) runStaticField(); });
+  // Tier 1 miss: try to upgrade in the background (cache first, then surrogate), and
+  // render the analytic floor immediately so the user is never looking at nothing.
+  if (!vol && txVox) {
+    tryLoadVolume(txVox, () => { if (fieldObj) runStaticField(); });
+    tryLoadSurrogate();
+  }
 
   const step = Math.max(extent[0], extent[2]) / 46;        // ~46 samples on the long axis
   const samples = [];                                       // [x, y, z, strength 0..1]
@@ -636,10 +714,19 @@ function runStaticField() {
   if (fieldObj.instanceColor) fieldObj.instanceColor.needsUpdate = true;
   scene.add(fieldObj);
   showLegend(lossMin, lossMax, 'path loss');
-  const srcLabel = vol ? 'full-physics solve (SceneV3 eikonal/Fresnel)'
-    : GRID ? 'analytic Motley-Keenan (in-browser)' : 'FSPL (grid unavailable)';
-  setStatus('Static field · ' + srcLabel + ' @ ' + freqMHz + ' MHz · ' + samples.length.toLocaleString() + ' samples'
-    + (vol ? ' · curved eikonal shadows + in-wall lag.' : GRID ? ' · walls shadow the field.' : '.'));
+  // Name the tier that actually produced this picture — cached volume, surrogate, or the
+  // analytic floor. Which engine drew it changes how much it should be trusted.
+  const tier = vol ? TIER.CACHE : (GRID ? TIER.ANALYTIC : TIER.ANALYTIC);
+  const srcLabel = vol ? TIER.CACHE + ' — full-physics solve (SceneV3 eikonal/Fresnel)'
+    : GRID ? TIER.ANALYTIC + ' — Motley-Keenan multiwall'
+           : TIER.ANALYTIC + ' — FSPL only (material grid unavailable)';
+  const fell = !vol && SURROGATE.state === 'unavailable'
+    ? ' · surrogate tier skipped: ' + SURROGATE.note : '';
+  setStatus('Static field · ' + srcLabel + ' @ ' + freqMHz + ' MHz · '
+    + samples.length.toLocaleString() + ' samples'
+    + (vol ? ' · curved eikonal shadows + in-wall lag.' : GRID ? ' · walls shadow the field.' : '.')
+    + fell);
+  window.SIM3D_TIER = tier;
 }
 function disposeField() {
   if (!fieldObj) return;
@@ -1464,4 +1551,9 @@ window.__sim3d = {
   runVizMode, loadVolumeIndex, loadVolume, loadMechanism, mechList, chanAt, tauAt,
   get mechChannels() { return mechCache; },
   get volumeIndex() { return volumeIndex; },
+  // cache/offload handles: which tier drew the current field, and what is warm
+  currentMode, volumesForMode, matchVolume, tryLoadSurrogate, prefetchNeighbours,
+  get tier() { return window.SIM3D_TIER || null; },
+  get surrogate() { return { state: SURROGATE.state, note: SURROGATE.note }; },
+  get warmVolumes() { return Object.keys(volumeCache); },
 };

@@ -125,13 +125,20 @@ def main():
                                                          band_sel=band_sel, scene=scene)
         nbytes += mbytes
 
+    mech_bands = [bands[i] for i in band_sel] if band_sel else bands
+    # Same content key the batch path computes, so a volume written here counts as a cache
+    # hit there (and vice versa) instead of being silently resolved by filename.
+    key = PV.content_key(scene_sha=PV.scene_sha(scene), mode=mode, tx_vox=txi,
+                         bands=bands, mechanisms=mechs or ["path_loss"],
+                         engine_ver=PV.engine_version(), mech_bands=mech_bands)
     entry = {
-        "txid": txid, "mode": mode,
+        "txid": txid, "mode": mode, "key": key,
+        "scene_sha": PV.scene_sha(scene), "engine_ver": PV.engine_version(),
         "tx_vox": txi, "grid_shape": [nx, ny, nz], "bands": bands,
         "t_max_ns": t_max_ns, "t_unreachable_ns": T_UNREACHABLE_NS,
         "pl_file": f"pl_volume_{txid}.bin", "t_file": f"t_volume_{txid}.bin",
         "mechanisms": mech_files,
-        "mech_bands": [bands[i] for i in band_sel] if band_sel else bands,
+        "mech_bands": mech_bands,
         "mechanism_names": mechs or ["path_loss"],
         "t_freq_mhz": None if mechs else args.t_freq,
         "norm": man.get("norm"), "bytes": int(nbytes),

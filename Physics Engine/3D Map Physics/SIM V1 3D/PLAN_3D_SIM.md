@@ -196,7 +196,34 @@ change, not an export change.
 - ✅ **Mode selector in the browser**, with the volume catalog filtered by mode. A volume
   solved in one mode is not interchangeable with another's, so the filter is correctness,
   not tidiness.
-- ⬜ `cache_index.py` (content-addressed LRU) · browser prefetch of neighbouring Tx.
+- ✅ **`cache_index.py`** — the content-addressed cache. Key is
+  `H(scene_sha, mode, tx_vox, bands, mechanisms, mech_bands, engine_ver)`, where
+  `engine_ver` hashes the **physics source itself**, so editing `Reflection_3D.py` or
+  `engine_3d.py` invalidates every affected volume with nobody remembering to bump a
+  number. Owns `index.json` (one writer — two writers with slightly different ideas of the
+  shape is how the v2/v3 divergence happened), LRU eviction under a disk budget, and a
+  `--verify` pass that catches truncation by arithmetic rather than by eye.
+- ✅ **The resume skip was silently wrong.** It asked "does `pl_volume_<tid>.bin` exist?",
+  so changing `--mechanisms`, widening `--bands`, or editing physics left the old file in
+  place, skipped the Tx, and kept a stale volume while reporting success. Demonstrated
+  before/after: same inputs → `SKIP (cache hit)` in 0.0 s; adding `reflection` → recomputes
+  in 10.0 s and the median PL moves 177.51 → 177.29 dB. The old code kept the first answer.
+- ✅ **Three-tier resolution, named on screen**: `cached volume → DL surrogate → analytic`.
+  The analytic JS mirror is the guaranteed-correct floor, so the surrogate can only ever
+  be an accelerator — the simulator works without it by construction.
+- ✅ **Neighbour prefetch** — after a volume loads, the 3 nearest cached Tx in the same
+  mode are fetched at idle, so moving the transmitter to the next one is instant.
+
+> **The surrogate tier deliberately refuses to guess.** No 3-D model is trained yet (M4),
+> and a network's input layout — channel order, normalization, blob sigma — is decided by
+> the training run. A wrong guess does not fail loudly; it produces a confident, wrong
+> field. So the browser loads `pl_unet3d.onnx` **only** alongside a `pl_unet3d.json`
+> contract that the trainer writes, and otherwise falls straight through to analytic and
+> says why. Writing that sidecar is part of M4.
+
+**LRU evicts whole transmitters, never individual files.** Half a volume is worse than
+none: the browser would fetch a 404 mid-render instead of falling through to the analytic
+tier.
 
 **Why the O2I field is cached.** Every facade source costs one `crossing_loss` solve
 (~2.9 s), so one source per lit voxel is 645 solves — half an hour for one map. But the

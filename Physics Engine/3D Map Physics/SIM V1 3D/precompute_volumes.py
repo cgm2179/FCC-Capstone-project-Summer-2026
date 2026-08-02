@@ -61,6 +61,7 @@ for _p in (HERE, MECH_DIR, HERE.parent.parent / "2D" / "SIM"):
         sys.path.insert(0, str(_p))
 
 import engine_3d  # noqa: E402
+from cache_index import CacheIndex, content_key, engine_version, scene_sha  # noqa: E402
 
 F16_MAX = 65504.0
 DEFAULT_MECHANISMS = "path_loss,reflection,diffraction"
@@ -271,73 +272,20 @@ def _entry_id(e):
 def merge_index(out_dir: Path, entries, manifest, mechanisms, bands, mode=None):
     """Rewrite index.json, preserving entries for transmitters not in this run.
 
-    Schema note (v3): entries carry `txid`, `pl_file` and `t_file` because that is what
-    `simulation3d.js` reads. v2 wrote `tx_id` and no file names at all, so the browser
-    could not load anything the batch precompute produced; entries in that shape are
-    migrated on read rather than dropped.
+    Thin wrapper over `cache_index.CacheIndex` so there is exactly ONE writer of the
+    catalog schema. The index doubles as the cache's own bookkeeping (keys, engine
+    version, LRU timestamps), and two writers with slightly different ideas of the shape
+    is how the v2/v3 divergence happened in the first place.
     """
-    idx_path = out_dir / "index.json"
-    old = {}
-    if idx_path.exists():
-        try:
-            prev = json.loads(idx_path.read_text())
-            for e in prev.get("volumes", prev.get("entries", [])):
-                tid = _entry_id(e)
-                if tid:
-                    old[tid] = migrate_entry(e, out_dir, manifest)
-        except Exception as exc:                      # a corrupt index must not lose data
-            print(f"  warning: could not read existing index.json ({exc}); "
-                  f"entries not in this run will be dropped")
+    ci = CacheIndex(out_dir, manifest=manifest)
     for e in entries:
-        old[_entry_id(e)] = e
-    doc = {
-        "version": "vol3d-v3",
-        # Modes cannot share a volume file: they have different scenes and different
-        # source models, so the browser filters the catalog by mode before matching a Tx.
-        "modes": sorted({e.get("mode", "indoor") for e in old.values()}
-                        | ({mode} if mode else set())),
-        "grid_shape": manifest["grid_shape"],
-        "cell_size_m": manifest["cell_size_m"],
-        "bands_mhz": list(bands),
-        "mechanisms": list(mechanisms),
-        "pl_layout": "band,x,y,z  float16 dB",
-        "t_layout": "x,y,z  float16 NANOSECONDS (sentinel 65504 = unreachable)",
-        "mech_layout": "m_<mech>_<txid>.bin = band,x,y,z float16 dB; "
-                       "tau_<mech>_<txid>.bin = x,y,z float16 ns",
-        "count": len(old),
-        "volumes": sorted(old.values(), key=lambda e: _entry_id(e)),
-    }
-    idx_path.write_text(json.dumps(doc, indent=1))
-    return doc
+        ci.put(e, key=e.get("key"))
+    return ci.save(mechanisms=mechanisms, bands=bands, mode=mode)
 
 
 def migrate_entry(e: dict, out_dir: Path, manifest: dict) -> dict:
-    """Bring a pre-v3 entry up to the schema the browser reads, in place of dropping it.
-
-    Fills the fields v2 omitted (`txid`, `pl_file`, `t_file`, `grid_shape`, `bands`) and
-    recovers `t_max_ns` from the stored T volume, since the sweep clock needs it.
-    """
-    tid = _entry_id(e)
-    if not tid:
-        return e
-    e = dict(e)
-    e["txid"] = tid
-    e.pop("tx_id", None)
-    # everything written before M3 was the indoor floor with a point source
-    e.setdefault("mode", "indoor")
-    e.setdefault("pl_file", f"pl_volume_{tid}.bin")
-    e.setdefault("t_file", f"t_volume_{tid}.bin")
-    e.setdefault("grid_shape", list(manifest["grid_shape"]))
-    if "bands" not in e:
-        e["bands"] = e.pop("bands_mhz", list(manifest.get("freqs_mhz", [])))
-    if isinstance(e.get("mechanisms"), list):
-        e["mechanism_names"] = e.pop("mechanisms")
-    if "t_max_ns" not in e:
-        tp = out_dir / e["t_file"]
-        e["t_max_ns"] = (_t_max_ns(np.fromfile(tp, dtype=np.float16))
-                         if tp.exists() else 0.0)
-    e.setdefault("t_unreachable_ns", F16_MAX)
-    return e
+    """Bring a pre-v3 entry up to the schema the browser reads (see CacheIndex.migrate)."""
+    return CacheIndex(out_dir, manifest=manifest).migrate(e)
 
 
 def _prepare_diffraction(scene, mechs, n_edges, cache_path):
@@ -383,7 +331,10 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--stratify", action="store_true", default=True)
     ap.add_argument("--list", type=int, default=0, help="only print chosen Tx positions")
-    ap.add_argument("--force", action="store_true", help="recompute existing volumes")
+    ap.add_argument("--force", action="store_true",
+                    help="recompute even on a cache hit")
+    ap.add_argument("--max-gb", type=float, default=None,
+                    help="disk budget; evict least-recently-used volumes after the run")
     ap.add_argument("--mech-channels", dest="mech_channels", action="store_true",
                     default=True, help="also write per-mechanism dB + tau channels")
     ap.add_argument("--no-mech-channels", dest="mech_channels", action="store_false")
@@ -436,11 +387,25 @@ def main(argv=None) -> int:
     edges, relay = _prepare_diffraction(scene, mechs, a.n_edges, a.relay_cache)
 
     mech_bands = [bands[i] for i in band_sel] if band_sel else list(bands)
-    entries, t0, done_bytes = [], time.time(), 0
+
+    # Resume by CONTENT, not by filename. The old check was "does pl_volume_<tid>.bin
+    # exist?", which silently kept a stale volume whenever the bands, the mechanisms, the
+    # mode or the physics itself had changed since it was written — you would believe you
+    # had recomputed and you had not.
+    ci = CacheIndex(out_dir, manifest=manifest)
+    ssha, ever = scene_sha(scene), engine_version()
+    print(f"cache {out_dir}: {len(ci.entries)} entries, {ci.total_bytes()/1e6:.0f} MB, "
+          f"engine_ver {ever}")
+
+    entries, t0, done_bytes, n_skip = [], time.time(), 0, 0
     for i, tx in enumerate(txs, 1):
         tid = tx_id(tx)
-        if not a.force and (out_dir / f"pl_volume_{tid}.bin").exists():
-            print(f"[{i}/{len(txs)}] {tid}  SKIP (cached)")
+        key = content_key(scene_sha=ssha, mode=mode, tx_vox=tx, bands=bands,
+                          mechanisms=mechs, engine_ver=ever, mech_bands=mech_bands)
+        if not a.force and ci.is_fresh(key):
+            ci.touch(tid)
+            n_skip += 1
+            print(f"[{i}/{len(txs)}] {tid}  SKIP (cache hit {key[:8]})")
             continue
         t1 = time.time()
         pl, t, cf, contribs = solve_one(
@@ -461,6 +426,7 @@ def main(argv=None) -> int:
                         "pl_file": f"pl_volume_{tid}.bin", "t_file": f"t_volume_{tid}.bin",
                         "mechanisms": mech_files, "mech_bands": mech_bands,
                         "mechanism_names": mechs,
+                        "key": key, "scene_sha": ssha, "engine_ver": ever,
                         "median_pl_db": round(float(np.median(pl[fin])), 2) if fin.any() else None,
                         "bytes": int(nbytes)})
         print(f"[{i}/{len(txs)}] {tid}  {time.time()-t1:5.1f}s  "
@@ -468,9 +434,19 @@ def main(argv=None) -> int:
               f"{nbytes/1e6:.1f} MB"
               + (f"  +{len(mech_files)} mech channels" if mech_files else ""))
 
-    doc = merge_index(out_dir, entries, manifest, mechs, bands, mode=mode)
-    print(f"\nwrote {len(entries)} new volumes ({done_bytes/1e6:.1f} MB) "
-          f"in {time.time()-t0:.1f}s; cache now holds {doc['count']} Tx")
+    for e in entries:
+        ci.put(e, key=e["key"])
+    doc = ci.save(mechanisms=mechs, bands=bands, mode=mode)
+    print(f"\nwrote {len(entries)} new volumes ({done_bytes/1e6:.1f} MB), "
+          f"{n_skip} cache hits, in {time.time()-t0:.1f}s; "
+          f"cache now holds {doc['count']} Tx ({doc['bytes']/1e6:.0f} MB)")
+
+    if a.max_gb:
+        r = ci.gc(int(a.max_gb * 1e9))
+        if r["evicted"]:
+            ci.save(mechanisms=mechs, bands=bands, mode=mode)
+            print(f"LRU: evicted {len(r['evicted'])} to stay under {a.max_gb} GB "
+                  f"({r['freed_bytes']/1e6:.0f} MB freed)")
     return 0
 
 
