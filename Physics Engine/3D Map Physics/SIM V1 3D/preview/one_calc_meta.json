@@ -1,0 +1,16 @@
+{
+  "tx_voxel": [
+    131,
+    9,
+    59
+  ],
+  "freq_mhz": 3500.0,
+  "pl_min": 43.3,
+  "pl_median": 146.1,
+  "pl_max": 540.0,
+  "excess_over_fspl_min": -0.0,
+  "T_max_ns": 144.2,
+  "T_minus_dc_min_ns": -0.606,
+  "corr_pl_vs_logdist": 0.573,
+  "note": "direct-only PL; deep shadows fill once diffraction (Stage 2) is added"
+}

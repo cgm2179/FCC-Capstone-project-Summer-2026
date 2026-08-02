@@ -1,11 +1,22 @@
-.DS_Store
-__pycache__/
-STEP_2/multiband/*.npz
-SIM/dataset/shard_*.npz
-SIM/web/pl_unet.onnx
-ARCHIVE/raw_walk_data/STEP_1.zip
-ARCHIVE/superseded/STEP_4/dataset/
-.claude/
-SIM V2/dataset_v2/
+# ---- Large / regenerable binaries — kept out of git (GitHub's 100 MB hard limit) ----
+# These are all reproducible from committed source, or hosted on GitHub releases.
+
+# Trained surrogates (fetch via `make model`; released as surrogate-v1 / pl_unet3d)
+*.onnx
 *.pt
-pl_unet*.onnx
+
+# Training dataset shards (regenerate with the phase_b notebooks, or `make dataset-fetch`)
+*.npz
+
+# Outdoor city voxel grids — ~347 MB each; regenerate with voxelize_city.py
+Physics Engine/3D Map Physics/SIM V1 3D/city/
+
+# ---- OS / Python junk ----
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.ipynb_checkpoints/
+
+# scene_v1_backup/ — pre-M0.4 grid, kept locally for rollback (not versioned)
+Physics Engine/3D Map Physics/SIM V1 3D/scene_v1_backup/

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"import numpy, scipy, PIL; print\\('numpy', numpy.__version__\\); print\\('scipy', scipy.__version__\\); print\\('PIL', PIL.__version__\\)\")",
+      "Bash(python3 extrude_to_3d.py)",
+      "Bash(python3 preview_iso.py)",
+      "Bash(python3 scratch_split.py)",
+      "Bash(python3 build_model.py)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}, %{size_download} bytes\\\\n\" http://localhost:8433/Frontend_Data_Display.html)",
+      "Bash(curl -s -o /dev/null -w \"DAE HTTP %{http_code}, %{size_download} bytes\\\\n\" http://localhost:8433/STEP_1/model_3d/floor7_model.dae)",
+      "Bash(curl -s -o /dev/null -w 'OBJ: HTTP %{http_code} \\(%{size_download} bytes\\)\\\\n' __TRACKED_VAR__/8681a299-6227-4f6a-a55c-d149f0e525ff.obj)",
+      "Bash(curl -s -o /dev/null -w 'MTL: HTTP %{http_code} \\(%{size_download} bytes\\)\\\\n' __TRACKED_VAR__/8681a299-6227-4f6a-a55c-d149f0e525ff.mtl)",
+      "Bash(curl -s -o /dev/null -w 'PNG: HTTP %{http_code} \\(%{size_download} bytes\\)\\\\n' __TRACKED_VAR__/8681a299-6227-4f6a-a55c-d149f0e525ff/M_1db1487a_cb56_46df_92fa_acb9164c7272.png)",
+      "Bash(curl -s \"http://localhost:8433/Frontend_Data_Display.html\")"
+    ]
+  }
+}

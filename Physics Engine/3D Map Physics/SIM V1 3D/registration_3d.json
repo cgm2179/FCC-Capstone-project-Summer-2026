@@ -1,0 +1,34 @@
+{
+  "version": "reg3d-v1",
+  "fit": {
+    "candidate": 0,
+    "dihedral": "id",
+    "transposed": false,
+    "footprint_iou": 0.8929,
+    "threshold": 0.85,
+    "passed": true
+  },
+  "grid_shape": [
+    262,
+    17,
+    132
+  ],
+  "cell_size_m": 0.3,
+  "m_per_px": 0.0679264324704457,
+  "px_to_vox_scale": {
+    "x": 0.22642144,
+    "z": 0.22642144
+  },
+  "rx_height_m": 1.4,
+  "rx_y_vox": 5,
+  "room_band": [
+    3,
+    8
+  ],
+  "source": {
+    "mask_2d": "/Users/cameronmickle/Documents/Indoor_Walk_Test_7-7/Physics Engine/2D/SIM/inside_mask.npy",
+    "mask_3d": "/Users/cameronmickle/Documents/Indoor_Walk_Test_7-7/Physics Engine/3D Map Physics/SIM V1 3D/inside_mask.npy",
+    "floorplan_meta": "/Users/cameronmickle/Documents/Indoor_Walk_Test_7-7/Physics Engine/2D/STEP_1/floorplan_meta.json"
+  },
+  "note": "Scale ANCHORED on m_per_px/cell_size_m (both grids were registered to the same floor plan); footprint IoU is a quality check, not the fit. Outline-vs-outline IoU 0.8929 against a 0.891 ceiling set by fill mismatch. Compose lon/lat -> px with floorplan_meta affine_px_to_lonlat inverse, then px -> voxel with px_to_vox_scale."
+}

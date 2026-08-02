@@ -1,0 +1,18 @@
+# SIM V1 3D — local pipeline (voxelize + 3D engine + one-calc).
+# Dependency-light by design (mirrors SIM/requirements.txt): the OBJ voxelizer
+# is pure NumPy — no mesh library required. Versions match the SIM/ environment.
+numpy==2.5.0
+scipy==1.18.0
+matplotlib==3.11.0
+# engine_3d.py solves the 3-D eikonal arrival time with scikit-fmm (skfmm).
+scikit-fmm==2025.06.23
+# voxelize_city.py: .obj/.stl load with pure NumPy (no dep). Other mesh formats
+# (.ply/.gltf/.glb/.dae/.fbx) need trimesh; FBX/3DS additionally need pyassimp.
+# trimesh>=4.0    # optional — install to voxelize non-OBJ/STL meshes
+# pyassimp>=4.1   # optional — only for .fbx / .3ds via trimesh
+# Phase C (Colab): 3D UNet training + ONNX export — torch/onnx/onnxruntime come
+# preinstalled on Colab; the notebook records exact versions in its output.
+# For a local GPU box: torch>=2.4, onnx>=1.16, onnxruntime>=1.19
+
+# test harness (tests3d/)
+pytest==9.1.1

@@ -1,0 +1,106 @@
+/* landing.css — app screen router: mode chooser → import → preprocess.
+   Reuses the dashboard design tokens (:root in dashboard.css). Light theme. */
+
+/* Only one .app-screen is visible at a time (router toggles [hidden]). */
+.app-screen[hidden] { display: none !important; }
+
+/* Centered step screens (chooser / import / preprocess). The workspace
+   (.wrap) is also an .app-screen but keeps its own grid layout. */
+.step-shell { max-width: 780px; margin: 0 auto; padding: 44px 20px 60px; }
+.step-shell .brand { font-size: 1.55rem; font-weight: 700; margin: 0 0 4px; }
+.step-shell .brand-sub { color: var(--muted); margin: 0 0 24px; font-size: 0.95rem; line-height: 1.45; }
+
+/* Stepper breadcrumb */
+.step-nav { display: flex; gap: 8px; align-items: center; margin-bottom: 22px;
+  flex-wrap: wrap; font-size: 0.82rem; }
+.step-nav .crumb { display: flex; align-items: center; gap: 7px; color: var(--muted); }
+.step-nav .crumb .dot { width: 22px; height: 22px; border-radius: 999px; border: 1px solid var(--line);
+  display: grid; place-items: center; font-weight: 700; font-size: 0.76rem; background: #fff; }
+.step-nav .crumb.done .dot, .step-nav .crumb.active .dot {
+  background: var(--accent); border-color: var(--accent); color: #fff; }
+.step-nav .crumb.active { color: var(--ink); font-weight: 600; }
+.step-nav .sep { color: var(--line); }
+
+/* Choice pill groups (Indoor/Outdoor, 2D/3D) */
+.choice-block { margin-bottom: 22px; }
+.choice-block > label { display: block; font-size: 0.84rem; color: var(--muted); margin-bottom: 8px; }
+.choice-group { display: flex; gap: 10px; flex-wrap: wrap; }
+.choice { appearance: none; border: 1px solid var(--line); background: #fff; color: var(--ink);
+  border-radius: 12px; padding: 14px 20px; cursor: pointer; font-size: 0.95rem; font-weight: 600;
+  min-width: 150px; text-align: left; line-height: 1.3; }
+.choice .choice-hint { display: block; font-weight: 400; font-size: 0.78rem; color: var(--muted); margin-top: 3px; }
+.choice.active { border-color: var(--accent); background: #e7f4f2; color: var(--accent); }
+.choice:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Import / preprocess cards */
+.step-cards { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; }
+@media (max-width: 640px) { .step-cards { grid-template-columns: 1fr; } }
+.step-card h3 { margin: 0 0 6px; font-size: 1rem; }
+.step-card p { margin: 0 0 12px; color: var(--muted); font-size: 0.85rem; line-height: 1.45; }
+.step-card code { font-family: ui-monospace, Menlo, monospace; font-size: 0.82em; }
+.file-drop { border: 1px dashed var(--line); border-radius: 10px; padding: 16px; text-align: center;
+  color: var(--muted); font-size: 0.86rem; background: #fbfdfc; cursor: pointer; display: block; }
+.file-drop input { display: block; margin: 8px auto 0; font-size: 0.8rem; }
+.file-list { margin: 10px 0 0; padding: 0; list-style: none; font-size: 0.82rem; }
+.file-list li { padding: 3px 0; color: var(--ink); }
+.file-list li.dim { color: var(--muted); }
+
+/* voxel geometry summary */
+.geo-grid { display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; font-size: 0.85rem; margin-top: 4px; }
+.geo-grid .k { color: var(--muted); }
+.geo-grid .v { color: var(--ink); font-weight: 600; text-align: right; }
+.mat-list { margin: 12px 0 0; padding: 10px 0 0; list-style: none; font-size: 0.78rem; columns: 2;
+  border-top: 1px solid var(--line); }
+.mat-list li { padding: 2px 0; color: var(--muted); break-inside: avoid; }
+
+/* voxelization mode + cell size (preprocess) */
+.vox-ctl { margin: 4px 0 14px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fbfdfc; }
+.vox-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.vox-row:last-of-type { margin-bottom: 0; }
+.vox-label { font-size: 0.82rem; color: var(--muted); font-weight: 600; }
+.vox-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
+.vox-opt { appearance: none; border: 0; border-right: 1px solid var(--line); background: #fff; color: var(--ink);
+  padding: 7px 15px; cursor: pointer; font-size: 0.85rem; font-weight: 600; line-height: 1.15; text-align: center; }
+.vox-opt:last-child { border-right: 0; }
+.vox-opt .vox-hint { display: block; font-weight: 400; font-size: 0.68rem; color: var(--muted); margin-top: 1px; }
+.vox-opt.active { background: #e7f4f2; color: var(--accent); }
+.vox-opt.active .vox-hint { color: var(--accent); }
+.vox-cell { font-size: 0.82rem; color: var(--muted); }
+.vox-cell input { width: 62px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
+  font-size: 0.85rem; margin-right: 4px; }
+.vox-note { font-size: 0.76rem; color: var(--muted); margin-top: 10px; line-height: 1.45; min-height: 1.1em; }
+.vox-note b { color: var(--ink); font-weight: 600; }
+.vox-note.warn b { color: #b0483f; }
+
+/* measurement-CSV validation summary (preprocess) */
+.csv-summary { margin-top: 12px; padding: 12px; border: 1px solid var(--line);
+  border-radius: 10px; background: #fbfdfc; }
+.csv-sel { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
+  font-size: 0.82rem; background: #fff; color: var(--ink); max-width: 58%; }
+.csv-summary .geo-grid { margin-top: 10px; font-size: 0.8rem; }
+.csv-summary .geo-grid .v.miss { color: #b0483f; font-weight: 600; }
+.csv-summary .geo-grid .v.def { color: var(--accent); }
+.csv-defaults { margin-top: 10px; font-size: 0.78rem; color: var(--muted); line-height: 1.5;
+  display: flex; flex-direction: column; gap: 6px; }
+.csv-defaults .cd-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.csv-defaults input { width: 68px; padding: 5px 7px; border: 1px solid var(--line);
+  border-radius: 7px; font-size: 0.8rem; }
+.csv-defaults b { color: var(--ink); }
+
+/* action row */
+.step-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 26px; gap: 12px; }
+.btn-primary { appearance: none; border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  font-weight: 700; border-radius: 10px; padding: 11px 22px; cursor: pointer; font-size: 0.95rem; }
+.btn-primary:disabled { background: #b9c9c4; border-color: #b9c9c4; cursor: not-allowed; }
+.btn-ghost { appearance: none; border: 1px solid var(--line); background: #fff; color: var(--muted);
+  font-weight: 600; border-radius: 10px; padding: 11px 18px; cursor: pointer; font-size: 0.92rem; }
+.step-note { font-size: 0.82rem; color: var(--muted); max-width: 60%; }
+.step-status { font-size: 0.84rem; margin-top: 10px; min-height: 1.1em; color: var(--muted); }
+.step-status.ok { color: var(--accent); font-weight: 600; }
+.step-status.err { color: #b0483f; }
+
+/* workspace mode badge + change link (top of the sidebar panel) */
+.mode-badge { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 0.8rem; }
+.mode-badge .chip { background: #e7f4f2; color: var(--accent); font-weight: 700; border-radius: 999px; padding: 3px 11px; }
+.mode-badge a { color: var(--muted); text-decoration: underline; cursor: pointer; }
+.mode-badge a:hover { color: var(--ink); }
