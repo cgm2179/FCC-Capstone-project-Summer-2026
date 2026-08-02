@@ -59,21 +59,56 @@ Tunable in `manifest_3d.json` (`obj_material_map`). Owner should sanity-check:
 
 ## Fidelity ladder
 
+Effect numbering follows the v1 spatial catalog (S1–S12) used across this project.
+Two of the mechanisms below carry **no** S-number on purpose: that catalog describes a
+single-first-arrival model and lists specular multipath and the diffuse tail as v2 forks.
+This engine implements them anyway — which is what makes the browser's mechanism
+time-lapse possible at all ("reflected fronts as separate sweeps" is literally the fork).
+
 **Shipped (this engine):**
 
+- **Geometric spreading (S1) + multi-wall log-distance (S2)** — `Path_Loss_3D` wrapping
+  `SceneV3.pathloss_maps`: `fspl_1m(f) + 10·n·log₁₀(d)` with the Motley-Keenan `n`, `d₀`
+  conventions.
 - **Per-material Fresnel/slab (S3–S7)** — angle+thickness `CrossingLUT`, replacing
   the old flat per-class dB.
+- **3-D UTD diffraction (S8)** — `Diffraction_3D`, Kouyoumjian-Pathak `D` kept **complex**
+  so the combiner can interfere; slice-wise edge finding with the wedge parameter measured
+  from geometry. A per-edge relay cache makes the second leg Tx-independent.
+- **Clutter / Beer-Lambert (S10)** — `per_metre` material classes charged by path length
+  inside `crossing_loss`.
+- **Specular reflection & multipath** *(no S-number — v2 fork)* — `Reflection_3D`,
+  order-1 image sources with complex Airy-slab `R`, summed **coherently**.
+- **Diffuse scattering** *(no S-number — v2 fork)* — `Scattering_3D`, effective-roughness
+  / directive model. The only INCOHERENT mechanism; supplies the delay-spread tail.
 - **Eikonal arrival time (T3c)** — 3-D fast-march routes the front around barriers
   and bends/lags it through dielectrics, instead of punching straight through.
+- **Physics-exact combining** — `Combine_3D` sums coherent `E` and incoherent `p_incoh`
+  separately, with a bandwidth-averaging knob so single-tone nulls no receiver sees are
+  not rendered as coverage holes.
 
-**Still deferred** (added by later-stage modules, power-summed onto the direct field):
+**Floor FAF (S9) does not apply here.** It is a 2-D stand-in for slabs the model cannot
+see; in a 3-D voxel scene the floor and ceiling are real crossings already charged by
+S3–S7. Keeping FAF as well would double-count.
 
-- **3-D UTD diffraction (S8)** — without it, shadows behind the metal core read
-  over-deep (energy that would bend in doesn't); the direct field alone can exceed
-  500 dB in the deep core shadow until diffraction fills it.
-- **Reflection & scattering** — specular image sources + diffuse scattering
-  (`Wave Behavior/Enivronmental Interaction/{Reflection,Scattering}_3D.py`, still stubs).
+**Still deferred:**
+
+- **Refraction & absorption as their own modules** — `Refraction_3D.py`,
+  `Absorption_3D.py` are still 0-byte. Both effects are *present* inside the current
+  stack (in-wall slowdown via the eikonal speed field; `Im(q)` bulk absorption inside the
+  `CrossingLUT`); what is missing is exposing them as separate viewable channels.
+- **Order-2+ image sources** — `Reflection_3D.solve` raises on `order > 1`. CS8's bounce
+  budget is therefore `N_max = 1`.
+- **Multi-arrival PDP (T6)** — `contracts.PathSet` exists but nothing populates it; the
+  export is first-arrival per mechanism.
 - **Correlated shadow field (S11)** — spatially-correlated large-scale fading.
+- **In-wall slowdown on non-direct legs** — reflection, diffraction and scattering time
+  their paths at vacuum `c`; only the direct field is charged the eikonal lag. See
+  `precompute_volumes.write_mechanism_channels` ("TWO CLOCKS").
+- **Wall loss on the diffuse outbound leg** — `Scattering_3D` charges `obs_tx` on the
+  inbound leg only, so diffuse power passes through structure unattenuated. On the
+  production scene this makes the diffuse channel dominate coverage (median interior PL
+  103 dB vs the direct field's 302 dB; diffuse wins in 94.6% of voxels).
 - **Floor/ceiling material split** — `FrontColor` lumps the floor slab with walls
   as drywall; splitting horizontal (concrete slab) from vertical (partition)
   faces by normal would be more accurate for near-vertical rays.

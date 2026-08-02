@@ -135,21 +135,108 @@ be gated on eikonal reachability; phase falls back to d/c there.
   Supplies the delay-spread tail that the scanner's unused `Ref Signal - Delay Spread`
   column (5,951 samples) can validate. numpy + torch backends. **This is the mechanism that
   genuinely wants the A100** (O(n_patches × n_rx)).
-- ⬜ mechanism channels in `export_pl_volume.py --mechanisms` · enable the six `viz3dMode`
-  options · mechanism time-lapse
-- ⬜ `Refraction_3D.py`, `Absorption_3D.py` (both cheap, local)
+- ✅ **mechanism channels + the browser demo** — `export_pl_volume.py --mechanisms` and
+  `precompute_volumes.py --mech-channels` write `m_<mech>_<txid>.bin` (dB) and
+  `tau_<mech>_<txid>.bin` (ns) beside the total volume; `simulation3d.js` gained
+  `loadMechanism`/`chanAt`/`runMechanismField`/`runMechanismTimeLapse`; the four implemented
+  mechanisms are live in `viz3dMode` plus a **mechanism time-lapse** entry.
+  Per-mechanism colour is the **contribution share in dB** against the total, not percent —
+  a mechanism carrying 0.1 % of the power still has structure worth seeing, and a linear
+  0–100 % ramp collapsed it to 18 voxels out of 588 k on the production scene.
+- ⬜ `Refraction_3D.py`, `Absorption_3D.py` (both cheap, local) — until these land their two
+  `viz3dMode` options stay disabled and honestly labelled "module not built".
 
-`Diffraction_3D` → `Reflection_3D` → mechanism channels in `export_pl_volume.py --mechanisms` →
-enable the six disabled `viz3dMode` options → **mechanism time-lapse**.
+The time-lapse reuses the sweep's clock and scrub wiring; `sweepState` now holds a *list* of
+layers (one instanced mesh per mechanism) instead of a single mesh, so the eikonal sweep is
+just the one-layer case. No new render code, no second animation path.
 
-The time-lapse reuses `runWavefrontSweep`/`setSweepTau` unchanged: feed each mechanism's `tau_first`
-as another channel, one instanced mesh per mechanism. The reflected front genuinely arrives after the
-direct, the diffracted after that, the diffuse halo last — so playing them together *is* the
-mechanism time-lapse, with no new render code.
+**Two arrival-time clocks, on purpose.** `path_loss` reports the eikonal τ (charged for
+in-wall slowdown, ~+6 ns median on this scene); reflection, diffraction and scattering report
+vacuum path length. Mixing them put the direct front LAST in 99 % of interior voxels. So
+`path_loss` also exports `tau_geom_*.bin` (d/c) and the time-lapse runs every layer on that
+one convention — an honest path-length comparison in which direct ≤ reflected ≤ diffracted
+holds by construction. The **Wavefront sweep** view keeps the true eikonal arrival.
+Charging the other three mechanisms for in-wall slowdown is the real fix and is a physics
+change, not an export change.
 
-### M3 — Four modes + offload/cache  ⬜
-Remaining mechanisms (`Refraction`, `Absorption`, `Scattering`) · mode selector ·
-`cache/precompute_volumes.py` + `cache_index.py`.
+**Two findings the mechanism views surfaced** (both pre-existing, neither introduced here):
+1. *Diffuse scattering dominates the coverage map.* At tx_66-5-54 / 2442 MHz the direct field's
+   median interior PL is **302 dB** while the diffuse channel's is **103 dB** — diffuse beats
+   direct in **94.6 %** of interior voxels. The outbound patch→Rx leg is charged **no** wall
+   loss (`Scattering_3D._accumulate_*` applies `obs_tx` to the inbound leg only), so diffuse
+   power leaks through structure unattenuated. The direct path meanwhile has no saturating
+   obstruction model (the 2D engine's `satObs`), so it runs away to 300–500 dB.
+2. *The browser assets were a re-voxelization behind.* `sim_assets_3d.js` / `collision_3d.js`
+   still described the pre-M0.4 262×11×118 grid while the volumes were 262×17×132. Both are
+   regenerated; `insideMaskFor()` now refuses to index one grid with the other's strides.
+
+### M3 — Four modes + offload/cache  🚧
+- ✅ **`modes_3d.py`** — the mode registry. Four modes, one solve path: modes differ only
+  in which grid they build and where the source is, so that difference is data, not four
+  forked scripts.
+  | mode | scene | source | mechanisms |
+  |---|---|---|---|
+  | `vacuum` | all air, production grid shape | point | path loss only |
+  | `indoor` | the voxelized 7th floor | point | all four |
+  | `o2i` | the same floor | plane wave on the facade | facade + reflection/diffraction/scattering |
+  | `outdoor` | `city/NoMa_DC_buildings` | point | path loss, reflection, diffraction |
+- ✅ **Vacuum is the invariant gate made visible.** The engine must reproduce
+  `20log₁₀(d) + 20log₁₀(f) − 27.55` exactly; the browser re-checks the exported volume
+  against the closed form and prints the worst deviation, so the gate is something the
+  user can *see* rather than a line in a test log.
+- ✅ **O2I geometry is derived, not guessed.** `forte_hall_geometry()` computes
+  **415.9 m at arrival bearing 237.0°** from the floor plan's own QGIS georeference plus
+  the known rooftop coordinates — replacing `bs_preset.bearing_deg = 135`, which its own
+  comment called a demo placeholder. Outdoor-leg FSPL 80.7 dB (619 MHz) → 96.2 dB
+  (3710 MHz). The tests assert the *derivation*, not the constant.
+- ✅ **`facade_sources_3d` / `bs_field_3d`** — 3-D port of `phase_a.facade_sources`/
+  `bs_maps`. Normals are estimated for the whole grid at once (the per-voxel Python
+  version was ~573k iterations; the vectorized one is 0.15 s). Opposite bearings light
+  **disjoint** facades — the property that makes O2I directional at all.
+- ✅ **Mode selector in the browser**, with the volume catalog filtered by mode. A volume
+  solved in one mode is not interchangeable with another's, so the filter is correctness,
+  not tidiness.
+- ✅ **`cache_index.py`** — the content-addressed cache. Key is
+  `H(scene_sha, mode, tx_vox, bands, mechanisms, mech_bands, engine_ver)`, where
+  `engine_ver` hashes the **physics source itself**, so editing `Reflection_3D.py` or
+  `engine_3d.py` invalidates every affected volume with nobody remembering to bump a
+  number. Owns `index.json` (one writer — two writers with slightly different ideas of the
+  shape is how the v2/v3 divergence happened), LRU eviction under a disk budget, and a
+  `--verify` pass that catches truncation by arithmetic rather than by eye.
+- ✅ **The resume skip was silently wrong.** It asked "does `pl_volume_<tid>.bin` exist?",
+  so changing `--mechanisms`, widening `--bands`, or editing physics left the old file in
+  place, skipped the Tx, and kept a stale volume while reporting success. Demonstrated
+  before/after: same inputs → `SKIP (cache hit)` in 0.0 s; adding `reflection` → recomputes
+  in 10.0 s and the median PL moves 177.51 → 177.29 dB. The old code kept the first answer.
+- ✅ **Three-tier resolution, named on screen**: `cached volume → DL surrogate → analytic`.
+  The analytic JS mirror is the guaranteed-correct floor, so the surrogate can only ever
+  be an accelerator — the simulator works without it by construction.
+- ✅ **Neighbour prefetch** — after a volume loads, the 3 nearest cached Tx in the same
+  mode are fetched at idle, so moving the transmitter to the next one is instant.
+
+> **The surrogate tier deliberately refuses to guess.** No 3-D model is trained yet (M4),
+> and a network's input layout — channel order, normalization, blob sigma — is decided by
+> the training run. A wrong guess does not fail loudly; it produces a confident, wrong
+> field. So the browser loads `pl_unet3d.onnx` **only** alongside a `pl_unet3d.json`
+> contract that the trainer writes, and otherwise falls straight through to analytic and
+> says why. Writing that sidecar is part of M4.
+
+**LRU evicts whole transmitters, never individual files.** Half a volume is worse than
+none: the browser would fetch a 404 mid-render instead of falling through to the analytic
+tier.
+
+**Why the O2I field is cached.** Every facade source costs one `crossing_loss` solve
+(~2.9 s), so one source per lit voxel is 645 solves — half an hour for one map. But the
+O2I source geometry is *fixed*: Forte Hall does not move. So the field is a one-time
+computation keyed by scene+bearing+loss+bands, ~2 min at the default 48 sources and free
+afterwards. Same reasoning as the diffraction relay cache.
+
+**Two deliberate departures from the indoor path**, both because the transmitter is
+416 m outside the grid: the FSPL floor is disabled in O2I (flooring against an in-grid
+facade voxel would clamp the map to a fiction), and the facade contributions are summed
+as **power, not field** — they discretize one wavefront, so a coherent sum would
+manufacture an interference pattern that is an artifact of the sampling stride.
+
 Browser resolution order: **cached volume → DL surrogate → analytic fallback.**
 
 ### M4 — Dataset + DL surrogate  ⬜ *(Colab A100)*

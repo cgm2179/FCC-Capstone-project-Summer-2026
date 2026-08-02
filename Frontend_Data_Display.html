@@ -519,6 +519,22 @@
             diffraction · absorption · scattering) is the next milestone.</p>
           <div class="sim3d-layout">
             <aside class="sim3d-rail">
+              <!-- Propagation mode (M3). Chooses the scene AND the source model, so it
+                   comes before the transmitter: in O2I there is no Tx to place, the
+                   source is a macro cell 416 m outside the grid. Registry and the
+                   per-mode physics live in SIM V1 3D/modes_3d.py. -->
+              <section class="sim3d-step">
+                <h3><span class="step-n">0</span> Propagation mode</h3>
+                <label class="sim3d-field">Mode
+                  <select id="mode3dSelect">
+                    <option value="vacuum">Vacuum / free space</option>
+                    <option value="indoor" selected>Indoor</option>
+                    <option value="o2i">Indoor + Outdoor (O2I)</option>
+                    <option value="outdoor">Outdoor (city)</option>
+                  </select>
+                </label>
+                <p id="mode3dNote" class="sim3d-modenote"></p>
+              </section>
               <section class="sim3d-step">
                 <h3><span class="step-n">1</span> Transmitter</h3>
                 <label class="sim3d-field">Antenna type
@@ -567,13 +583,19 @@
                     <option value="interference">Interference &amp; multipath</option>
                     <option value="coverage">Propagation &amp; coverage</option>
                     <option value="sweep">Wavefront sweep (eikonal T)</option>
-                    <optgroup label="RF physics — coming soon">
-                      <option disabled>Path loss</option>
-                      <option disabled>Reflection</option>
-                      <option disabled>Refraction</option>
-                      <option disabled>Diffraction</option>
-                      <option disabled>Absorption</option>
-                      <option disabled>Scattering</option>
+                    <option value="mechlapse">Mechanism time-lapse</option>
+                    <!-- Per-mechanism views read the m_<mech>_*.bin channels written by
+                         export_pl_volume.py --mechanisms. Path loss shows absolute dB;
+                         the rest show each mechanism's share of the total power. -->
+                    <optgroup label="RF physics — per mechanism">
+                      <option value="path_loss">Geometric spreading + transmission (S1–S7)</option>
+                      <option value="reflection">Specular reflection / multipath</option>
+                      <option value="diffraction">UTD diffraction (S8)</option>
+                      <option value="scattering">Diffuse scattering</option>
+                    </optgroup>
+                    <optgroup label="RF physics — module not built">
+                      <option value="refraction" disabled>Refraction</option>
+                      <option value="absorption" disabled>Absorption</option>
                     </optgroup>
                   </select>
                 </label>

@@ -1,0 +1,8 @@
+# Volume caches and voxel grids are binary. Without this git guesses per file and
+# occasionally decides a .bin is text, producing hundred-thousand-line "diffs" on a
+# float16 blob and bloating the pack.
+*.bin binary
+*.npy binary
+*.npz binary
+*.onnx binary
+*.pt binary

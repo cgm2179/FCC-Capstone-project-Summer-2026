@@ -170,5 +170,144 @@
       3710.0
     ],
     "note": "cellular set derived from the PCTEL G-flex walk (T-Mobile MCC310/MNC260): n71 619/627, B2/n2 1935, n41 2510/2600, n78 3500/3710. n78 is the only band overlapping the sim's original WiFi list, so it is the one validatable band."
+  },
+  "mode": "indoor",
+  "modes": {
+    "_note": "Four propagation modes (M3). `mode` above is the default this scene is solved in; modes_3d.py is the registry and the single source of truth for how each one builds its scene and places its source.",
+    "available": [
+      {
+        "key": "vacuum",
+        "label": "Vacuum / free space",
+        "summary": "All air. PL must equal FSPL exactly \u2014 the invariant gate, visible.",
+        "source": "point",
+        "mechanisms": [
+          "path_loss"
+        ],
+        "barrier_classes": [],
+        "notes": "No materials, so only spreading applies; every other mechanism would be identically zero. Running the other modules here is not wrong, just empty.",
+        "available": true,
+        "unavailable_reason": null
+      },
+      {
+        "key": "indoor",
+        "label": "Indoor",
+        "summary": "The voxelized 7th floor with the transmitter inside. The production case.",
+        "source": "point",
+        "mechanisms": [
+          "path_loss",
+          "reflection",
+          "diffraction",
+          "scattering"
+        ],
+        "barrier_classes": [
+          3
+        ],
+        "notes": "",
+        "available": true,
+        "unavailable_reason": null
+      },
+      {
+        "key": "o2i",
+        "label": "Indoor + Outdoor (O2I)",
+        "summary": "Distant macro cell lighting the facade; energy penetrates and spreads inside.",
+        "source": "plane_wave",
+        "mechanisms": [
+          "o2i_facade",
+          "reflection",
+          "diffraction",
+          "scattering"
+        ],
+        "barrier_classes": [
+          3
+        ],
+        "notes": "Source geometry is derived from the Forte Hall coordinates and the floor plan georeference, not from the placeholder 135 deg bearing.",
+        "available": true,
+        "unavailable_reason": null,
+        "geometry": {
+          "tx_lonlat": [
+            -77.01142,
+            38.90155
+          ],
+          "origin_lonlat": [
+            -77.0074055,
+            38.90358466666667
+          ],
+          "building_centre_local_m": [
+            0.91,
+            0.12
+          ],
+          "tx_local_m": [
+            -347.8,
+            -226.5
+          ],
+          "distance_m": 415.9,
+          "arrival_bearing_deg": 237.0,
+          "propagation_bearing_deg": 57.0,
+          "derivation": "local ENU about floorplan_meta.origin_lonlat; building centre from affine_px_to_local_m at the raster centre",
+          "source": "/Users/cameronmickle/Documents/Indoor_Walk_Test_7-7/Physics Engine/2D/STEP_1/floorplan_meta.json"
+        },
+        "o2i_db": {
+          "low_loss": 15.0,
+          "high_loss": 28.0
+        }
+      },
+      {
+        "key": "outdoor",
+        "label": "Outdoor",
+        "summary": "City block: buildings are one barrier class, streets are air.",
+        "source": "point",
+        "mechanisms": [
+          "path_loss",
+          "reflection",
+          "diffraction"
+        ],
+        "barrier_classes": [
+          3
+        ],
+        "notes": "Ground reflection and terrain diffraction are not new physics \u2014 they are Reflection_3D and Diffraction_3D on a scene whose walls are buildings. Diffuse scattering is omitted by default: at 1 m cells the facade patch count explodes and the effective-roughness model is calibrated for indoor surfaces, so enabling it here would be extrapolation.",
+        "available": true,
+        "unavailable_reason": null
+      }
+    ],
+    "o2i": {
+      "geometry": {
+        "tx_lonlat": [
+          -77.01142,
+          38.90155
+        ],
+        "origin_lonlat": [
+          -77.0074055,
+          38.90358466666667
+        ],
+        "building_centre_local_m": [
+          0.91,
+          0.12
+        ],
+        "tx_local_m": [
+          -347.8,
+          -226.5
+        ],
+        "distance_m": 415.9,
+        "arrival_bearing_deg": 237.0,
+        "propagation_bearing_deg": 57.0,
+        "derivation": "local ENU about floorplan_meta.origin_lonlat; building centre from affine_px_to_local_m at the raster centre",
+        "source": "/Users/cameronmickle/Documents/Indoor_Walk_Test_7-7/Physics Engine/2D/STEP_1/floorplan_meta.json"
+      },
+      "penetration_db": {
+        "low_loss": 15.0,
+        "high_loss": 28.0
+      },
+      "penetration_ref": "3GPP TR 38.901 building-penetration classes",
+      "default_class": "low_loss",
+      "exterior_class": 5,
+      "default_sources": 48,
+      "supersedes": "2D manifest bs_preset.bearing_deg = 135, which its own comment called a demo placeholder; the bearing here is derived from the floor plan georeference and the known Forte Hall coordinates."
+    },
+    "outdoor": {
+      "scene_dir": "city/NoMa_DC_buildings",
+      "builder": "voxelize_city.py --mode 2.5d",
+      "building_class": 3,
+      "note": "gitignored (~350 MB per grid); rebuild with voxelize_city.py. Ground reflection and terrain diffraction are Reflection_3D / Diffraction_3D on a scene whose walls are buildings, not new modules."
+    }
   }
 }

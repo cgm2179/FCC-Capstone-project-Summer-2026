@@ -141,11 +141,11 @@ def solve(scene, tx, *, bands=None, S=0.3, alpha_R=4, patch_cells=2,
     txv = np.asarray(tx, np.float32)
 
     if backend == "torch":
-        acc = _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
-                                alpha_R, diffuse_frac, device, progress)
+        acc, tau_c = _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
+                                       alpha_R, diffuse_frac, device, progress)
     else:
-        acc = _accumulate_numpy(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
-                                alpha_R, diffuse_frac, progress)
+        acc, tau_c = _accumulate_numpy(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
+                                       alpha_R, diffuse_frac, progress)
 
     # upsample the coarse diffuse field back to the full grid
     for i in range(len(freqs)):
@@ -156,7 +156,13 @@ def solve(scene, tx, *, bands=None, S=0.3, alpha_R=4, patch_cells=2,
             p_incoh[i] = ndimage.zoom(acc[i], zoom, order=1)[:NX, :NY, :NZ]
     p_incoh *= inside[None].astype(np.float32)
 
-    # first diffuse arrival ~ shortest tx->patch->rx path
+    # First diffuse arrival: shortest tx->patch->rx two-leg path (band-independent, so one
+    # coarse solve broadcast across bands). This is what puts the diffuse halo LAST in the
+    # mechanism time-lapse -- and it is causal by the triangle inequality, since
+    # |tx-p| + |p-rx| >= |tx-rx| for every patch p.
+    tau_up = _upsample_tau(tau_c, (NX, NY, NZ), d)
+    tau_first[:] = np.where(inside, tau_up, np.inf)[None]
+
     fg = contracts.FieldGrid(
         E=np.zeros((contracts.NPOL, len(freqs), NX, NY, NZ), np.complex64),
         tau_first=tau_first, mechanism=MECHANISM, freqs_mhz=freqs,
@@ -164,15 +170,36 @@ def solve(scene, tx, *, bands=None, S=0.3, alpha_R=4, patch_cells=2,
         meta={"S": S, "alpha_R": alpha_R, "n_patches": int(len(pos)),
               "patch_cells": patch_cells, "rx_downsample": d, "backend": backend,
               "model": "effective roughness / directive (Degli-Esposti)",
-              "note": "INCOHERENT: fills p_incoh, E is zero by design"})
+              "note": "INCOHERENT: fills p_incoh, E is zero by design",
+              "tau": "min over patches of (|tx-p| + |p-rx|)/c, band-independent"})
     fg.combine_as = contracts.INCOHERENT
     return fg
 
 
+def _upsample_tau(tau_c, shape, d):
+    """Coarse arrival-time lattice -> full grid, preserving the unreachable sentinel.
+
+    inf cannot go through an interpolator, so unreachable cells ride a large finite
+    sentinel and are restored to inf afterwards. Arrival time is smooth in space (unlike
+    power, which spans decades), so linear interpolation is the right choice here.
+    """
+    NX, NY, NZ = shape
+    if d == 1 and tau_c.shape == shape:
+        return tau_c.astype(np.float32)
+    finite = np.isfinite(tau_c)
+    big = float(tau_c[finite].max() * 4.0) if finite.any() else 1.0
+    filled = np.where(finite, tau_c, big).astype(np.float32)
+    zoom = (NX / tau_c.shape[0], NY / tau_c.shape[1], NZ / tau_c.shape[2])
+    up = ndimage.zoom(filled, zoom, order=1)[:NX, :NY, :NZ]
+    return np.where(up < big * 0.5, up, np.inf).astype(np.float32)
+
+
 def _accumulate_numpy(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
                       alpha_R, diffuse_frac, progress):
+    """-> (power (nf, *coarse) float64, tau_first (*coarse) float32 seconds)."""
     cell = scene.cell
     out = np.zeros((len(freqs),) + R.shape[:3], np.float64)
+    tau_min = np.full(R.shape[:3], np.inf, np.float32)
     Rf = R.reshape(-1, 3)
     for pi in range(len(pos)):
         p, n = pos[pi], nrm[pi]
@@ -196,6 +223,13 @@ def _accumulate_numpy(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
         # patches only radiate into their own half-space
         lobe *= (u_out @ n > 0)
 
+        # two-leg delay, counted only where this patch actually radiates
+        radiates = live & (lobe > 0)
+        if radiates.any():
+            t_p = ((s_in + s_out) / C0).astype(np.float32)
+            np.minimum(tau_min, np.where(radiates, t_p, np.inf).reshape(R.shape[:3]),
+                       out=tau_min)
+
         for i, bi in enumerate(bidx):
             lam = C0 / (freqs[i] * 1e6)
             # incident power density at the patch (free-space spreading + wall crossings)
@@ -209,11 +243,12 @@ def _accumulate_numpy(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
             out[i] += contrib.reshape(R.shape[:3])
         if progress and pi % 500 == 0:
             print(f"  patch {pi}/{len(pos)}")
-    return out
+    return out, tau_min
 
 
 def _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
                       alpha_R, diffuse_frac, device, progress):
+    """-> (power (nf, *coarse) float64, tau_first (*coarse) float32 seconds)."""
     import torch
     if device is None:
         device = ("cuda" if torch.cuda.is_available()
@@ -229,6 +264,7 @@ def _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
     A = torch.as_tensor(area, device=dev)
     tx_t = torch.as_tensor(txv, device=dev)
     out = torch.zeros((len(freqs), Rf.shape[0]), dtype=acc_dt, device=dev)
+    tau_min = torch.full((Rf.shape[0],), float("inf"), dtype=torch.float32, device=dev)
 
     r_in = tx_t[None] - P
     s_in = torch.linalg.norm(r_in, dim=-1) * cell
@@ -240,7 +276,8 @@ def _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
     obs_t = [torch.as_tensor(np.asarray(obs_tx[bi]), device=dev) for bi in bidx]
     sel = torch.nonzero(ok).flatten()
     if sel.numel() == 0:
-        return out.reshape((len(freqs),) + R.shape[:3]).cpu().numpy()
+        return (out.reshape((len(freqs),) + R.shape[:3]).cpu().numpy(),
+                tau_min.reshape(R.shape[:3]).cpu().numpy())
 
     # Per-patch incident power, all patches and bands at once (n_patch, n_band).
     ixyz = P[sel].long()
@@ -255,6 +292,7 @@ def _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
     # ~200k tiny kernels per Tx and left the A100 at 0% utilisation -- launch-bound, not
     # compute-bound. Chunking turns it into a handful of large batched reductions.
     Pc, Nc, Sc = P[sel], N[sel], spec[sel]
+    s_in_c = s_in[sel]
     n_rx = Rf.shape[0]
     chunk = max(1, min(int(sel.numel()), max(1, (1 << 24) // max(n_rx, 1))))
     norm_lobe = (alpha_R + 1.0) / (2.0 * np.pi)
@@ -267,13 +305,21 @@ def _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
         cos_s = torch.einsum("crk,ck->cr", u_out, sc_)
         lobe = norm_lobe * torch.clamp(cos_s, min=0) ** alpha_R
         lobe = lobe * (torch.einsum("crk,ck->cr", u_out, nc) > 0)
+        radiates = (s_out > cell) & (lobe > 0)
         geo = (lobe / torch.clamp(s_out ** 2, min=cell ** 2)).to(acc_dt)
         geo = torch.where(s_out > cell, geo, torch.zeros((), dtype=acc_dt, device=dev))
         # (n_band, c) @ (c, n_rx) -> (n_band, n_rx): one matmul per chunk
         out += diffuse_frac * (p_in[k:k + chunk].T @ geo)
+        # earliest two-leg delay, same chunk, one more batched reduction (not a per-patch
+        # loop -- that is what left the A100 launch-bound before)
+        t_chunk = (s_in_c[k:k + chunk, None] + s_out) / C0
+        t_chunk = torch.where(radiates, t_chunk.float(),
+                              torch.full((), float("inf"), device=dev))
+        tau_min = torch.minimum(tau_min, t_chunk.amin(dim=0))
         if progress:
             print(f"  patches {min(k+chunk, sel.numel())}/{sel.numel()}", flush=True)
-    return out.reshape((len(freqs),) + R.shape[:3]).cpu().numpy()
+    return (out.reshape((len(freqs),) + R.shape[:3]).cpu().numpy(),
+            tau_min.reshape(R.shape[:3]).cpu().numpy())
 
 
 # --------------------------------------------------------------------------- self-test
@@ -310,6 +356,24 @@ def _selftest(backend="numpy") -> int:
     check("p_incoh populated", fg.p_incoh is not None and float(fg.p_incoh.max()) > 0)
     check("p_incoh finite and non-negative",
           bool(np.isfinite(fg.p_incoh).all() and (fg.p_incoh >= 0).all()))
+
+    # ---- diffuse arrival time (what places the halo LAST in the time-lapse) ----
+    tau = fg.tau_first[0]
+    live = np.isfinite(tau)
+    check("tau_first populated", bool(live.any()),
+          "all inf -- the diffuse halo would never appear in the time-lapse")
+    gx, gy, gz = np.meshgrid(*[np.arange(s) for s in M.shape], indexing="ij")
+    d_direct = np.sqrt((gx - tx[0]) ** 2 + (gy - tx[1]) ** 2
+                       + (gz - tx[2]) ** 2) * sc.cell
+    tau_direct = d_direct / C0
+    # two legs via a patch can never beat the straight line (triangle inequality); allow
+    # one coarse-lattice cell of interpolation slack
+    slack = (sc.cell * 2.0) / C0
+    check("diffuse arrival is causal",
+          bool((tau[live] >= tau_direct[live] - slack).all()),
+          f"min margin {float(np.min(tau[live] - tau_direct[live])) * 1e9:.2f} ns")
+    check("diffuse arrives after the direct path",
+          float(np.median(tau[live] - tau_direct[live])) > 0)
 
     # S = 0 must produce exactly no diffuse power
     fg0 = solve(sc, tx, bands=bands, S=0.0, patch_cells=2, rx_downsample=2,

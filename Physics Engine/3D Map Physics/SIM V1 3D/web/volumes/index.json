@@ -1,5 +1,10 @@
 {
- "version": "vol3d-v2",
+ "version": "vol3d-v3",
+ "modes": [
+  "indoor",
+  "o2i",
+  "vacuum"
+ ],
  "grid_shape": [
   262,
   17,
@@ -7,35 +12,37 @@
  ],
  "cell_size_m": 0.3,
  "bands_mhz": [
-  619.0,
-  627.0,
-  1935.0,
   2442.0,
-  2510.0,
-  2600.0,
-  3500.0,
-  3710.0,
-  5500.0,
-  6125.0
+  3500.0
  ],
  "mechanisms": [
   "path_loss",
-  "reflection",
-  "diffraction",
-  "scattering"
+  "reflection"
  ],
+ "engine_ver": "67e2962f3bc2d393",
  "pl_layout": "band,x,y,z  float16 dB",
- "t_layout": "x,y,z  float16 NANOSECONDS (sentinel 65504)",
- "count": 3,
+ "t_layout": "x,y,z  float16 NANOSECONDS (sentinel 65504 = unreachable)",
+ "mech_layout": "m_<mech>_<txid>.bin = band,x,y,z float16 dB; tau_<mech>_<txid>.bin = x,y,z float16 ns",
+ "count": 6,
+ "bytes": 118761456,
  "volumes": [
   {
-   "tx_id": "tx_174-5-42",
    "tx_vox": [
     174,
     5,
     42
    ],
-   "bands_mhz": [
+   "median_pl_db": 164.12,
+   "bytes": 12934416,
+   "txid": "tx_174-5-42",
+   "pl_file": "pl_volume_tx_174-5-42.bin",
+   "t_file": "t_volume_tx_174-5-42.bin",
+   "grid_shape": [
+    262,
+    17,
+    132
+   ],
+   "bands": [
     619.0,
     627.0,
     1935.0,
@@ -47,23 +54,90 @@
     5500.0,
     6125.0
    ],
-   "mechanisms": [
+   "mechanism_names": [
     "path_loss",
     "reflection",
     "diffraction",
     "scattering"
    ],
-   "median_pl_db": 164.12,
-   "bytes": 12934416
+   "t_max_ns": 199.38,
+   "t_unreachable_ns": 65504.0,
+   "mode": "indoor"
   },
   {
-   "tx_id": "tx_60-5-63",
+   "txid": "tx_217-5-110",
+   "mode": "indoor",
+   "tx_vox": [
+    217,
+    5,
+    110
+   ],
+   "grid_shape": [
+    262,
+    17,
+    132
+   ],
+   "bands": [
+    2442.0,
+    3500.0
+   ],
+   "t_max_ns": 252.0,
+   "t_unreachable_ns": 65504.0,
+   "pl_file": "pl_volume_tx_217-5-110.bin",
+   "t_file": "t_volume_tx_217-5-110.bin",
+   "mechanisms": {
+    "path_loss": {
+     "pl_file": "m_path_loss_tx_217-5-110.bin",
+     "tau_file": "tau_path_loss_tx_217-5-110.bin",
+     "t_max_ns": 252.0,
+     "tau_convention": "eikonal",
+     "combine_as": "coherent",
+     "tau_geom_file": "tau_geom_path_loss_tx_217-5-110.bin",
+     "tau_geom_max_ns": 243.75,
+     "bytes": 3527568
+    },
+    "reflection": {
+     "pl_file": "m_reflection_tx_217-5-110.bin",
+     "tau_file": "tau_reflection_tx_217-5-110.bin",
+     "t_max_ns": 240.75,
+     "tau_convention": "geometric",
+     "combine_as": "coherent",
+     "bytes": 2351712
+    }
+   },
+   "mech_bands": [
+    2442.0
+   ],
+   "mechanism_names": [
+    "path_loss",
+    "reflection"
+   ],
+   "key": "c722ac750a592c66",
+   "scene_sha": "689d48a8799a62f4",
+   "engine_ver": "67e2962f3bc2d393",
+   "median_pl_db": 177.29,
+   "bytes": 9406848,
+   "created": 1785638728.35183,
+   "last_used": 1785638747.6190221,
+   "hits": 1
+  },
+  {
    "tx_vox": [
     60,
     5,
     63
    ],
-   "bands_mhz": [
+   "median_pl_db": 154.88,
+   "bytes": 12934416,
+   "txid": "tx_60-5-63",
+   "pl_file": "pl_volume_tx_60-5-63.bin",
+   "t_file": "t_volume_tx_60-5-63.bin",
+   "grid_shape": [
+    262,
+    17,
+    132
+   ],
+   "bands": [
     619.0,
     627.0,
     1935.0,
@@ -75,23 +149,29 @@
     5500.0,
     6125.0
    ],
-   "mechanisms": [
+   "mechanism_names": [
     "path_loss",
     "reflection",
     "diffraction",
     "scattering"
    ],
-   "median_pl_db": 154.88,
-   "bytes": 12934416
+   "t_max_ns": 217.0,
+   "t_unreachable_ns": 65504.0,
+   "mode": "indoor"
   },
   {
-   "tx_id": "tx_66-5-54",
+   "txid": "tx_66-5-54",
    "tx_vox": [
     66,
     5,
     54
    ],
-   "bands_mhz": [
+   "grid_shape": [
+    262,
+    17,
+    132
+   ],
+   "bands": [
     619.0,
     627.0,
     1935.0,
@@ -103,14 +183,207 @@
     5500.0,
     6125.0
    ],
-   "mechanisms": [
+   "t_max_ns": 215.62,
+   "t_unreachable_ns": 65504.0,
+   "pl_file": "pl_volume_tx_66-5-54.bin",
+   "t_file": "t_volume_tx_66-5-54.bin",
+   "mechanisms": {
+    "path_loss": {
+     "pl_file": "m_path_loss_tx_66-5-54.bin",
+     "tau_file": "tau_path_loss_tx_66-5-54.bin",
+     "t_max_ns": 215.62,
+     "tau_convention": "eikonal",
+     "combine_as": "coherent",
+     "tau_geom_file": "tau_geom_path_loss_tx_66-5-54.bin",
+     "tau_geom_max_ns": 210.12,
+     "bytes": 5879280
+    },
+    "reflection": {
+     "pl_file": "m_reflection_tx_66-5-54.bin",
+     "tau_file": "tau_reflection_tx_66-5-54.bin",
+     "t_max_ns": 198.88,
+     "tau_convention": "geometric",
+     "combine_as": "coherent",
+     "bytes": 4703424
+    },
+    "diffraction": {
+     "pl_file": "m_diffraction_tx_66-5-54.bin",
+     "tau_file": "tau_diffraction_tx_66-5-54.bin",
+     "t_max_ns": 200.12,
+     "tau_convention": "geometric",
+     "combine_as": "coherent",
+     "bytes": 4703424
+    },
+    "scattering": {
+     "pl_file": "m_scattering_tx_66-5-54.bin",
+     "tau_file": "tau_scattering_tx_66-5-54.bin",
+     "t_max_ns": 198.12,
+     "tau_convention": "geometric",
+     "combine_as": "incoherent",
+     "bytes": 4703424
+    }
+   },
+   "mech_bands": [
+    2442.0,
+    3500.0,
+    5500.0
+   ],
+   "mechanism_names": [
     "path_loss",
     "reflection",
     "diffraction",
     "scattering"
    ],
-   "median_pl_db": 173.12,
-   "bytes": 12934416
+   "t_freq_mhz": null,
+   "norm": {
+    "pl_min_db": 40.0,
+    "pl_range_db": 130.0,
+    "freq_log_lo_mhz": 600.0,
+    "freq_log_hi_mhz": 6200.0
+   },
+   "bytes": 32923968,
+   "mode": "indoor"
+  },
+  {
+   "txid": "tx_2-3-115",
+   "mode": "o2i",
+   "tx_vox": [
+    2,
+    3,
+    115
+   ],
+   "grid_shape": [
+    262,
+    17,
+    132
+   ],
+   "bands": [
+    619.0,
+    627.0,
+    1935.0,
+    2442.0,
+    2510.0,
+    2600.0,
+    3500.0,
+    3710.0,
+    5500.0,
+    6125.0
+   ],
+   "t_max_ns": 280.25,
+   "t_unreachable_ns": 65504.0,
+   "pl_file": "pl_volume_tx_2-3-115.bin",
+   "t_file": "t_volume_tx_2-3-115.bin",
+   "mechanisms": {
+    "o2i_facade": {
+     "pl_file": "m_o2i_facade_tx_2-3-115.bin",
+     "tau_file": "tau_o2i_facade_tx_2-3-115.bin",
+     "t_max_ns": 280.25,
+     "tau_convention": "geometric",
+     "combine_as": "incoherent",
+     "bytes": 4703424
+    },
+    "reflection": {
+     "pl_file": "m_reflection_tx_2-3-115.bin",
+     "tau_file": "tau_reflection_tx_2-3-115.bin",
+     "t_max_ns": 275.5,
+     "tau_convention": "geometric",
+     "combine_as": "coherent",
+     "bytes": 4703424
+    },
+    "diffraction": {
+     "pl_file": "m_diffraction_tx_2-3-115.bin",
+     "tau_file": "tau_diffraction_tx_2-3-115.bin",
+     "t_max_ns": 275.5,
+     "tau_convention": "geometric",
+     "combine_as": "coherent",
+     "bytes": 4703424
+    },
+    "scattering": {
+     "pl_file": "m_scattering_tx_2-3-115.bin",
+     "tau_file": "tau_scattering_tx_2-3-115.bin",
+     "t_max_ns": 275.0,
+     "tau_convention": "geometric",
+     "combine_as": "incoherent",
+     "bytes": 4703424
+    }
+   },
+   "mech_bands": [
+    2442.0,
+    3500.0,
+    5500.0
+   ],
+   "mechanism_names": [
+    "o2i_facade",
+    "reflection",
+    "diffraction",
+    "scattering"
+   ],
+   "t_freq_mhz": null,
+   "norm": {
+    "pl_min_db": 40.0,
+    "pl_range_db": 130.0,
+    "freq_log_lo_mhz": 600.0,
+    "freq_log_hi_mhz": 6200.0
+   },
+   "bytes": 31748112
+  },
+  {
+   "txid": "tx_131-6-65",
+   "mode": "vacuum",
+   "tx_vox": [
+    131,
+    6,
+    65
+   ],
+   "grid_shape": [
+    262,
+    17,
+    132
+   ],
+   "bands": [
+    619.0,
+    627.0,
+    1935.0,
+    2442.0,
+    2510.0,
+    2600.0,
+    3500.0,
+    3710.0,
+    5500.0,
+    6125.0
+   ],
+   "t_max_ns": 146.88,
+   "t_unreachable_ns": 65504.0,
+   "pl_file": "pl_volume_tx_131-6-65.bin",
+   "t_file": "t_volume_tx_131-6-65.bin",
+   "mechanisms": {
+    "path_loss": {
+     "pl_file": "m_path_loss_tx_131-6-65.bin",
+     "tau_file": "tau_path_loss_tx_131-6-65.bin",
+     "t_max_ns": 146.88,
+     "tau_convention": "eikonal",
+     "combine_as": "coherent",
+     "tau_geom_file": "tau_geom_path_loss_tx_131-6-65.bin",
+     "tau_geom_max_ns": 147.12,
+     "bytes": 5879280
+    }
+   },
+   "mech_bands": [
+    2442.0,
+    3500.0,
+    5500.0
+   ],
+   "mechanism_names": [
+    "path_loss"
+   ],
+   "t_freq_mhz": null,
+   "norm": {
+    "pl_min_db": 40.0,
+    "pl_range_db": 130.0,
+    "freq_log_lo_mhz": 600.0,
+    "freq_log_hi_mhz": 6200.0
+   },
+   "bytes": 18813696
   }
  ]
 }
