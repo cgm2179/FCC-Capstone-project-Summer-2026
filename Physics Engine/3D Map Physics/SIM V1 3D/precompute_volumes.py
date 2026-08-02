@@ -64,7 +64,20 @@ import engine_3d  # noqa: E402
 from cache_index import CacheIndex, content_key, engine_version, scene_sha  # noqa: E402
 
 F16_MAX = 65504.0
-DEFAULT_MECHANISMS = "path_loss,reflection,diffraction"
+
+
+def resolve_mechanisms(mode: str, arg: str | None = None) -> list[str]:
+    """The mechanism stack for a run: an explicit --mechanisms wins, else the mode's own.
+
+    `modes_3d` owns the per-mode stack. This script used to carry its own default string
+    beside it, which is how the two entry points came to disagree about what a default
+    `indoor` solve includes (the constant omitted `scattering`), and how an explicit stack
+    that happened to spell the default was silently read as "no flag given".
+    """
+    if arg:
+        return [m.strip() for m in arg.split(",") if m.strip()]
+    import modes_3d as MD
+    return list(MD.get_mode(mode).mechanisms)
 
 
 def tx_id(tx) -> str:
@@ -323,7 +336,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--n-tx", type=int, default=8)
     ap.add_argument("--out", default=str(HERE / "web" / "volumes"))
-    ap.add_argument("--mechanisms", default=DEFAULT_MECHANISMS)
+    ap.add_argument("--mechanisms", default=None,
+                    help="comma-separated stack; default: the mode's own stack from "
+                         "modes_3d (the registry is the only definition of it)")
     ap.add_argument("--bands", default=None, help="comma-separated MHz (default: all)")
     ap.add_argument("--backend", default="numpy", choices=["numpy", "torch"])
     ap.add_argument("--bandwidth-mhz", type=float, default=None)
@@ -360,9 +375,7 @@ def main(argv=None) -> int:
 
     scene, manifest = MD.build_scene(mode)
     bands = ([float(x) for x in a.bands.split(",")] if a.bands else list(scene.freqs))
-    # an explicit --mechanisms still wins; otherwise take the mode's own stack
-    mechs = ([m.strip() for m in a.mechanisms.split(",") if m.strip()]
-             if a.mechanisms != DEFAULT_MECHANISMS else list(info["mechanisms"]))
+    mechs = resolve_mechanisms(mode, a.mechanisms)
     out_dir = Path(a.out).expanduser().resolve()
 
     band_sel = None

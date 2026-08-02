@@ -99,10 +99,12 @@ def main():
         want = [float(x) for x in args.mech_bands.split(",")]
         band_sel = [min(range(len(bands)), key=lambda i: abs(bands[i] - w)) for w in want]
 
-    # An explicit --mechanisms wins; otherwise the mode supplies its own stack, which is
-    # the only way `o2i` ever gets its facade source.
-    mechs = ([m.strip() for m in args.mechanisms.split(",")] if args.mechanisms
-             else (list(info["mechanisms"]) if mode != "indoor" else []))
+    # An explicit --mechanisms wins; otherwise the mode's own stack, resolved through the
+    # same helper the batch path uses so the two front doors cannot drift — and it is the
+    # only way `o2i` ever gets its facade source. Indoor is the one exception: with no
+    # flag it stays the path-loss-only volume this script has always written.
+    mechs = ([] if (not args.mechanisms and mode == "indoor")
+             else PV.resolve_mechanisms(mode, args.mechanisms))
     print(f"mode {mode} — {info['label']}")
     print(f"grid {nx}x{ny}x{nz}  tx(voxel)={txi}  bands={bands}  "
           + (f"mechanisms={mechs}" if mechs else f"path-loss only, T@{args.t_freq:.0f} MHz"))

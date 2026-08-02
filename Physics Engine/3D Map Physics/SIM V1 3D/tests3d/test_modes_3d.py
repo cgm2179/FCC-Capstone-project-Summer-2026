@@ -211,6 +211,49 @@ def test_source_for_returns_the_right_shape_per_mode(scene):
     assert "arrival_bearing_deg" in o and "distance_m" in o
 
 
+def test_entry_points_take_the_default_stack_from_the_registry():
+    """The exporters must not carry their own idea of what a mode includes.
+
+    `precompute_volumes` used to hold `DEFAULT_MECHANISMS = "path_loss,reflection,
+    diffraction"`, so a default indoor solve there was missing the scattering the registry
+    lists — two entry points, two different meanings of "indoor".
+    """
+    import precompute_volumes as PV
+
+    for k in MD.list_modes():
+        assert PV.resolve_mechanisms(k) == list(MD.get_mode(k).mechanisms), \
+            f"{k}: the batch exporter disagrees with the registry"
+    assert "scattering" in PV.resolve_mechanisms("indoor")
+    assert not hasattr(PV, "DEFAULT_MECHANISMS"), \
+        "a second definition of the default stack is back beside the registry"
+
+
+def test_explicit_mechanisms_flag_still_wins():
+    """Including when it spells exactly what the old hardcoded default said — comparing
+    the argument against a default string read that as "no flag given"."""
+    import precompute_volumes as PV
+
+    assert PV.resolve_mechanisms("indoor", "path_loss,reflection") == \
+        ["path_loss", "reflection"]
+    assert PV.resolve_mechanisms("indoor", "path_loss,reflection,diffraction") == \
+        ["path_loss", "reflection", "diffraction"]
+    assert PV.resolve_mechanisms("o2i", "path_loss") == ["path_loss"]
+
+
+def test_single_tx_exporter_resolves_through_the_same_helper():
+    """export_pl_volume shares the batch code path, so it must share the resolution too.
+
+    Asserted on the source because the choice happens inside `main()`, after a scene build
+    and a full solve that no unit test can afford.
+    """
+    import inspect
+
+    import export_pl_volume as EX
+
+    assert "PV.resolve_mechanisms" in inspect.getsource(EX.main)
+    assert not hasattr(EX, "DEFAULT_MECHANISMS")
+
+
 def test_manifest_carries_the_mode_and_the_o2i_derivation(manifest):
     assert manifest.get("mode") in MD.list_modes()
     modes = manifest.get("modes")
