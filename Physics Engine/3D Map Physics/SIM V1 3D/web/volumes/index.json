@@ -1,37 +1,116 @@
 {
-  "volumes": [
-    {
-      "txid": "tx_131-9-59",
-      "tx_vox": [
-        131,
-        9,
-        59
-      ],
-      "grid_shape": [
-        262,
-        11,
-        118
-      ],
-      "bands": [
-        2442.0,
-        3500.0,
-        5500.0,
-        6125.0
-      ],
-      "t_freq_mhz": 3500.0,
-      "t_max_ns": 147.11,
-      "t_unreachable_ns": 65504.0,
-      "dtype": "float16",
-      "pl_layout": "band,x,y,z",
-      "t_layout": "x,y,z",
-      "pl_file": "pl_volume_tx_131-9-59.bin",
-      "t_file": "t_volume_tx_131-9-59.bin",
-      "norm": {
-        "pl_min_db": 40.0,
-        "pl_range_db": 130.0,
-        "freq_log_lo_mhz": 2400.0,
-        "freq_log_hi_mhz": 6125.0
-      }
-    }
-  ]
+ "version": "vol3d-v2",
+ "grid_shape": [
+  262,
+  17,
+  132
+ ],
+ "cell_size_m": 0.3,
+ "bands_mhz": [
+  619.0,
+  627.0,
+  1935.0,
+  2442.0,
+  2510.0,
+  2600.0,
+  3500.0,
+  3710.0,
+  5500.0,
+  6125.0
+ ],
+ "mechanisms": [
+  "path_loss",
+  "reflection",
+  "diffraction",
+  "scattering"
+ ],
+ "pl_layout": "band,x,y,z  float16 dB",
+ "t_layout": "x,y,z  float16 NANOSECONDS (sentinel 65504)",
+ "count": 3,
+ "volumes": [
+  {
+   "tx_id": "tx_174-5-42",
+   "tx_vox": [
+    174,
+    5,
+    42
+   ],
+   "bands_mhz": [
+    619.0,
+    627.0,
+    1935.0,
+    2442.0,
+    2510.0,
+    2600.0,
+    3500.0,
+    3710.0,
+    5500.0,
+    6125.0
+   ],
+   "mechanisms": [
+    "path_loss",
+    "reflection",
+    "diffraction",
+    "scattering"
+   ],
+   "median_pl_db": 164.12,
+   "bytes": 12934416
+  },
+  {
+   "tx_id": "tx_60-5-63",
+   "tx_vox": [
+    60,
+    5,
+    63
+   ],
+   "bands_mhz": [
+    619.0,
+    627.0,
+    1935.0,
+    2442.0,
+    2510.0,
+    2600.0,
+    3500.0,
+    3710.0,
+    5500.0,
+    6125.0
+   ],
+   "mechanisms": [
+    "path_loss",
+    "reflection",
+    "diffraction",
+    "scattering"
+   ],
+   "median_pl_db": 154.88,
+   "bytes": 12934416
+  },
+  {
+   "tx_id": "tx_66-5-54",
+   "tx_vox": [
+    66,
+    5,
+    54
+   ],
+   "bands_mhz": [
+    619.0,
+    627.0,
+    1935.0,
+    2442.0,
+    2510.0,
+    2600.0,
+    3500.0,
+    3710.0,
+    5500.0,
+    6125.0
+   ],
+   "mechanisms": [
+    "path_loss",
+    "reflection",
+    "diffraction",
+    "scattering"
+   ],
+   "median_pl_db": 173.12,
+   "bytes": 12934416
+  }
+ ]
 }
