@@ -256,8 +256,74 @@ def shard_paths(out_dir, s: int) -> dict:
             "meta": f"{d}/shard_{s:03d}_meta.npz"}
 
 
-def shard_complete(out_dir, s: int) -> bool:
-    return all(os.path.exists(p) for p in shard_paths(out_dir, s).values())
+def shard_complete(out_dir, s: int, *, expect_pos=None, bands=None, scene_sha=None) -> bool:
+    """True if shard `s` is present AND (when expectations are given) matches this run.
+
+    The original check only asked whether the three files existed, which let a
+    leftover *smoke* shard (8 positions, written with SHARD_POS=8) look finished. A
+    later `full` run (SHARD_POS=25) then skipped that slot and never generated the
+    positions it was meant to hold — a silent hole in the position coverage that no
+    downstream `pos_id`-uniqueness check can catch. Passing the expected geometry
+    makes a mismatched shard count as *incomplete*, so the generator regenerates it.
+
+    With no expectations this is the old files-exist behaviour, so existing callers
+    are unaffected.
+    """
+    p = shard_paths(out_dir, s)
+    if not all(os.path.exists(f) for f in p.values()):
+        return False
+    if expect_pos is None and bands is None and scene_sha is None:
+        return True
+    try:
+        with np.load(p["meta"], allow_pickle=False) as z:
+            meta = {k: z[k] for k in z.files}
+    except Exception:
+        return False
+    if scene_sha is not None:
+        got = meta.get("scene_sha")
+        if got is None or str(np.asarray(got).reshape(-1)[0]) != str(scene_sha):
+            return False
+    if bands is not None:
+        got = [round(float(b), 3) for b in np.ravel(meta.get("bands_mhz", ()))]
+        if got != [round(float(b), 3) for b in bands]:
+            return False
+    if expect_pos is not None:
+        pid = meta.get("pos_id")
+        if pid is None or int(np.unique(pid).size) != int(expect_pos):
+            return False
+    return True
+
+
+def audit_shards(out_dir, *, shard_pos, n_positions, bands=None, scene_sha=None):
+    """Census of the shard slots needed to cover positions [0, n_positions).
+
+    Returns `(ok, rows)`. `ok` is True only when every slot is present and matches
+    the current run — i.e. no gaps and no smoke leftovers. Each row is
+    {shard, positions, expect, got, status} with status in {"ok","missing",
+    "mismatch"}, ready to print in the generator's preflight.
+    """
+    n_shards = int(np.ceil(n_positions / shard_pos))
+    rows, ok = [], True
+    for s in range(n_shards):
+        p0 = s * shard_pos
+        p1 = min((s + 1) * shard_pos, n_positions)
+        expect = p1 - p0
+        meta_path = shard_paths(out_dir, s)["meta"]
+        present = os.path.exists(meta_path)
+        matches = shard_complete(out_dir, s, expect_pos=expect, bands=bands,
+                                 scene_sha=scene_sha)
+        got = None
+        if present:
+            try:
+                with np.load(meta_path, allow_pickle=False) as z:
+                    got = int(np.unique(z["pos_id"]).size)
+            except Exception:
+                got = -1
+        status = "ok" if matches else ("missing" if not present else "mismatch")
+        ok = ok and matches
+        rows.append(dict(shard=s, positions=f"{p0}-{p1 - 1}", expect=expect,
+                         got=got, status=status))
+    return ok, rows
 
 
 def write_shard(out_dir, s: int, pl: np.ndarray, tau: np.ndarray, meta: dict) -> dict:

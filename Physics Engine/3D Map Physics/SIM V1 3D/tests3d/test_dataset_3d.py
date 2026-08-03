@@ -173,6 +173,74 @@ def test_no_partial_shard_survives_a_crash(tmp_path):
     assert not leftovers, f"temp files not cleaned up: {leftovers}"
 
 
+# ------------------------------------------------ shard_complete: the smoke-gap fix
+_BANDS = [619.0, 1935.0, 2442.0, 3500.0, 5500.0, 6125.0]
+_SHA = "deadbeefdeadbeef"
+
+
+def _write(tmp_path, s, pos_ids, *, bands=_BANDS, sha=_SHA, shape=(2, 2, 2)):
+    """Write a shard covering `pos_ids` at `bands`, exactly as phase_b3's loop does."""
+    pos_ids = list(pos_ids)
+    npos, nb = len(pos_ids), len(bands)
+    pl = np.zeros((npos * nb,) + shape, np.float16)
+    tau = np.zeros((npos,) + shape, np.float16)
+    meta = dict(
+        tx=np.zeros((npos * nb, 3), np.int16),
+        freq_mhz=np.array(bands * npos, np.float32),
+        freq_feat=np.zeros(npos * nb, np.float32),
+        pos_id=np.repeat(pos_ids, nb).astype(np.int32),
+        tau_row=np.repeat(np.arange(npos), nb).astype(np.int32),
+        scene_sha=sha, bands_mhz=np.array(bands, np.float32))
+    D.write_shard(tmp_path, s, pl, tau, meta)
+
+
+def test_shard_complete_rejects_smoke_leftover(tmp_path):
+    """A SHARD_POS=8 smoke shard must not satisfy a SHARD_POS=25 full run.
+
+    Reproduces the gap that shipped in the 716/750 dataset: a smoke run wrote
+    8-position shards into slots 0-1, and the old files-exist shard_complete let the
+    full run skip them, so positions 16-49 were never generated. The strengthened
+    check catches every way a shard can fail to match the current run.
+    """
+    _write(tmp_path, 0, range(0, 8))                       # smoke: 8 positions
+
+    # old behaviour preserved: with no expectations, files-exist == complete
+    assert D.shard_complete(tmp_path, 0) is True
+
+    # full run expects 25 positions here -> incomplete -> the loop regenerates it
+    assert D.shard_complete(tmp_path, 0, expect_pos=25, bands=_BANDS, scene_sha=_SHA) is False
+
+    _write(tmp_path, 2, range(50, 75))                     # a genuine 25-position shard
+    assert D.shard_complete(tmp_path, 2, expect_pos=25, bands=_BANDS, scene_sha=_SHA) is True
+    # a different scene or band set also invalidates a present shard
+    assert D.shard_complete(tmp_path, 2, expect_pos=25, bands=_BANDS, scene_sha="0" * 16) is False
+    assert D.shard_complete(tmp_path, 2, expect_pos=25, bands=_BANDS[:5], scene_sha=_SHA) is False
+
+
+def test_audit_shards_finds_then_clears_the_position_gap(tmp_path):
+    """audit_shards reports the smoke gap, and regenerating the slots clears it."""
+    # smoke left slots 0-1 (8 pos each: 0-7, 8-15); the full run filled 2-5 (25 each)
+    _write(tmp_path, 0, range(0, 8))
+    _write(tmp_path, 1, range(8, 16))
+    for s in range(2, 6):
+        _write(tmp_path, s, range(s * 25, s * 25 + 25))
+
+    ok, rows = D.audit_shards(tmp_path, shard_pos=25, n_positions=150,
+                              bands=_BANDS, scene_sha=_SHA)
+    assert ok is False
+    by_shard = {r["shard"]: r for r in rows}
+    assert by_shard[0]["status"] == "mismatch" and by_shard[0]["got"] == 8
+    assert by_shard[1]["status"] == "mismatch"
+    assert by_shard[2]["status"] == "ok"
+
+    # regenerate the two contaminated slots at the full SHARD_POS -> gap closes
+    _write(tmp_path, 0, range(0, 25))
+    _write(tmp_path, 1, range(25, 50))
+    ok2, rows2 = D.audit_shards(tmp_path, shard_pos=25, n_positions=150,
+                                bands=_BANDS, scene_sha=_SHA)
+    assert ok2 is True, [r for r in rows2 if r["status"] != "ok"]
+
+
 # --------------------------------------------------------------------------- contract
 def test_surrogate_contract_is_what_the_browser_reads(grid, manifest):
     c = D.surrogate_contract(manifest, grid, bands=[2442.0, 3500.0],
