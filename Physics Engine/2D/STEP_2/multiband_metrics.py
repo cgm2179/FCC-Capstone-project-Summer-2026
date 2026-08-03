@@ -40,6 +40,7 @@ mk = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mk)
 
 BANDS = [
+    dict(label="LTE_B13_751MHz",  f_mhz=751.0,  protocol="LTE", bw_mhz=10, scs_khz=15),  # Verizon (PCI 396/397/398) — cross-validation anchor
     dict(label="LTE_B71_617MHz",  f_mhz=617.0,  protocol="LTE", bw_mhz=10, scs_khz=15),
     dict(label="LTE_B2_1960MHz",  f_mhz=1960.0, protocol="LTE", bw_mhz=20, scs_khz=15),
     dict(label="NR_n41_2506MHz",  f_mhz=2506.0, protocol="NR",  bw_mhz=60, scs_khz=30),

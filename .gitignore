@@ -64,3 +64,9 @@ Physics Engine/3D Map Physics/SIM V1 3D/scene_v1_backup/
 # Indoor OSM basemap (PR #25): a large, per-machine generated raster. Regenerate with
 # `python3 scripts/prepare_indoor_basemap.py`. The live (Leaflet) path needs no file.
 Data/basemap_image.js
+
+# PR #26 — regenerable 2D O2I prediction artifacts. Rebuild with
+# pathloss_2d/predict_o2i.py then pathloss_2d/export_web.py.
+Physics Engine/Cross_Validation/pathloss_2d/out/
+Data/pl2d_crossval.js
+Physics Engine/Cross_Validation/validation/reports/*.png

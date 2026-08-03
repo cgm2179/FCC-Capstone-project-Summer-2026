@@ -31,6 +31,17 @@
     // time (load-time refs go stale) and listen via delegation on document (below).
     const osmBasemapMode = () => { const el = document.getElementById('osmBasemap'); return el ? el.value : 'off'; };
     const planOpacity = () => { const el = document.getElementById('floorOpacity'); return el ? Number(el.value) / 100 : 1; };
+    // 2D O2I cross-validation overlay (PR #26): selector value + lazy population.
+    const crossvalKey = () => { const el = document.getElementById('crossvalSelect'); return el ? el.value : ''; };
+    function populateCrossval() {
+      const sel = document.getElementById('crossvalSelect');
+      if (!sel || sel.dataset.filled === '1') return;
+      for (const k of (window.PL2D_CROSSVAL_KEYS || [])) {
+        const e = (window.PL2D_CROSSVAL || {})[k] || {};
+        sel.add(new Option(e.label || k, k));
+      }
+      sel.dataset.filled = '1';
+    }
     const tabMapBtn = document.getElementById('tabMapBtn');
     const tabHistogramBtn = document.getElementById('tabHistogramBtn');
     const tabTimeBtn = document.getElementById('tabTimeBtn');
@@ -539,6 +550,10 @@
     // respond to the Time Elapsed Playback slider. The time-scoped view lives
     // entirely on the Time Elapsed Playback tab (see renderPlayback below).
     function render() {
+      populateCrossval();
+      const cvk = crossvalKey();
+      if (cvk && window.PL2D_CROSSVAL && window.PL2D_CROSSVAL[cvk]) { renderCrossval(cvk); return; }
+      const cs = document.getElementById('crossvalStats'); if (cs) cs.textContent = '';
       if (osmBasemapMode() === 'live') { renderLeaflet(); return; }
       // non-live: Plotly surface owns #plot; hide the Leaflet surface (unless in 3D CAD mode)
       const in3D = !!(document.getElementById('mapMode3dBtn') &&
@@ -839,6 +854,53 @@
 
       leafletMap.invalidateSize();
       updateStats(data, metric);
+    }
+
+    // PR #26: overlay the 2D O2I predicted RSRP heatmap (viridis, from export_web.py) under
+    // the measured points coloured by residual (measured − predicted, level-calibrated).
+    function renderCrossval(key) {
+      const e = window.PL2D_CROSSVAL[key];
+      const lmDiv = document.getElementById('leafletMap'); if (lmDiv) lmDiv.style.display = 'none';
+      const plotDiv = document.getElementById('plot'); if (plotDiv) plotDiv.style.display = '';
+      if (plotKind === 'mapbox' || plotKind === 'leaflet') Plotly.purge(plotEl);
+      plotKind = 'cart';
+      const pts = e.points || [];
+      const absr = pts.map(p => Math.abs(p.resid)).sort((a, b) => a - b);
+      const lim = Math.max(6, absr.length ? absr[Math.floor(absr.length * 0.95)] : 6);
+      const traces = [{
+        type: 'scattergl', mode: 'markers',
+        x: pts.map(p => p.px), y: pts.map(p => p.py),
+        marker: {
+          size: 10, color: pts.map(p => p.resid), colorscale: 'RdBu', reversescale: true,
+          cmin: -lim, cmax: lim, cmid: 0, line: { color: '#222', width: 0.5 },
+          colorbar: { title: 'measured − predicted (dB)', len: 0.8, thickness: 16 }
+        },
+        text: pts.map(p => `measured ${p.meas} · predicted ${p.pred_cal} · resid ${p.resid} dB`),
+        hovertemplate: '%{text}<extra></extra>', showlegend: false
+      }];
+      const pred = {
+        source: e.rsrp_png, xref: 'x', yref: 'y', x: 0, y: 0, sizex: 1150, sizey: 515,
+        xanchor: 'left', yanchor: 'top', sizing: 'stretch', layer: 'below', opacity: 0.85
+      };
+      const fp = Object.assign({}, floorPlanImage, { opacity: 0.30 });
+      const sign = e.level_cal_db >= 0 ? '+' : '';
+      const layout = {
+        margin: { l: 12, r: 16, t: 54, b: 12 },
+        title: {
+          text: `Predicted 2D O2I vs measured — ${e.label}`
+            + `<br><sub>ρ ${e.spearman_rho} · RMSE(level-cal) ${e.rmse_after_cal_db} dB · `
+            + `level ${sign}${e.level_cal_db} dB · n ${e.n} · measured mean ${e.measured_mean} dBm · `
+            + `viridis = predicted RSRP, dots = residual</sub>`,
+          x: 0.02, font: { size: 13 }
+        },
+        xaxis: { visible: false, range: [0, 1150] },
+        yaxis: { visible: false, range: [515, 0], scaleanchor: 'x' },
+        images: [pred, fp],
+        paper_bgcolor: '#ffffff', plot_bgcolor: '#ffffff'
+      };
+      Plotly.react(plotEl, traces, layout, { responsive: true, displaylogo: false });
+      const stats = document.getElementById('crossvalStats');
+      if (stats) stats.textContent = `ρ ${e.spearman_rho} · RMSE ${e.rmse_after_cal_db} dB · n ${e.n}`;
     }
 
     // m:ss elapsed-duration label (e.g. "2:05"), independent of clock format.
@@ -1162,7 +1224,8 @@
     // OSM under-layer controls (PR #25) — Map Coverage only. Delegated on document so
     // they work even though the map-modes row is (re)built after this script runs.
     document.addEventListener('change', (e) => {
-      if (e.target && e.target.id === 'osmBasemap' && currentTab === 'map') refresh();
+      if (!e.target) return;
+      if ((e.target.id === 'osmBasemap' || e.target.id === 'crossvalSelect') && currentTab === 'map') refresh();
     });
     document.addEventListener('input', (e) => {
       if (e.target && e.target.id === 'floorOpacity' && currentTab === 'map') refresh();
