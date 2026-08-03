@@ -1,28 +1,39 @@
 # ---- Large / regenerable binaries — kept out of git (GitHub's 100 MB hard limit) ----
-# These are all reproducible from committed source, or hosted on GitHub releases.
+# A fresh `git clone` still gets everything needed to run the browser sim and to
+# start the Colab M4 pipeline (scene grids, notebooks, smoke ONNX, outdoor demo
+# tile, cached volumes). Only multi-GB regenerable artifacts stay out.
 
-# Trained surrogates (fetch via `make model`; released as surrogate-v1 / pl_unet3d)
+# Trained PyTorch checkpoints live on Drive during Colab; do not commit.
+*.pt
+*.pth
+
+# ONNX models are ignored by default (can be large). The browser surrogate at the
+# fixed deploy path MUST clone with the repo — allow-list it explicitly so
+# `git add SIM3D/web/pl_unet3d.onnx` after Colab export is not silently skipped.
 *.onnx
 !Physics Engine/3D Map Physics/SIM V1 3D/web/pl_unet3d.onnx
 !SIM3D/web/pl_unet3d.onnx
-*.pt
 
-# Training dataset shards (regenerate with the phase_b notebooks, or `make dataset-fetch`)
-*.npz
-
-# 3-D surrogate shards are raw .npy so the trainer can memory-map them (a compressed
-# member cannot be mmap'd, and the dataset is ~8 GB against Colab's 12.7 GB of RAM).
-# Listed by name because *.npy as a whole is NOT ignored — material_grid.npy and the
-# masks are committed source.
+# Dataset shard *volumes* (~GB). Meta sidecars are ignored the same way.
+# Do NOT use a blanket `*.npz` — that also hides small non-dataset archives.
 Physics Engine/3D Map Physics/SIM V1 3D/dataset/shard_*.npy
+Physics Engine/3D Map Physics/SIM V1 3D/dataset/shard_*_meta.npz
 Physics Engine/3D Map Physics/SIM V1 3D/dataset/*.part
+# 2-D pipeline shards (same rule)
+Physics Engine/2D/SIM/dataset/shard_*.npz
+Physics Engine/2D/SIM/dataset/*.part
 
-# Outdoor city voxel grids — ~347 MB each; regenerate with voxelize_city.py
+# Outdoor FULL city voxel grids — ~350 MB; regenerate with voxelize_city.py.
+# The committed demo tile under city_demo/ is NOT ignored (Outdoor mode works offline).
 Physics Engine/3D Map Physics/SIM V1 3D/city/
 
-# Diffraction relay cache — ~376 MB at 16 edges; rebuilt automatically by
-# precompute_volumes.py on first run (~75 s), then reused by every transmitter.
+# Diffraction relay cache — ~376 MB; rebuilt on first solve (~75 s).
 Physics Engine/3D Map Physics/SIM V1 3D/cache/
+
+# Colab checkpoint dir contents except the human-readable train report
+Physics Engine/3D Map Physics/SIM V1 3D/checkpoints/*
+!Physics Engine/3D Map Physics/SIM V1 3D/checkpoints/.gitkeep
+!Physics Engine/3D Map Physics/SIM V1 3D/checkpoints/train_report.json
 
 # ---- Large local working data — NOT committable ----
 # GitHub rejects any single file over 100 MB at the pre-receive hook, and

@@ -25,11 +25,14 @@ from scipy import ndimage
 
 # Locate the validated 2-D physics_v2.py. The repo reorg moved SIM to
 # Physics Engine/2D/SIM, so search a few candidate locations (real path first,
-# then legacy sibling layouts) and put the first that exists on sys.path.
+# then legacy / Colab layouts) and put the first that exists on sys.path.
+# Colab often uploads only `SIM V1 3D/` — drop a copy of physics_v2.py into that
+# folder (or keep the whole repo tree) and the `_here` entry finds it.
 _here = Path(__file__).resolve().parent
 for _c in (_here.parent.parent / "2D" / "SIM",   # Physics Engine/2D/SIM (real)
            _here.parent.parent / "SIM",          # legacy: SIM beside the 3D group
-           _here.parent / "SIM"):                # legacy: SIM beside SIM V1 3D
+           _here.parent / "SIM",                 # legacy: SIM beside SIM V1 3D
+           _here):                               # Colab: physics_v2.py inside SIM V1 3D/
     if (_c / "physics_v2.py").exists():
         if str(_c) not in sys.path:
             sys.path.insert(0, str(_c))

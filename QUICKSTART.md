@@ -108,27 +108,25 @@ The committed default model `Data/models/7th_floor_full.glb` was produced this w
 → a few MB) and loads in a second or two. Drop a `.glb` into "Load model file…" and it
 loads the same fast path; Draco geometry decodes automatically.
 
-## What a fresh clone does *not* include
+## What a fresh clone includes vs omits
 
-None of these are breakage — they are regenerable artifacts kept out of git deliberately.
+**Included** (`.gitignore` allow-lists these — browser + Colab start after clone):
+scene grids/masks/manifest, both M4 notebooks, `dataset_3d.py`, outdoor `city_demo/`,
+cached `web/volumes/`, and `web/pl_unet3d.json` + smoke `web/pl_unet3d.onnx`.
+After Colab, overwrite that ONNX path and `git add` it — git will **not** silently skip it.
 
-- **`SIM V1 3D/cache/`** — the diffraction relay cache (~376 MB) and the O2I facade field.
-  Rebuilt automatically on the first solve that needs them (~74 s and ~2 min respectively).
-  Not needed to browse the cached volumes.
-- **`SIM V1 3D/city/`** — the full outdoor city grid (~350 MB @ 1 m). Gitignored /
-  regenerable. A **committed demo tile** lives at `SIM3D/city_demo/NoMa_DC_tile`
-  (`129×33×129` @ 2 m) with one cached Tx (`tx_67-20-66`); Outdoor mode uses that
-  automatically. Rebuild the full city when you have the RAM:
+**Omitted on purpose** (regenerable / too large for GitHub):
+
+- **`SIM V1 3D/cache/`** — diffraction relay (~376 MB); rebuilt on first solve (~75 s).
+- **`SIM V1 3D/city/`** — full outdoor city (~350 MB @ 1 m). Demo tile
+  `city_demo/NoMa_DC_tile` (`129×33×129` @ 2 m, Tx `tx_67-20-66`) is committed.
   ```bash
   python3 "SIM V1 3D/voxelize_city.py" --mode 2.5d --cell 1
   ```
-- **`pl_unet3d.onnx` + `pl_unet3d.json`** — a **smoke** (untrained) 3D surrogate is
-  shipped so the browser contract + WASM inference path can be verified. It is *not*
-  a ≤5 dB trained model; replace it after Colab training. Resolution order remains
-  *cached volume → DL surrogate → analytic*; the analytic mirror is still the
-  guaranteed-correct floor.
+- **`dataset/shard_*.npy`** — generate on Colab via `phase_b3_dataset.ipynb`.
+- **`*.pt` checkpoints** — stay on Drive; optional `checkpoints/train_report.json` is commit-able.
 - **`FCC_Walk_Outdoor_Indoor_Full/`, `Sandbox_Version_3D_Simulation_v1.obj/`** — local
-  working data, far past GitHub's 100 MB per-file limit.
+  working data over GitHub’s 100 MB/file limit.
 
 ## Where things live
 
