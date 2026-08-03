@@ -56,36 +56,52 @@ To browse the result, serve over HTTP and open `Frontend_Data_Display.html` — 
 
 ## Colab — dataset → train → export (M4)
 
-Upload the whole `SIM V1 3D/` folder to Drive, plus the sibling `Physics Engine/2D/SIM/physics_v2.py`
-that `physics_3d` imports. Then, in order:
+### What a clone already includes (gitignore does **not** strip these)
+`material_grid.npy`, `inside_mask.npy`, `valid_tx_mask.npy`, `manifest_3d.json`,
+both notebooks, `dataset_3d.py` / `engine_3d.py`, `web/pl_unet3d.json` + smoke
+`web/pl_unet3d.onnx` (allow-listed), outdoor `city_demo/`, and cached `web/volumes/`.
 
-**B — `phase_b3_dataset.ipynb`** (CPU runtime is correct; `SceneV3` is NumPy)
+Ignored on purpose (regenerate / keep on Drive): full `city/`, `cache/`,
+`dataset/shard_*.npy`, `*.pt` checkpoints. After Colab, copy the trained
+`web/pl_unet3d.onnx` + `pl_unet3d.json` back — git will accept that ONNX path.
+
+### Drive layout (pick one)
+
+**Recommended — whole repo on Drive** (paths match a normal clone):
+```text
+MyDrive/indoor-walk-test/          ← git clone here, or upload the repo zip
+ROOT = "/content/drive/MyDrive/indoor-walk-test/Physics Engine/3D Map Physics/SIM V1 3D"
+```
+
+**Minimal — folder only:** upload `SIM V1 3D/` and also drop
+`Physics Engine/2D/SIM/physics_v2.py` **into that same folder** (Colab fallback
+search in `physics_3d.py`). For mechanism exports you also need the sibling
+`Wave Behavior/` tree beside `SIM V1 3D/`.
+
+### Run order
+
+**B — `phase_b3_dataset.ipynb`** (CPU runtime; `SceneV3` is NumPy)
 
 Set `ROOT`, leave `SMOKE = True` for a 16-position check, then set it `False` and Run All.
 Writes resumable `dataset/shard_NNN_{pl,tau}.npy` + `_meta.npz`; re-run the generate cell to
 resume after a disconnect. Roughly 4 s per position, so 1,000 positions is about an hour.
 
-> **This notebook currently stops at its preflight gate, by design.** 79 % of interior voxels at
-> 3500 MHz saturate the 170 dB normalization ceiling because `SceneV3.crossing_loss` has no
-> saturating obstruction model. Training on that target teaches a network a flat plateau. Land
-> Pre-M4 §P1 in [PLAN_3D_SIM.md](PLAN_3D_SIM.md) first; raising `CLIP_LIMIT` to get past the gate
-> is the one change that guarantees a worthless model.
+Preflight should print `preflight OK` (M2 `satObs` keeps clip fraction under 35%).
+Do **not** raise `CLIP_LIMIT` if it fails — fix the scene / `use_satobs` instead.
 
-**C — `phase_c3_train_colab.ipynb`** (GPU runtime)
+**C — `phase_c3_train_colab.ipynb`** (GPU runtime — A100 preferred)
 
-Set `ROOT`, Run All. Trains the 3-D UNet with FSPL-floor, causality, band-ordering and reciprocity
-constraints; reports test RMSE/MAE in dB against FSPL and log-distance baselines; exports
-`web/pl_unet3d.onnx` behind a ≤ 0.1 dB parity gate, plus the `web/pl_unet3d.json` input contract the
-browser refuses to run without. Resumable — checkpoints to Drive every 2 epochs and honours a
-`MAX_HOURS` budget, so re-running the training cell continues rather than restarts.
+Set the same `ROOT`, Run All. Trains the 3-D UNet with FSPL-floor, causality, band-ordering and
+reciprocity constraints; exports `web/pl_unet3d.onnx` behind a ≤ 0.1 dB parity gate plus
+`web/pl_unet3d.json`. Resumable — checkpoints every 2 epochs; `MAX_HOURS` stops cleanly.
+
+Copy both `web/pl_unet3d.*` files back into the repo (and optional
+`checkpoints/train_report.json`), commit, push. Browser status then shows a real
+`DL surrogate` instead of the smoke model.
 
 Both notebooks import their tensor layout from `dataset_3d.py`. Do not redefine normalization,
 channel order or the blob sigma anywhere else: a mismatch between trainer and browser does not
 raise, it renders a confident wrong field.
-
-```bash
-python3 "SIM V1 3D/export_web3.py"    # grid + masks + manifest -> web/sim_assets_3d.js
-```
 
 ## Status
 
