@@ -1,0 +1,77 @@
+{
+ "spec_version": "pl-unet3d-v1",
+ "model_file": "pl_unet3d.onnx",
+ "mode": "indoor",
+ "mechanisms": [
+  "path_loss"
+ ],
+ "grid_shape": [
+  262,
+  17,
+  132
+ ],
+ "cell_size_m": 0.3,
+ "scene_sha": "689d48a8799a62f4",
+ "bands_mhz": [
+  619.0,
+  1935.0,
+  2442.0,
+  3500.0,
+  5500.0,
+  6125.0
+ ],
+ "input": {
+  "name": "x",
+  "layout": "N,C,X,Y,Z",
+  "dtype": "float32",
+  "channels": [
+   "material_onehot_0",
+   "material_onehot_1",
+   "material_onehot_2",
+   "material_onehot_3",
+   "material_onehot_4",
+   "material_onehot_5",
+   "tx_blob",
+   "freq_feat",
+   "log_distance"
+  ],
+  "material_classes": 6,
+  "tx_blob_sigma_cells": 2.0,
+  "logdist_divisor": 3.0,
+  "logdist_min_m": 1.0,
+  "freq_log_lo_mhz": 600.0,
+  "freq_log_hi_mhz": 6200.0
+ },
+ "output": {
+  "name": "y",
+  "layout": "N,C,X,Y,Z",
+  "channels": [
+   "pl_norm",
+   "tau_norm"
+  ],
+  "pl_min_db": 40.0,
+  "pl_range_db": 130.0,
+  "tau_max_ns": 400.0
+ },
+ "metrics": {
+  "rmse_pl_db": 14.466699345544574,
+  "mae_pl_db": 10.10450232486349,
+  "rmse_tau_ns": 12.019273794745484,
+  "rmse_fspl_db": 79.98819545261031,
+  "rmse_logdist_db": 66.17990333726762,
+  "fspl_violation_frac": 0.0,
+  "causality_violation_frac": 0.054925105078830104
+ },
+ "trained_at": "2026-08-03T04:56:21Z",
+ "params": 3289466,
+ "base": 24,
+ "epochs_run": 39,
+ "onnx_parity_db": 0.1313934326171875,
+ "onnx_size_mb": 13.2,
+ "train_positions": 584,
+ "train_samples": 3504,
+ "test_positions": 64,
+ "torch": "2.11.0+cu128",
+ "force_export": true,
+ "smoke": false
+}
