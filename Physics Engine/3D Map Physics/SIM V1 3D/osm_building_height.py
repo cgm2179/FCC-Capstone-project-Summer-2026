@@ -155,6 +155,102 @@ def resolve_tx_height_m(lon: float = FORTE_HALL_LON, lat: float = FORTE_HALL_LAT
     return out
 
 
+# --------------------------------------------------------------------------- #
+# Generalized resolver with on-disk cache + per-site manual override.          #
+# Added for the base-station catalog (Cross_Validation/base_station_catalog);  #
+# resolve_tx_height_m above is unchanged so existing importers keep working.   #
+# --------------------------------------------------------------------------- #
+def _cache_key(lon: float, lat: float) -> str:
+    return f"{round(float(lon), 6)},{round(float(lat), 6)}"
+
+
+def load_cache(cache_path) -> dict:
+    p = Path(cache_path)
+    if p.is_file():
+        try:
+            return json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError):
+            return {}
+    return {}
+
+
+def save_cache(cache_path, cache: dict) -> None:
+    Path(cache_path).write_text(json.dumps(cache, indent=2, sort_keys=True))
+
+
+def resolve_building_height(lon: float, lat: float, *, manual_m: float | None = None,
+                            prefer_manual: bool = False, use_network: bool = True,
+                            fallback_m: float = FALLBACK_HEIGHT_M,
+                            min_plausible_m: float = 6.0,
+                            cache: dict | None = None, cache_path=None) -> dict:
+    """Building height at (lon, lat) with a manual override and optional on-disk cache.
+
+    Decision order:
+      - prefer_manual=True and manual_m given -> manual   (source 'manual:prefer')
+      - else a positive OSM height             -> OSM      (source 'osm:*')
+      - else manual_m if given                 -> manual   (source 'manual:fallback')
+      - else fallback_m                        -> fallback (source 'fallback:*')
+
+    Never raises on a network miss. Pass a shared `cache` dict for batch runs, or a
+    `cache_path` to load/save a JSON cache automatically (Overpass-friendly, offline
+    after the first successful run).
+    """
+    key = _cache_key(lon, lat)
+    own_cache = cache is None and cache_path is not None
+    if own_cache:
+        cache = load_cache(cache_path)
+
+    osm_res = None
+    if cache is not None and key in cache:
+        osm_res = cache[key]
+    elif use_network:
+        res = resolve_tx_height_m(lon, lat, use_network=True, fallback_m=fallback_m)
+        # strip the bulky OSM element body before caching / returning
+        slim = {k: v for k, v in res.items() if k != "osm"}
+        el = res.get("osm")
+        if isinstance(el, dict):
+            slim["osm_tags"] = el.get("tags")
+            if "_error" in el:
+                slim["osm_error"] = el["_error"]
+        osm_res = slim
+        if cache is not None:
+            cache[key] = slim
+
+    osm_height = None
+    osm_source = None
+    if osm_res and str(osm_res.get("source", "")).startswith("osm"):
+        osm_height = osm_res.get("height_m")
+        osm_source = osm_res.get("source")
+
+    # Reject obvious OSM placeholders (e.g. the default height=3 on untagged buildings)
+    # so a live re-fetch can't clobber a real survey/fallback with a stub value.
+    osm_placeholder = osm_height is not None and float(osm_height) < min_plausible_m
+    if osm_placeholder:
+        osm_height, osm_source = None, None
+
+    manual_ok = manual_m is not None and float(manual_m) > 0
+    if manual_ok and prefer_manual:
+        height, source, conf = float(manual_m), "manual:prefer", "manual"
+    elif osm_height is not None and float(osm_height) > 0:
+        height, source, conf = float(osm_height), osm_source, "osm"
+    elif manual_ok:
+        height, source, conf = float(manual_m), "manual:fallback", "manual"
+    else:
+        height, source, conf = float(fallback_m), f"fallback:{fallback_m}m", "fallback"
+
+    if own_cache:
+        save_cache(cache_path, cache)
+
+    return {
+        "lon": float(lon), "lat": float(lat),
+        "height_m": round(height, 2), "source": source, "confidence": conf,
+        "osm_height_m": osm_height, "manual_m": manual_m,
+        "osm_placeholder": osm_placeholder,
+        "osm_tags": (osm_res or {}).get("osm_tags"),
+        "osm_error": (osm_res or {}).get("osm_error"),
+    }
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--lon", type=float, default=FORTE_HALL_LON)
