@@ -24,19 +24,56 @@ import numpy as np
 from scipy import ndimage
 
 # Locate the validated 2-D physics_v2.py. The repo reorg moved SIM to
-# Physics Engine/2D/SIM, so search a few candidate locations (real path first,
-# then legacy / Colab layouts) and put the first that exists on sys.path.
-# Colab often uploads only `SIM V1 3D/` — drop a copy of physics_v2.py into that
-# folder (or keep the whole repo tree) and the `_here` entry finds it.
+# Physics Engine/2D/SIM. Search several layouts (local clone, legacy, Colab zip
+# upload, physics_v2.py copied into SIM V1 3D/). Raise a clear error if none hit —
+# a bare `ModuleNotFoundError` on Colab is not actionable.
 _here = Path(__file__).resolve().parent
-for _c in (_here.parent.parent / "2D" / "SIM",   # Physics Engine/2D/SIM (real)
-           _here.parent.parent / "SIM",          # legacy: SIM beside the 3D group
-           _here.parent / "SIM",                 # legacy: SIM beside SIM V1 3D
-           _here):                               # Colab: physics_v2.py inside SIM V1 3D/
-    if (_c / "physics_v2.py").exists():
+
+
+def _physics_v2_candidates(here: Path):
+    """Yield directories that may contain physics_v2.py, most-likely first."""
+    seen = set()
+    cands = [
+        here.parent.parent / "2D" / "SIM",          # .../Physics Engine/2D/SIM
+        here.parent.parent / "SIM",                 # legacy beside 3D Map Physics
+        here.parent / "SIM",                        # legacy beside SIM V1 3D
+        here,                                       # Colab: copy physics_v2.py here
+    ]
+    # Walk up looking for <repo>/Physics Engine/2D/SIM (GitHub zip / Drive clone)
+    p = here
+    for _ in range(6):
+        p = p.parent
+        cands.append(p / "Physics Engine" / "2D" / "SIM")
+        cands.append(p / "2D" / "SIM")
+        cands.append(p / "SIM")
+    for c in cands:
+        key = str(c)
+        if key in seen:
+            continue
+        seen.add(key)
+        yield c
+
+
+_found = None
+_tried = []
+for _c in _physics_v2_candidates(_here):
+    _tried.append(str(_c / "physics_v2.py"))
+    if (_c / "physics_v2.py").is_file():
         if str(_c) not in sys.path:
             sys.path.insert(0, str(_c))
+        _found = _c
         break
+if _found is None:
+    raise ModuleNotFoundError(
+        "physics_v2.py not found — the 3D engine imports the validated 2D CrossingLUT "
+        "from Physics Engine/2D/SIM/physics_v2.py.\n\n"
+        "On Colab, either:\n"
+        "  1) Upload the WHOLE repo (so Physics Engine/2D/SIM/ exists next to "
+        "3D Map Physics/), or\n"
+        "  2) Copy physics_v2.py into your SIM V1 3D/ folder (same folder as "
+        "physics_3d.py).\n\n"
+        "Paths checked:\n  - " + "\n  - ".join(_tried[:12])
+    )
 import physics_v2 as P   # noqa: E402  (validated Block A–D kernels + CrossingLUT)
 
 C_LIGHT = 299792458.0

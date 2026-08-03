@@ -67,11 +67,15 @@ Ignored on purpose (regenerate / keep on Drive): full `city/`, `cache/`,
 
 ### Drive layout (pick one)
 
-**Recommended — whole repo on Drive** (paths match a normal clone):
+**Recommended — whole repo on Drive** (paths match a normal clone / GitHub zip):
 ```text
-MyDrive/indoor-walk-test/          ← git clone here, or upload the repo zip
-ROOT = "/content/drive/MyDrive/indoor-walk-test/Physics Engine/3D Map Physics/SIM V1 3D"
+MyDrive/indoor-walk-test-main/     ← GitHub “Download ZIP” or git clone
+ROOT = "/content/drive/MyDrive/indoor-walk-test-main/Physics Engine/3D Map Physics/SIM V1 3D"
 ```
+Confirm this file exists on Drive before running cells:
+`…/indoor-walk-test-main/Physics Engine/2D/SIM/physics_v2.py`
+(If it’s missing, the zip upload was incomplete — re-copy that folder, or place
+`physics_v2.py` directly inside `SIM V1 3D/`.)
 
 **Minimal — folder only:** upload `SIM V1 3D/` and also drop
 `Physics Engine/2D/SIM/physics_v2.py` **into that same folder** (Colab fallback
