@@ -72,6 +72,9 @@ const dispThreshVal = document.getElementById('disp3dThreshVal');
 const dispClipGeom  = document.getElementById('disp3dClipGeom');
 const dispClipAxis  = document.getElementById('disp3dClipAxis');
 const dispSmooth    = document.getElementById('disp3dSmooth');
+const dispCad       = document.getElementById('disp3dCad');
+const dispVoxels    = document.getElementById('disp3dVoxels');
+const dispWash      = document.getElementById('disp3dWash');
 const modelFile     = document.getElementById('sim3dModelFile');    // Phase B: load a model to simulate
 const modelCell     = document.getElementById('sim3dModelCell');
 const modelRevert   = document.getElementById('sim3dModelRevert');
@@ -80,6 +83,8 @@ const metaEl        = document.getElementById('sim3dMeta');
 const probeEl       = document.getElementById('sim3dProbe');
 const probeBody     = document.getElementById('sim3dProbeBody');
 const probeClose    = document.getElementById('sim3dProbeClose');
+// Indoor CAD mesh used for the visual shell (voxels stay for physics / volumes).
+const INDOOR_CAD_URL = 'Data/models/7th_floor_full.glb';
 
 function setStatus(msg) { if (statusEl) statusEl.textContent = msg || ''; }
 
@@ -87,11 +92,13 @@ function setStatus(msg) { if (statusEl) statusEl.textContent = msg || ''; }
 // How the solved volume is READ — never the physics. `plane`/`sliceY` cut a horizontal
 // prediction plane; `eirpDbm` turns path loss into RSRP so `classes`/`fixed` can show
 // received power in dBm the way WRAP's coverage view and the 2D sim do.
-const DISPLAY = { plane: false, sliceY: null, eirpDbm: 20, scale: 'auto', classes: false, threshDbm: -85,
-  // Geometry view (Phase A): cut the building at the level plane (clipGeom) along clipAxis
-  // ('y' = horizontal ground↔roof, 'x'/'z' = vertical elevation), and render the building as a
-  // smooth marching-cubes surface (smooth) instead of voxel cubes. Rendering only — cache-safe.
-  clipGeom: false, clipAxis: 'y', smooth: false };
+const DISPLAY = {
+  // Default to a WinProp-style prediction plane + smooth wash (not Minecraft cubes).
+  plane: true, sliceY: null, eirpDbm: 20, scale: 'auto', classes: false, threshDbm: -85,
+  // Geometry view: CAD mesh is the visual building; voxel boxes / smooth shells are optional
+  // overlays. Physics still uses cannon boxes + the material grid. Rendering only — cache-safe.
+  clipGeom: false, clipAxis: 'y', smooth: false, cad: true, voxels: false, wash: true,
+};
 const RSRP_LO = -100, RSRP_HI = -40;                 // fixed received-power display window (dBm)
 const COV_GOOD = [0.13, 0.70, 0.29], COV_MARG = [0.98, 0.75, 0.18], COV_DEAD = [0.86, 0.28, 0.24];
 let lastSolveMs = 0;                                  // wall time of the last field solve
@@ -241,6 +248,8 @@ const DEFAULT_STYLE = { opacity: 0.55, roughness: 0.9, metalness: 0.04 };
 let wallMeshes = [];
 let wallBodies = [];
 let surfaceMeshes = [];              // smooth marching-cubes surface (A2), one mesh per class
+let cadRoot = null;                  // real CAD mesh (GLB/OBJ), fitted to the voxel extent
+let cadLoading = null;               // in-flight CAD load promise
 const GEOM_CLIP = [];                // active geometry clip planes (0 or 1); shared by all meshes
 let clipPlane = null;                // the THREE.Plane cutting the building at the level
 let buildMs = 0;
@@ -253,7 +262,11 @@ function readyStatus() {
     return (mat ? mat.name.replace(/_/g, ' ') : 'class ' + m.userData.materialClass)
       + ' ' + m.count.toLocaleString();
   });
-  return COLLISION.n_boxes.toLocaleString() + ' voxel boxes · '
+  const look = DISPLAY.cad ? 'CAD model'
+    : DISPLAY.smooth ? 'smooth voxel surface'
+    : DISPLAY.voxels ? 'voxel boxes' : 'hidden geometry';
+  return look + ' · physics '
+    + COLLISION.n_boxes.toLocaleString() + ' boxes · '
     + extent.map((e) => e.toFixed(1)).join(' × ') + ' m' + voxTarget()
     + (buildMs ? ' · built in ' + buildMs + ' ms' : '')
     + (counts.length ? ' · ' + counts.join(', ') : '')
@@ -302,6 +315,9 @@ function buildBuilding() {
     mesh.userData.materialClass = cls;
     // glass last so it composites over the structure behind it
     mesh.renderOrder = cls === 5 ? 2 : 1;
+    // Physics boxes stay in the world; the visual InstancedMesh is only added when the user
+    // opts into “Show voxel boxes”. Default look is the CAD mesh (or smooth surface).
+    mesh.visible = false;
     scene.add(mesh);
     wallMeshes.push(mesh);
   }
@@ -319,10 +335,25 @@ function buildBuilding() {
     body.addShape(new CANNON.Box(new CANNON.Vec3(b[3], b[4], b[5])));
     body.position.set(b[0], b[1], b[2]); world.addBody(body); wallBodies.push(body);
   }
+  // Voxels are the physics / volume grid — hide them visually unless the user opts in.
+  applyGeometryVisibility();
+  // Default prediction-plane height once extent is known (WinProp-style wash).
+  if (DISPLAY.plane && DISPLAY.sliceY == null) {
+    DISPLAY.sliceY = extent[1] * 0.45;
+    if (dispHeight) { dispHeight.value = '45'; dispHeight.disabled = false; }
+    if (dispPlaneBtn) {
+      dispPlaneBtn.textContent = 'Plane';
+      dispPlaneBtn.classList.add('active');
+    }
+    updateHeightLabel();
+  }
+  // Indoor: load the real CAD mesh and fit it to this voxel frame (outdoor has no matching GLB).
+  if (ACTIVE_FIXED_SCENE === 'indoor' && DISPLAY.cad) ensureCadMesh();
 }
 
 function disposeBuilding() {
   disposeSurface();
+  disposeCad();
   for (const m of wallMeshes) {
     scene.remove(m);
     if (m.geometry) m.geometry.dispose();
@@ -390,23 +421,200 @@ function disposeSurface() {
   surfaceMeshes = [];
 }
 function applyGeometryVisibility() {
-  for (const m of wallMeshes) m.visible = !DISPLAY.smooth;
-  for (const m of surfaceMeshes) m.visible = DISPLAY.smooth;
+  // CAD is the default indoor look. Smooth / voxel boxes are optional debug overlays
+  // (mutually exclusive with CAD so the view does not stack three buildings).
+  const showCad = !!(cadRoot && DISPLAY.cad);
+  for (const m of wallMeshes) m.visible = !!(DISPLAY.voxels && !showCad);
+  for (const m of surfaceMeshes) m.visible = !!(DISPLAY.smooth && !showCad);
+  if (cadRoot) cadRoot.visible = showCad;
 }
 // Show either the voxel cubes or the smooth surface (built lazily on first use). The surface
 // build is ~1.5 s of synchronous surface-nets, so defer it behind a painted status message.
 function setGeometryMode() {
-  if (DISPLAY.smooth && !surfaceMeshes.length) {
+  if (DISPLAY.smooth && !DISPLAY.cad && !surfaceMeshes.length) {
     setStatus('Building smooth surface…');
     setTimeout(() => { buildSmoothSurface(); applyGeometryVisibility(); }, 0);
     return;
   }
   applyGeometryVisibility();
 }
-// Raycast target for Tx/Rx placement — the VISIBLE geometry (surface in smooth mode, else cubes).
+// Raycast target for Tx/Rx placement — prefer CAD, then smooth shell, else voxel boxes.
 function raycastTargets() {
+  if (DISPLAY.cad && cadRoot && cadRoot.visible) return [cadRoot];
   if (DISPLAY.smooth && surfaceMeshes.length) return surfaceMeshes;
-  return wallMeshes.length ? wallMeshes : [wallMesh];
+  return wallMeshes.length ? wallMeshes : (wallMesh ? [wallMesh] : []);
+}
+
+// ---- CAD visual shell (UI only) -------------------------------------------------
+// The RF grid / cached volumes / DL surrogate stay on the voxel frame. The CAD mesh is
+// fitted into that same metre box so the heatmap wash lines up with the model.
+function disposeCad() {
+  if (!cadRoot || !scene) return;
+  scene.remove(cadRoot);
+  cadRoot.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) {
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach((m) => {
+        for (const k in m) { const v = m[k]; if (v && v.isTexture) v.dispose(); }
+        m.dispose();
+      });
+    }
+  });
+  cadRoot = null;
+}
+function normalizeCadMaterials(object) {
+  object.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.geometry && !o.geometry.getAttribute('normal')) o.geometry.computeVertexNormals();
+    if (!o.material) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    const upgraded = mats.map((m) => {
+      const name = (m && m.name) || '';
+      let out = m;
+      try {
+        if (/glass/i.test(name)) {
+          out = new THREE.MeshStandardMaterial({
+            color: (m.color && m.color.clone()) || new THREE.Color(0x9ec5d8),
+            metalness: 0.05, roughness: 0.12, transparent: true, opacity: 0.35,
+            side: THREE.DoubleSide, depthWrite: false,
+          });
+          out.name = name; if (m.dispose) m.dispose();
+        } else if (/steel|stainless|metal/i.test(name)) {
+          out = new THREE.MeshStandardMaterial({
+            map: m.map || null,
+            color: m.map ? new THREE.Color(0xffffff)
+              : ((m.color && m.color.clone()) || new THREE.Color(0xb0b6ba)),
+            metalness: 0.85, roughness: 0.35, side: THREE.DoubleSide,
+          });
+          out.name = name;
+        } else {
+          // Keep CAD readable on the light sim background (was nearly invisible at ~0.55 white).
+          out.transparent = false;
+          out.opacity = 1;
+          out.side = THREE.DoubleSide;
+          out.depthWrite = true;
+          if (out.color && out.color.isColor) {
+            // Slightly darken pure-white SketchUp fills so walls separate from the bg.
+            const hsl = {}; out.color.getHSL(hsl);
+            if (hsl.l > 0.85) out.color.setHSL(hsl.h, Math.max(hsl.s, 0.05), 0.72);
+          }
+        }
+      } catch (e) { out = m; }
+      out.clippingPlanes = GEOM_CLIP;
+      out.needsUpdate = true;
+      return out;
+    });
+    o.material = Array.isArray(o.material) ? upgraded : upgraded[0];
+    // WinProp-style edge overlay — defines rooms without showing voxel cubes.
+    if (!o.userData.__edges && o.geometry) {
+      try {
+        const edges = new THREE.LineSegments(
+          new THREE.EdgesGeometry(o.geometry, 35),
+          new THREE.LineBasicMaterial({ color: 0x2a3535, transparent: true, opacity: 0.55 }));
+        edges.renderOrder = 4;
+        edges.raycast = () => {};                     // don't steal Tx placement hits
+        o.add(edges);
+        o.userData.__edges = edges;
+      } catch (e) { /* EdgesGeometry can throw on empty buffers */ }
+    }
+  });
+}
+function autoOrientCadUp(object) {
+  object.rotation.set(0, 0, 0);
+  object.updateMatrixWorld(true);
+  const s = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3());
+  const min = Math.min(s.x, s.y, s.z);
+  if (min === s.z) object.rotation.x = -Math.PI / 2;
+  else if (min === s.x) object.rotation.z = Math.PI / 2;
+}
+function fitCadToExtent(object, ext) {
+  // Fit the CAD footprint into the voxel metre box [0,extX] × [0,extY] × [0,extZ].
+  autoOrientCadUp(object);
+  object.position.set(0, 0, 0);
+  object.scale.set(1, 1, 1);
+  object.updateMatrixWorld(true);
+  let box = new THREE.Box3().setFromObject(object);
+  if (box.isEmpty()) return false;
+  const size = box.getSize(new THREE.Vector3());
+  // Uniform scale from X (floor-plan registration axis); Y/Z follow so proportions stay.
+  const sx = ext[0] / Math.max(size.x, 1e-6);
+  const sz = ext[2] / Math.max(size.z, 1e-6);
+  const s = Math.min(sx, sz);                       // contain inside the voxel footprint
+  object.scale.setScalar(s);
+  object.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(object);
+  const min = box.min;
+  object.position.set(-min.x, -min.y, -min.z);
+  object.updateMatrixWorld(true);
+  // If height still overshoots the voxel ceiling a lot, squash Y only (visual).
+  box = new THREE.Box3().setFromObject(object);
+  const h = box.max.y - box.min.y;
+  if (h > ext[1] * 1.35) {
+    object.scale.y *= (ext[1] * 1.05) / h;
+    object.updateMatrixWorld(true);
+    box = new THREE.Box3().setFromObject(object);
+    object.position.y -= box.min.y;
+  }
+  return true;
+}
+function mountCadObject(object, ext) {
+  disposeCad();
+  normalizeCadMaterials(object);
+  if (!fitCadToExtent(object, ext || extent)) {
+    setStatus('CAD model has no geometry to display.');
+    return false;
+  }
+  object.traverse((o) => { if (o.isMesh) o.raycast = THREE.Mesh.prototype.raycast; });
+  cadRoot = object;
+  scene.add(cadRoot);
+  applyGeometryVisibility();
+  // Debug hook for automated tests / console inspection.
+  window.__sim3dCad = {
+    root: cadRoot,
+    box: () => new THREE.Box3().setFromObject(cadRoot),
+    extent: () => extent && extent.slice(),
+  };
+  return true;
+}
+async function ensureCadMesh() {
+  if (cadRoot || ACTIVE_FIXED_SCENE !== 'indoor' || RUNTIME_SCENE) return cadRoot;
+  if (cadLoading) return cadLoading;
+  setStatus('Loading CAD model…');
+  cadLoading = (async () => {
+    try {
+      const [{ GLTFLoader }, { DRACOLoader }] = await Promise.all([
+        import('three/addons/loaders/GLTFLoader.js'),
+        import('three/addons/loaders/DRACOLoader.js'),
+      ]);
+      const loader = new GLTFLoader();
+      loader.setDRACOLoader(new DRACOLoader()
+        .setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/libs/draco/'));
+      const gltf = await loader.loadAsync(INDOOR_CAD_URL);
+      if (!scene || ACTIVE_FIXED_SCENE !== 'indoor') return null;
+      if (!mountCadObject(gltf.scene, extent)) {
+        throw new Error('CAD fit failed');
+      }
+      // Belt-and-suspenders: never leave voxel cubes visible under a successful CAD load.
+      DISPLAY.voxels = false; if (dispVoxels) dispVoxels.checked = false;
+      DISPLAY.smooth = false; if (dispSmooth) dispSmooth.checked = false;
+      DISPLAY.cad = true; if (dispCad) dispCad.checked = true;
+      applyGeometryVisibility();
+      setStatus(readyStatus());
+      return cadRoot;
+    } catch (e) {
+      console.warn('CAD load failed', e);
+      // Fall back to smooth voxel surface so the tab still looks like a building.
+      DISPLAY.cad = false; if (dispCad) dispCad.checked = false;
+      DISPLAY.voxels = false; if (dispVoxels) dispVoxels.checked = false;
+      DISPLAY.smooth = true; if (dispSmooth) dispSmooth.checked = true;
+      setGeometryMode();
+      setStatus('CAD unavailable (' + (e && e.message || e) + ') — smooth voxel surface. '
+        + 'Tick “Show voxel boxes” to see the physics grid.');
+      return null;
+    } finally { cadLoading = null; }
+  })();
+  return cadLoading;
 }
 
 // ---- Fixed scene swap (Indoor <-> Outdoor demo tile) ----------------------
@@ -459,10 +667,17 @@ function setFixedScene(kind) {
     clearPlaced();
     disposeBuilding();
     DISPLAY.smooth = false; if (dispSmooth) dispSmooth.checked = false;
+    DISPLAY.voxels = false; if (dispVoxels) dispVoxels.checked = false;
+    DISPLAY.cad = !outdoor; if (dispCad) { dispCad.checked = DISPLAY.cad; dispCad.disabled = outdoor; }
+    if (outdoor) {
+      // No matching city GLB in-repo yet — show the smooth DEM/building surface.
+      DISPLAY.smooth = true; if (dispSmooth) dispSmooth.checked = true;
+    }
     resetFrameForActiveScene(true);
     const t0 = performance.now();
     buildBuilding();
     buildMs = Math.round(performance.now() - t0);
+    if (outdoor && DISPLAY.smooth) setGeometryMode();
     refreshMeta();
     setStatus((outdoor ? 'Outdoor city tile' : 'Indoor 7th-floor scene') + ' loaded · ' + readyStatus());
   } else {
@@ -493,11 +708,18 @@ function setRuntimeScene(vox, name) {
   window.SIM3D_VOLUME = null;                    // cached volumes belong to the fixed scene
   surrogateVol = null;                           // scene-locked UNet contract belongs there too
   RUNTIME_SCENE = { name: name || 'imported model', dims: vox.dims };
-  // hide the fixed voxel building; render the imported model as a smooth surface of its grid
+  // hide the fixed voxel building; keep the imported CAD mesh if we mounted one
   disposeField(); disposeSurface();
   for (const m of wallMeshes) m.visible = false;
-  DISPLAY.smooth = true; if (dispSmooth) dispSmooth.checked = true;
-  buildSmoothSurface(); applyGeometryVisibility();
+  DISPLAY.voxels = false; if (dispVoxels) dispVoxels.checked = false;
+  if (cadRoot && DISPLAY.cad) {
+    fitCadToExtent(cadRoot, extent);
+    applyGeometryVisibility();
+  } else {
+    DISPLAY.smooth = true; if (dispSmooth) dispSmooth.checked = true;
+    buildSmoothSurface(); applyGeometryVisibility();
+  }
+  if (DISPLAY.plane) DISPLAY.sliceY = extent[1] * 0.45;
   if (controls) { controls.target.copy(center); controls.update(); }
   refreshMeta();
   if (vizMode) runVizMode(vizMode.value);        // solve on the new grid (analytic tier)
@@ -507,6 +729,7 @@ function setRuntimeScene(vox, name) {
   return true;
 }
 // Voxelize a loaded THREE model and switch the sim to it (deferred behind a status message).
+// The same object is kept as the visual CAD shell (fitted to the new voxel extent).
 function simulateModel(object, name, realSizeM) {
   if (!ensureInit()) return;
   setStatus('Voxelizing “' + (name || 'model') + '” …');
@@ -518,6 +741,8 @@ function simulateModel(object, name, realSizeM) {
     const vox = voxelizeTriangles(tris, { resolution: 160, real_longest_m: realSizeM || 80,
       barrierClass: 2, pad: 1 });
     if (!vox) { setStatus('Voxelization produced an empty grid.'); return; }
+    DISPLAY.cad = true; if (dispCad) dispCad.checked = true;
+    mountCadObject(object, vox.extent);
     setRuntimeScene(vox, name);
   }, 0);
 }
@@ -598,7 +823,7 @@ function onPointerDown(ev) {
   raycaster.setFromCamera(ndc, camera);
   // Test every class mesh, not just one: the building is now several InstancedMeshes, so
   // raycasting a single one would make whole materials unclickable.
-  const hit = raycaster.intersectObjects(raycastTargets(), false)[0];
+  const hit = raycaster.intersectObjects(raycastTargets(), true)[0];
   if (!hit) return;
   const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
   const pos = hit.point.clone().addScaledVector(normal, 0.4);
@@ -889,6 +1114,38 @@ function prefetchNeighbours(entry) {
   });
 }
 function plAt(vol, band, x, y, z) { const NY = vol.dims[1], NZ = vol.dims[2]; return h2f(vol.pl[((band * vol.dims[0] + x) * NY + y) * NZ + z]); }
+// UI-only bilinear/trilinear sample of a volume in world metres. Does not change stored data
+// or the DL surrogate — just softens the heatmap wash so it does not look Minecraft.
+function plAtWorld(vol, band, wx, wy, wz) {
+  const NX = vol.dims[0], NY = vol.dims[1], NZ = vol.dims[2];
+  const fx = wx / CELL_M - 0.5, fy = wy / CELL_M - 0.5, fz = wz / CELL_M - 0.5;
+  const x0 = Math.floor(fx), y0 = Math.floor(fy), z0 = Math.floor(fz);
+  const tx = fx - x0, ty = fy - y0, tz = fz - z0;
+  let acc = 0, wsum = 0;
+  for (let di = 0; di < 2; di++) for (let dj = 0; dj < 2; dj++) for (let dk = 0; dk < 2; dk++) {
+    const xi = clampi(x0 + di, NX), yi = clampi(y0 + dj, NY), zi = clampi(z0 + dk, NZ);
+    const v = plAt(vol, band, xi, yi, zi);
+    if (!isFinite(v) || v >= 65504) continue;
+    const w = (di ? tx : 1 - tx) * (dj ? ty : 1 - ty) * (dk ? tz : 1 - tz);
+    acc += v * w; wsum += w;
+  }
+  return wsum > 0 ? acc / wsum : NaN;
+}
+function surrogateAtWorld(sur, wx, wy, wz) {
+  const NX = sur.dims[0], NY = sur.dims[1], NZ = sur.dims[2];
+  const fx = wx / CELL_M - 0.5, fy = wy / CELL_M - 0.5, fz = wz / CELL_M - 0.5;
+  const x0 = Math.floor(fx), y0 = Math.floor(fy), z0 = Math.floor(fz);
+  const tx = fx - x0, ty = fy - y0, tz = fz - z0;
+  let acc = 0, wsum = 0;
+  for (let di = 0; di < 2; di++) for (let dj = 0; dj < 2; dj++) for (let dk = 0; dk < 2; dk++) {
+    const xi = clampi(x0 + di, NX), yi = clampi(y0 + dj, NY), zi = clampi(z0 + dk, NZ);
+    const v = surrogateAt(sur, xi, yi, zi);
+    if (!isFinite(v) || v >= 65504) continue;
+    const w = (di ? tx : 1 - tx) * (dj ? ty : 1 - ty) * (dk ? tz : 1 - tz);
+    acc += v * w; wsum += w;
+  }
+  return wsum > 0 ? acc / wsum : NaN;
+}
 function tAt(vol, x, y, z) { const NY = vol.dims[1], NZ = vol.dims[2]; return h2f(vol.t[(x * NY + y) * NZ + z]); }
 function nearestBandIndex(vol, fMHz) {
   let bi = 0, bd = Infinity;
@@ -1080,6 +1337,8 @@ function reportNoVolume(txVox) {
     const d = Math.hypot(e.tx_vox[0] - txVox[0], e.tx_vox[1] - txVox[1], e.tx_vox[2] - txVox[2]);
     if (d < bd) { bd = d; near = e; }
   }
+  // Don't clobber a field that already rendered (analytic / surrogate / wash).
+  if (fieldObj) return;
   setStatus(label + ' · ' + pool.length + ' cached solve' + (pool.length === 1 ? '' : 's')
     + ' in this mode, but the nearest (' + near.txid + ') is ' + Math.round(bd)
     + ' voxels away — beyond the ' + VOL_TOL + '-voxel match tolerance. Move the transmitter '
@@ -1310,7 +1569,7 @@ function probeAt(ev) {
     p = raycaster.ray.intersectPlane(
       new THREE.Plane(new THREE.Vector3(0, 1, 0), -DISPLAY.sliceY), new THREE.Vector3());
   } else {
-    const hit = raycaster.intersectObjects(raycastTargets(), false)[0];
+    const hit = raycaster.intersectObjects(raycastTargets(), true)[0];
     if (hit) p = hit.point.clone();
     else p = raycaster.ray.intersectPlane(
       new THREE.Plane(new THREE.Vector3(0, 1, 0), -(center ? center.y : extent[1] / 2)), new THREE.Vector3());
@@ -1432,6 +1691,11 @@ function applyGeomClip() {
   if (DISPLAY.clipGeom) { updateClipPlane(); GEOM_CLIP.push(clipPlane); }
   for (const m of wallMeshes) if (m.material) m.material.needsUpdate = true;
   for (const m of surfaceMeshes) if (m.material) m.material.needsUpdate = true;
+  if (cadRoot) cadRoot.traverse((o) => {
+    if (!o.isMesh || !o.material) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    mats.forEach((m) => { m.clippingPlanes = GEOM_CLIP; m.needsUpdate = true; });
+  });
   if (fieldObj && fieldObj.material) fieldObj.material.needsUpdate = true;
 }
 
@@ -1462,7 +1726,32 @@ if (dispClipAxis) dispClipAxis.addEventListener('change', () => {
 });
 if (dispSmooth) dispSmooth.addEventListener('change', () => {
   DISPLAY.smooth = dispSmooth.checked;
+  if (DISPLAY.smooth) {
+    DISPLAY.cad = false; if (dispCad) dispCad.checked = false;
+    DISPLAY.voxels = false; if (dispVoxels) dispVoxels.checked = false;
+  }
   setGeometryMode();                             // builds the surface lazily on first use
+});
+if (dispCad) dispCad.addEventListener('change', () => {
+  DISPLAY.cad = dispCad.checked;
+  if (DISPLAY.cad) {
+    DISPLAY.smooth = false; if (dispSmooth) dispSmooth.checked = false;
+    DISPLAY.voxels = false; if (dispVoxels) dispVoxels.checked = false;
+    if (!cadRoot && ACTIVE_FIXED_SCENE === 'indoor' && !RUNTIME_SCENE) ensureCadMesh();
+  }
+  applyGeometryVisibility();
+});
+if (dispVoxels) dispVoxels.addEventListener('change', () => {
+  DISPLAY.voxels = dispVoxels.checked;
+  if (DISPLAY.voxels) {
+    DISPLAY.cad = false; if (dispCad) dispCad.checked = false;
+    DISPLAY.smooth = false; if (dispSmooth) dispSmooth.checked = false;
+  }
+  applyGeometryVisibility();
+});
+if (dispWash) dispWash.addEventListener('change', () => {
+  DISPLAY.wash = dispWash.checked;
+  reRunViz();
 });
 if (dispEirp) dispEirp.addEventListener('change', () => { DISPLAY.eirpDbm = Number(dispEirp.value) || 20; reRunViz(); });
 if (dispScale) dispScale.addEventListener('change', () => { DISPLAY.scale = dispScale.value; reRunViz(); });
@@ -1478,8 +1767,8 @@ if (dispThresh) {
 function runStaticField() {
   if (!ensureInit()) return;
   const _t0 = performance.now();
-  const tx = firstTx();
-  const src = tx ? tx.body.position : center;
+  const placedTx = firstTx();
+  const src = placedTx ? placedTx.body.position : center;
   const freqMHz = Number(wfBand && wfBand.value) || 2437;
   disposeField();
   disposeLobes(); disposeVectors(); disposeInterference(); disposeSweep(); // field replaces others
@@ -1508,39 +1797,68 @@ function runStaticField() {
   // Tier 1 miss: try to upgrade in the background (cache first, then surrogate), and render
   // the analytic floor immediately so the user is never looking at nothing. Skipped for an
   // imported runtime scene — its grid is unique, so no cached volume / surrogate can match.
+  // When no Tx is placed yet, ask the catalog for the mode's default cached solve (null key)
+  // instead of matching the scene centre — centre is often outside VOL_TOL of demo Tx's.
   if (!vol && !RUNTIME_SCENE) {
-    tryLoadVolume(txVox, () => { if (fieldObj) runStaticField(); });
+    tryLoadVolume(placedTx ? txVox : null, () => { if (fieldObj) runStaticField(); });
     if (!sur && txVox) runSurrogate(txVox, freqMHz).then((r) => { if (r && fieldObj) runStaticField(); });
   }
 
   const { sliced, g, yLo, yHi, yInc } = sampleBounds();     // full volume, or one prediction plane
+
+  // Sample PL at a world point — shared by the wash canvas and the cube cloud.
+  function samplePlAt(x, y, z) {
+    let pl;
+    if (vol) pl = plAtWorld(vol, bandIdx, x, y, z);
+    else if (sur) pl = surrogateAtWorld(sur, x, y, z);
+    else if (GRID && txVox) {
+      pl = marchPL(txVox,
+        clampi(Math.floor(x / CELL_M), GDIMS[0]),
+        clampi(Math.floor(y / CELL_M), GDIMS[1]),
+        clampi(Math.floor(z / CELL_M), GDIMS[2]), L, Ap, f1);
+    } else {
+      const dx = x - src.x, dy = y - src.y, dz = z - src.z;
+      const d = Math.max(0.5, Math.sqrt(dx * dx + dy * dy + dz * dz));
+      pl = 20 * Math.log10(d) + 20 * Math.log10(freqMHz) - 27.55;
+    }
+    return pl;
+  }
+
+  // WinProp-style smooth wash: textured plane (UI only — same volume samples, bilinear).
+  if (DISPLAY.wash) {
+    const yPlane = (DISPLAY.plane && DISPLAY.sliceY != null) ? DISPLAY.sliceY : (extent[1] * 0.45);
+    const nSamp = buildCoverageWash(samplePlAt, yPlane);
+    coverageLegend();
+    const tier = vol ? TIER.CACHE : sur ? TIER.SURROGATE : TIER.ANALYTIC;
+    const srcLabel = vol ? TIER.CACHE + ' — full-physics solve (SceneV3 eikonal/Fresnel)'
+      : sur ? TIER.SURROGATE + ' — ' + (SURROGATE.note || 'UNet3D')
+            : GRID ? TIER.ANALYTIC + ' — Motley-Keenan multiwall'
+                   : TIER.ANALYTIC + ' — FSPL only (material grid unavailable)';
+    const fell = !vol && SURROGATE.state === 'unavailable'
+      ? ' · surrogate tier skipped: ' + SURROGATE.note : '';
+    setStatus('Static field · ' + srcLabel + ' @ ' + freqMHz + ' MHz · '
+      + 'smooth wash @ y=' + yPlane.toFixed(1) + ' m · ' + nSamp.toLocaleString() + ' texels'
+      + (vol ? ' · curved eikonal shadows + in-wall lag.'
+        : sur ? ' · ONNX Runtime inference.'
+              : GRID ? ' · walls shadow the field.' : '.')
+      + fell);
+    window.SIM3D_TIER = tier;
+    lastSolveMs = Math.round(performance.now() - _t0);
+    refreshMeta();
+    return;
+  }
+
   const samples = [];                                       // [x, y, z, mag, r, g, b]
   for (let x = g * 0.5; x < extent[0]; x += g)
     for (let y = yLo; y < yHi; y += yInc)
       for (let z = g * 0.5; z < extent[2]; z += g) {
-        let pl;
-        if (vol) {
-          pl = plAt(vol, bandIdx, clampi(Math.floor(x / CELL_M), vol.dims[0]),
-            clampi(Math.floor(y / CELL_M), vol.dims[1]), clampi(Math.floor(z / CELL_M), vol.dims[2]));
-        } else if (sur) {
-          pl = surrogateAt(sur, clampi(Math.floor(x / CELL_M), sur.dims[0]),
-            clampi(Math.floor(y / CELL_M), sur.dims[1]), clampi(Math.floor(z / CELL_M), sur.dims[2]));
-        } else if (GRID && txVox) {
-          pl = marchPL(txVox,
-            clampi(Math.floor(x / CELL_M), GDIMS[0]),
-            clampi(Math.floor(y / CELL_M), GDIMS[1]),
-            clampi(Math.floor(z / CELL_M), GDIMS[2]), L, Ap, f1);
-        } else {
-          const dx = x - src.x, dy = y - src.y, dz = z - src.z;
-          const d = Math.max(0.5, Math.sqrt(dx * dx + dy * dy + dz * dz));
-          pl = 20 * Math.log10(d) + 20 * Math.log10(freqMHz) - 27.55;   // FSPL fallback
-        }
+        const pl = samplePlAt(x, y, z);
         if (!isFinite(pl) || pl >= 65504) continue;
         const cs = coverageSample(pl, sliced);               // colour/keep per Display settings
         if (!cs.keep) continue;
         samples.push([x, y, z, cs.mag, cs.rgb[0], cs.rgb[1], cs.rgb[2]]);
       }
-  // Instanced cubes (not THREE.Points — the WebGPU backend can't size points):
+  // Instanced cubes (legacy / debug when Smooth heatmap wash is off):
   // one small cube per sample, coloured/sized by the Display settings.
   const cube = new THREE.BoxGeometry(g * 0.42, g * 0.42, g * 0.42);
   const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, clippingPlanes: GEOM_CLIP });
@@ -1575,9 +1893,59 @@ function runStaticField() {
   lastSolveMs = Math.round(performance.now() - _t0);
   refreshMeta();
 }
+
+// Build a WinProp-style coverage plane (CanvasTexture). Returns texel count kept.
+function buildCoverageWash(samplePlAt, yPlane) {
+  const res = Math.max(128, Math.min(384, Math.round(Math.max(extent[0], extent[2]) / Math.max(CELL_M, 0.05))));
+  const nx = res, nz = Math.max(64, Math.round(res * extent[2] / extent[0]));
+  const cv = document.createElement('canvas');
+  cv.width = nx; cv.height = nz;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(nx, nz);
+  let kept = 0;
+  for (let jz = 0; jz < nz; jz++) {
+    const z = ((jz + 0.5) / nz) * extent[2];
+    for (let ix = 0; ix < nx; ix++) {
+      const x = ((ix + 0.5) / nx) * extent[0];
+      const o = (jz * nx + ix) * 4;
+      const pl = samplePlAt(x, yPlane, z);
+      if (!isFinite(pl) || pl >= 65504) { img.data[o + 3] = 0; continue; }
+      const cs = coverageSample(pl, true);
+      if (!cs.keep) { img.data[o + 3] = 0; continue; }
+      img.data[o] = Math.round(cs.rgb[0] * 255);
+      img.data[o + 1] = Math.round(cs.rgb[1] * 255);
+      img.data[o + 2] = Math.round(cs.rgb[2] * 255);
+      img.data[o + 3] = Math.round(40 + cs.mag * 180);
+      kept++;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.flipY = false;
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex, transparent: true, opacity: 0.78, depthWrite: false,
+    side: THREE.DoubleSide, clippingPlanes: GEOM_CLIP,
+  });
+  fieldObj = new THREE.Mesh(new THREE.PlaneGeometry(extent[0], extent[2]), mat);
+  fieldObj.rotation.x = -Math.PI / 2;
+  fieldObj.position.set(extent[0] / 2, yPlane + 0.03, extent[2] / 2);
+  fieldObj.renderOrder = 3;
+  fieldObj.userData.isWash = true;
+  scene.add(fieldObj);
+  return kept;
+}
 function disposeField() {
   if (!fieldObj) return;
-  scene.remove(fieldObj); fieldObj.geometry.dispose(); fieldObj.material.dispose(); fieldObj = null;
+  scene.remove(fieldObj);
+  if (fieldObj.material) {
+    if (fieldObj.material.map) fieldObj.material.map.dispose();
+    fieldObj.material.dispose();
+  }
+  if (fieldObj.geometry) fieldObj.geometry.dispose();
+  fieldObj = null;
   hideLegend();
 }
 
