@@ -1,0 +1,48 @@
+{
+  "_note": "Default path-loss configs (SIM V1.5). Layer1=PL field, Layer2=link budget.",
+  "reliability_z": {
+    "50": 0.0,
+    "80": 0.84,
+    "90": 1.28,
+    "95": 1.65,
+    "99": 2.33
+  },
+  "indoor": {
+    "mode": "indoor",
+    "model": "close_in",
+    "ple_n": 3.0,
+    "ple_far": 4.0,
+    "d0_m": 1.0,
+    "pl_d0_db": null,
+    "shadow_sigma_db": 8.0,
+    "breakpoint_m": null,
+    "fi_alpha_db": 32.4,
+    "fi_beta": 2.0,
+    "fi_gamma": 2.0,
+    "tx_power_dbm": 20.0,
+    "tx_gain_dbi": 3.0,
+    "cable_loss_db": 0.0,
+    "reliability": "90",
+    "tx_height_m": 2.5,
+    "rx_height_m": 1.5
+  },
+  "outdoor": {
+    "mode": "outdoor",
+    "model": "dual_slope",
+    "ple_n": 2.0,
+    "ple_far": 4.0,
+    "d0_m": 1.0,
+    "pl_d0_db": null,
+    "shadow_sigma_db": 6.0,
+    "breakpoint_m": null,
+    "fi_alpha_db": 32.4,
+    "fi_beta": 2.0,
+    "fi_gamma": 2.0,
+    "tx_power_dbm": 20.0,
+    "tx_gain_dbi": 3.0,
+    "cable_loss_db": 0.0,
+    "reliability": "90",
+    "tx_height_m": 10.0,
+    "rx_height_m": 1.5
+  }
+}
