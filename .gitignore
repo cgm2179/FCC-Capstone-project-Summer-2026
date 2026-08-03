@@ -60,3 +60,7 @@ __pycache__/
 
 # scene_v1_backup/ — pre-M0.4 grid, kept locally for rollback (not versioned)
 Physics Engine/3D Map Physics/SIM V1 3D/scene_v1_backup/
+
+# Indoor OSM basemap (PR #25): a large, per-machine generated raster. Regenerate with
+# `python3 scripts/prepare_indoor_basemap.py`. The live (Leaflet) path needs no file.
+Data/basemap_image.js
