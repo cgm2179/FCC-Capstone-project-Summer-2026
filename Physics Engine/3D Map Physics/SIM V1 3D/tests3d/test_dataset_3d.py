@@ -241,6 +241,83 @@ def test_audit_shards_finds_then_clears_the_position_gap(tmp_path):
     assert ok2 is True, [r for r in rows2 if r["status"] != "ok"]
 
 
+# ----------------------------------------------- planar (xy/yz/zx) featurization
+def _synth_M(shape=(6, 4, 5)):
+    return (np.arange(int(np.prod(shape))).reshape(shape) % 6).astype(np.int16)
+
+
+@pytest.mark.parametrize("orient", D.PLANE_ORIENTS)
+def test_plane_slice_stack_round_trips(orient):
+    """Stacking every slice along the fixed axis must rebuild the volume exactly.
+
+    This is the whole premise of the ensemble: each orientation reconstructs the
+    volume by stacking its 2-D predictions. If the round-trip is not exact, the
+    composed 3-D field is misaligned no matter how good the plane models are.
+    """
+    V = np.arange(5 * 3 * 4, dtype=np.float32).reshape(5, 3, 4)
+    n = D.n_slices(V.shape, orient)
+    rebuilt = D.stack_planes([D.slice_plane(V, orient, i) for i in range(n)], orient)
+    assert rebuilt.shape == V.shape and np.array_equal(rebuilt, V)
+    assert D.slice_plane(V, orient, 0).shape == D.plane_shape(V.shape, orient)
+
+
+@pytest.mark.parametrize("orient", D.PLANE_ORIENTS)
+def test_plane_input_shape_and_onehot(orient):
+    M = _synth_M()
+    H, W = D.plane_shape(M.shape, orient)
+    x = D.plane_input(M, (2, 1, 2), 0.5, orient, 0, cell_m=0.3)
+    assert x.shape == (len(D.INPUT_CHANNELS_PLANE), H, W) == (10, H, W)
+    assert np.allclose(x[:6].sum(0), 1.0)                    # one-hot partitions the slice
+    assert float(x[7].min()) == float(x[7].max()) == 0.5     # freq feature is constant
+
+
+@pytest.mark.parametrize("orient", D.PLANE_ORIENTS)
+def test_plane_blob_peaks_on_tx_plane_and_attenuates_off_it(orient):
+    M = _synth_M((7, 5, 6))
+    tx = (3, 2, 4)
+    fa, ra, ca = D._orient_axes(orient)
+    sigma = D.TX_SIGMA_CELLS
+    on = D.plane_dynamic_channels(tx, 0.5, orient, tx[fa], M.shape, 0.3)   # Tx's own slice
+    blob, _ff, logd, perp = on
+    assert np.isclose(blob.max(), 1.0) and np.isclose(blob[tx[ra], tx[ca]], 1.0)
+    assert np.isclose(logd[tx[ra], tx[ca]], 0.0)             # d_m clipped to 1 m -> 0
+    assert np.allclose(perp, 0.0)
+    d = 2                                                     # an off-plane slice
+    off = D.plane_dynamic_channels(tx, 0.5, orient, tx[fa] + d, M.shape, 0.3)
+    assert np.isclose(off[0].max(), np.exp(-(d ** 2) / (2 * sigma ** 2)))
+    assert np.allclose(off[3], d / M.shape[fa])
+
+
+@pytest.mark.parametrize("orient", D.PLANE_ORIENTS)
+def test_plane_input_matches_3d_featurization_on_tx_plane(manifest, orient):
+    """A plane through the Tx must equal the 3-D input sliced at that plane."""
+    M = _synth_M((6, 4, 5))
+    tx = (2, 1, 3)
+    norm = D.load_norm(manifest)
+    cell = float(manifest["cell_size_m"])
+    idx = tx[D._ORIENT_FIXED_AXIS[orient]]
+    vol = D.build_input_volume(M, tx, 3500.0, norm, cell)     # (9, X, Y, Z)
+    pl = D.plane_input(M, tx, norm.freq_feature(3500.0), orient, idx, cell)
+    for c in (6, 7, 8):                                       # blob, freq, log-distance
+        assert np.allclose(D.slice_plane(vol[c], orient, idx), pl[c], atol=1e-5)
+    assert np.allclose(pl[9], 0.0)                            # perp_offset Δ=0 on Tx plane
+
+
+def test_pl_only_shard_writes_no_tau(tmp_path):
+    """tau=None writes a PL-only shard: no _tau.npy, still complete, opens tau=None."""
+    pl = np.zeros((2, 3, 3, 3), np.float16)
+    D.write_shard(tmp_path, 0, pl, None,
+                  dict(pos_id=np.array([0, 0], np.int32),
+                       bands_mhz=np.array([619.0, 3500.0], np.float32),
+                       scene_sha="feedfacefeedface"))
+    assert not (tmp_path / "shard_000_tau.npy").exists()
+    assert D.shard_complete(tmp_path, 0)
+    assert D.shard_complete(tmp_path, 0, expect_pos=1, bands=[619.0, 3500.0],
+                            scene_sha="feedfacefeedface")
+    rpl, rtau, rmeta = D.open_shard(tmp_path, 0)
+    assert rtau is None and rpl.shape == (2, 3, 3, 3)
+
+
 # --------------------------------------------------------------------------- contract
 def test_surrogate_contract_is_what_the_browser_reads(grid, manifest):
     c = D.surrogate_contract(manifest, grid, bands=[2442.0, 3500.0],

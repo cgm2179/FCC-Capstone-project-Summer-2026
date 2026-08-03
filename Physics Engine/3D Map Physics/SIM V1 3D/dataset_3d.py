@@ -173,6 +173,113 @@ def distance_m(tx, coords: np.ndarray, cell_m: float) -> np.ndarray:
     return (np.sqrt(d2) * float(cell_m)).astype(np.float32)
 
 
+# ------------------------------------------------- planar (xy/yz/zx) featurization
+# M4 speed strategy: instead of one data-hungry 3-D UNet, train three 2-D UNets on
+# axis-aligned slice stacks and compose. A plane is an exact slice of the same PL
+# volume, so nothing in the physics changes — only the featurization becomes 2-D.
+# Each orientation is named by the two axes its planes span; the third (fixed) axis
+# is the one we stack along to rebuild the volume.
+PLANE_ORIENTS = ("zx", "xy", "yz")
+_ORIENT_FIXED_AXIS = {"zx": 1, "xy": 2, "yz": 0}   # Y-floors, Z-planes, X-planes
+DYNAMIC_CHANNELS_PLANE = ("tx_blob", "freq_feat", "log_distance", "perp_offset")
+INPUT_CHANNELS_PLANE = STATIC_CHANNELS + DYNAMIC_CHANNELS_PLANE           # 10
+OUTPUT_CHANNELS_PLANE = ("pl_norm",)                                      # PL only
+SPEC_VERSION_PLANE = "pl-unet2d-planes-v1"
+
+
+def _orient_axes(orient: str):
+    """(fixed_axis, row_axis, col_axis) for an orientation.
+
+    The two in-plane axes are the non-fixed axes in ascending order, which is
+    exactly the axis order `np.take(vol, idx, axis=fixed)` leaves behind — so the
+    (row, col) of a sliced plane always line up with these.
+    """
+    fa = _ORIENT_FIXED_AXIS[orient]
+    ra, ca = (a for a in (0, 1, 2) if a != fa)
+    return fa, ra, ca
+
+
+def plane_shape(grid_shape, orient: str):
+    _, ra, ca = _orient_axes(orient)
+    return int(grid_shape[ra]), int(grid_shape[ca])
+
+
+def n_slices(grid_shape, orient: str) -> int:
+    return int(grid_shape[_ORIENT_FIXED_AXIS[orient]])
+
+
+def slice_plane(vol: np.ndarray, orient: str, idx: int) -> np.ndarray:
+    """One 2-D (H, W) slice of a 3-D volume along the orientation's fixed axis."""
+    return np.take(vol, int(idx), axis=_ORIENT_FIXED_AXIS[orient])
+
+
+# material grids and PL volumes slice the same way; alias for readable call sites
+slice_material = slice_plane
+
+
+def stack_planes(planes, orient: str) -> np.ndarray:
+    """Inverse of `slice_plane`: stack a full set of slices back into the volume."""
+    return np.stack(list(planes), axis=_ORIENT_FIXED_AXIS[orient])
+
+
+def plane_static_channels(M: np.ndarray, orient: str, idx: int,
+                          n_classes: int = 6) -> np.ndarray:
+    """Material one-hot (n_classes, H, W) of one 2-D slice of the geometry."""
+    sl = slice_plane(M, orient, idx)
+    return np.stack([(sl == c) for c in range(n_classes)], 0).astype(np.float32)
+
+
+def plane_dynamic_channels(tx, freq_feat: float, orient: str, idx: int, grid_shape,
+                           cell_m: float, sigma_cells: float = TX_SIGMA_CELLS,
+                           logdist_divisor: float = LOGDIST_DIVISOR) -> np.ndarray:
+    """(4, H, W): Tx blob, freq feature, log-distance, perpendicular offset.
+
+    The Tx generally does NOT lie in the plane, so both the blob and the distance
+    are the true 3-D quantities evaluated on the slice: the blob is a 3-D Gaussian
+    sliced at perpendicular offset Δ (peak amplitude exp(-Δ²/2σ²) < 1 off the Tx's
+    own slice), and log-distance uses sqrt(in-plane² + Δ²). `perp_offset` hands the
+    net Δ directly so it can tell an in-plane source from a far off-plane one. A
+    plane through the Tx (Δ=0) reduces exactly to the 3-D featurization.
+    """
+    fa, ra, ca = _orient_axes(orient)
+    H, W = int(grid_shape[ra]), int(grid_shape[ca])
+    rr, cc = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
+    dr = rr.astype(np.float32) - float(tx[ra])
+    dc = cc.astype(np.float32) - float(tx[ca])
+    dperp = float(idx) - float(tx[fa])
+    d2 = dr * dr + dc * dc + dperp * dperp
+    blob = np.exp(-d2 / (2.0 * sigma_cells ** 2)).astype(np.float32)
+    d_m = np.maximum(np.sqrt(d2) * float(cell_m), 1.0)
+    logd = (np.log10(d_m) / logdist_divisor).astype(np.float32)
+    ff = np.full((H, W), float(freq_feat), np.float32)
+    perp = np.full((H, W), abs(dperp) / max(int(grid_shape[fa]), 1), np.float32)
+    return np.stack([blob, ff, logd, perp], 0)
+
+
+def plane_input(M: np.ndarray, tx, freq_feat: float, orient: str, idx: int,
+                cell_m: float, n_classes: int = 6) -> np.ndarray:
+    """Full (10, H, W) plane input in canonical order (one-hot, then dynamic)."""
+    static = plane_static_channels(M, orient, idx, n_classes)
+    dyn = plane_dynamic_channels(tx, freq_feat, orient, idx, M.shape, cell_m)
+    return np.concatenate([static, dyn], 0)
+
+
+def build_plane_input(M: np.ndarray, tx, freq_mhz: float, norm: Norm, orient: str,
+                      idx: int, cell_m: float, n_classes: int = 6) -> np.ndarray:
+    """Convenience wrapper mirroring `build_input_volume` for a single plane."""
+    return plane_input(M, tx, norm.freq_feature(freq_mhz), orient, idx, cell_m, n_classes)
+
+
+def plane_distance_m(tx, orient: str, idx: int, grid_shape, cell_m: float) -> np.ndarray:
+    """3-D Tx distance (metres) evaluated on a plane — for FSPL / log-dist baselines."""
+    fa, ra, ca = _orient_axes(orient)
+    H, W = int(grid_shape[ra]), int(grid_shape[ca])
+    rr, cc = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
+    d2 = ((rr - float(tx[ra])) ** 2 + (cc - float(tx[ca])) ** 2
+          + (float(idx) - float(tx[fa])) ** 2)
+    return (np.sqrt(d2) * float(cell_m)).astype(np.float32)
+
+
 def fspl_db(d_m, f_mhz: float, manifest: dict) -> np.ndarray:
     """Free-space reference used by both the FSPL-floor loss and the baseline.
 
@@ -270,8 +377,8 @@ def shard_complete(out_dir, s: int, *, expect_pos=None, bands=None, scene_sha=No
     are unaffected.
     """
     p = shard_paths(out_dir, s)
-    if not all(os.path.exists(f) for f in p.values()):
-        return False
+    if not (os.path.exists(p["pl"]) and os.path.exists(p["meta"])):
+        return False  # `_tau.npy` is optional — a PL-only shard is still complete
     if expect_pos is None and bands is None and scene_sha is None:
         return True
     try:
@@ -326,24 +433,31 @@ def audit_shards(out_dir, *, shard_pos, n_positions, bands=None, scene_sha=None)
     return ok, rows
 
 
-def write_shard(out_dir, s: int, pl: np.ndarray, tau: np.ndarray, meta: dict) -> dict:
+def write_shard(out_dir, s: int, pl: np.ndarray, tau, meta: dict) -> dict:
     """Raw .npy for the volumes, .npz only for the small metadata.
 
     Deliberately NOT `savez_compressed` for the volumes: `np.load(mmap_mode='r')`
     cannot memory-map a compressed member, so a compressed shard forces the whole
     dataset into RAM at import. That is the fp32-at-load bug's real root — the
     dataset is 8 GB and Colab has 12.7.
+
+    `tau=None` writes a **PL-only** shard (no `_tau.npy`). The planar surrogate is PL
+    only and just slices these volumes, so carrying the eikonal store — and paying
+    the un-sliceable 3-D eikonal at generation — is dead weight for it.
     """
     p = shard_paths(out_dir, s)
     # Write through file handles, not names: np.save/np.savez APPEND .npy/.npz to a
     # path that lacks the suffix, so a ".tmp" name silently lands somewhere else.
-    tmp = {k: v + ".part" for k, v in p.items()}
-    for key, arr in (("pl", pl), ("tau", tau)):
-        with open(tmp[key], "wb") as fh:
-            np.save(fh, np.asarray(arr, np.float16))
+    written = ["pl", "meta"] + (["tau"] if tau is not None else [])
+    tmp = {k: p[k] + ".part" for k in written}
+    with open(tmp["pl"], "wb") as fh:
+        np.save(fh, np.asarray(pl, np.float16))
+    if tau is not None:
+        with open(tmp["tau"], "wb") as fh:
+            np.save(fh, np.asarray(tau, np.float16))
     with open(tmp["meta"], "wb") as fh:
         np.savez(fh, **meta)
-    for k in p:                       # rename last: a killed cell leaves no half shard
+    for k in written:                 # rename last: a killed cell leaves no half shard
         os.replace(tmp[k], p[k])
     return p
 
@@ -353,10 +467,13 @@ def list_shards(out_dir) -> list:
 
 
 def open_shard(out_dir, s: int):
-    """(pl_memmap, tau_memmap, meta_dict). Volumes stay on disk until indexed."""
+    """(pl_memmap, tau_memmap_or_None, meta_dict). Volumes stay on disk until indexed.
+
+    `tau` is None for a PL-only shard (no `_tau.npy`) — planar training ignores it.
+    """
     p = shard_paths(out_dir, s)
     pl = np.load(p["pl"], mmap_mode="r")
-    tau = np.load(p["tau"], mmap_mode="r")
+    tau = np.load(p["tau"], mmap_mode="r") if os.path.exists(p["tau"]) else None
     meta = dict(np.load(p["meta"]))
     return pl, tau, meta
 
@@ -429,6 +546,58 @@ def surrogate_contract(manifest: dict, M: np.ndarray, *, bands, mechanisms, mode
             "pl_min_db": norm.pl_min_db,
             "pl_range_db": norm.pl_range_db,
             "tau_max_ns": norm.tau_max_ns,
+        },
+        "metrics": metrics or {},
+        **(extra or {}),
+    }
+
+
+def surrogate_contract_plane(manifest: dict, M: np.ndarray, *, orient: str, bands,
+                             mechanisms=("path_loss",), mode: str = "indoor",
+                             metrics: dict | None = None,
+                             extra: dict | None = None) -> dict:
+    """Per-orientation `pl_unet2d_<orient>.json` sidecar — the 2-D analog.
+
+    One contract per slice-stack. The browser (once its consume path exists) reads
+    the three, runs each net over its slices, stacks along `fixed_axis` to a volume,
+    and composes the three. `plane_shape`/`fixed_axis`/`inplane_axes` are exactly
+    what `slice_plane`/`stack_planes` use, so the stitch is unambiguous.
+    """
+    norm = load_norm(manifest)
+    fa, ra, ca = _orient_axes(orient)
+    H, W = plane_shape(M.shape, orient)
+    return {
+        "spec_version": SPEC_VERSION_PLANE,
+        "model_file": f"pl_unet2d_{orient}.onnx",
+        "mode": mode,
+        "mechanisms": list(mechanisms),
+        "orientation": orient,
+        "grid_shape": [int(v) for v in M.shape],
+        "plane_shape": [H, W],
+        "fixed_axis": fa,
+        "inplane_axes": [ra, ca],
+        "n_slices": n_slices(M.shape, orient),
+        "cell_size_m": float(manifest["cell_size_m"]),
+        "scene_sha": scene_sha(M),
+        "bands_mhz": [float(b) for b in bands],
+        "input": {
+            "name": "x",
+            "layout": "N,C,H,W",
+            "dtype": "float32",
+            "channels": list(INPUT_CHANNELS_PLANE),
+            "material_classes": len(STATIC_CHANNELS),
+            "tx_blob_sigma_cells": TX_SIGMA_CELLS,
+            "logdist_divisor": LOGDIST_DIVISOR,
+            "logdist_min_m": 1.0,
+            "freq_log_lo_mhz": norm.freq_log_lo_mhz,
+            "freq_log_hi_mhz": norm.freq_log_hi_mhz,
+        },
+        "output": {
+            "name": "y",
+            "layout": "N,C,H,W",
+            "channels": list(OUTPUT_CHANNELS_PLANE),
+            "pl_min_db": norm.pl_min_db,
+            "pl_range_db": norm.pl_range_db,
         },
         "metrics": metrics or {},
         **(extra or {}),
