@@ -16,8 +16,12 @@ Browser deploy path (documented; the viewer wiring is the follow-on render task)
   4. Upload as a THREE.Data3DTexture (nx × ny × nz, R32F/R16F) and ray-march it
      in the WebGPU viewer (the volumetric-heatmap render).
 
-usage: python "SIM V1 3D/export_web3.py"
+usage:
+  python "SIM V1 3D/export_web3.py"
+  python "SIM V1 3D/export_web3.py" --sim-dir city_demo/NoMa_DC_tile \
+      --out web/sim_assets_outdoor_3d.js --global SIM3D_ASSETS_OUTDOOR
 """
+import argparse
 import base64
 import json
 from pathlib import Path
@@ -32,9 +36,19 @@ def b64(a):
 
 
 def main():
-    man = json.loads((HERE / "manifest_3d.json").read_text())
-    M = np.load(HERE / "material_grid.npy")
-    inside = np.load(HERE / "inside_mask.npy")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sim-dir", default=str(HERE),
+                    help="directory containing manifest_3d/material_grid/inside_mask")
+    ap.add_argument("--out", default=str(HERE / "web" / "sim_assets_3d.js"),
+                    help="output JS file")
+    ap.add_argument("--global", dest="global_name", default="SIM3D_ASSETS",
+                    help="window global to assign")
+    args = ap.parse_args()
+
+    sim_dir = Path(args.sim_dir).expanduser().resolve()
+    man = json.loads((sim_dir / "manifest_3d.json").read_text())
+    M = np.load(sim_dir / "material_grid.npy")
+    inside = np.load(sim_dir / "inside_mask.npy")
 
     out = dict(
         manifest_3d=man,
@@ -43,9 +57,9 @@ def main():
         grid_b64=b64(M.astype(np.int8)),            # material class per voxel
         inside_b64=b64(inside.astype(np.uint8)),    # interior mask (display/loss)
     )
-    (HERE / "web").mkdir(exist_ok=True)
-    p = HERE / "web" / "sim_assets_3d.js"
-    p.write_text("window.SIM3D_ASSETS = " + json.dumps(out) + ";\n")
+    p = Path(args.out).expanduser().resolve()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"window.{args.global_name} = " + json.dumps(out) + ";\n")
     print(f"wrote {p} ({p.stat().st_size / 1e6:.1f} MB)")
     print("next: train Phase C → pl_unet3d.onnx into web/, then wire the viewer.")
 

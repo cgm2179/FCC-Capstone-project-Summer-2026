@@ -115,15 +115,18 @@ None of these are breakage — they are regenerable artifacts kept out of git de
 - **`SIM V1 3D/cache/`** — the diffraction relay cache (~376 MB) and the O2I facade field.
   Rebuilt automatically on the first solve that needs them (~74 s and ~2 min respectively).
   Not needed to browse the cached volumes.
-- **`SIM V1 3D/city/`** — the outdoor city grid (~350 MB). **Outdoor mode reports itself
-  unavailable** until you rebuild it. The source mesh *is* in the repo:
+- **`SIM V1 3D/city/`** — the full outdoor city grid (~350 MB @ 1 m). Gitignored /
+  regenerable. A **committed demo tile** lives at `SIM3D/city_demo/NoMa_DC_tile`
+  (`129×33×129` @ 2 m) with one cached Tx (`tx_67-20-66`); Outdoor mode uses that
+  automatically. Rebuild the full city when you have the RAM:
   ```bash
   python3 "SIM V1 3D/voxelize_city.py" --mode 2.5d --cell 1
   ```
-- **`pl_unet3d.onnx`** — no 3D surrogate is trained yet (that is M4). The browser's
-  resolution order is *cached volume → DL surrogate → analytic*; with no model the
-  surrogate tier reports its own absence and falls through. The analytic mirror is the
-  guaranteed-correct floor, so the simulator works without a surrogate by design.
+- **`pl_unet3d.onnx` + `pl_unet3d.json`** — a **smoke** (untrained) 3D surrogate is
+  shipped so the browser contract + WASM inference path can be verified. It is *not*
+  a ≤5 dB trained model; replace it after Colab training. Resolution order remains
+  *cached volume → DL surrogate → analytic*; the analytic mirror is still the
+  guaranteed-correct floor.
 - **`FCC_Walk_Outdoor_Indoor_Full/`, `Sandbox_Version_3D_Simulation_v1.obj/`** — local
   working data, far past GitHub's 100 MB per-file limit.
 

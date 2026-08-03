@@ -31,8 +31,12 @@ ground pad is added at y=0 since the voxelized floor slab (layer 0 is only
 so a dropped object outside real walls still lands on something instead of
 free-falling forever.
 
-usage: python "SIM V1 3D/export_collision_3d.py"
+usage:
+  python "SIM V1 3D/export_collision_3d.py"
+  python "SIM V1 3D/export_collision_3d.py" --sim-dir city_demo/NoMa_DC_tile \
+      --out web/collision_outdoor_3d.js --global SIM3D_COLLISION_OUTDOOR
 """
+import argparse
 import json
 from pathlib import Path
 
@@ -93,8 +97,18 @@ def boxes_to_meters(boxes, cell_size_m):
 
 
 def main():
-    man = json.loads((HERE / "manifest_3d.json").read_text())
-    M = np.load(HERE / "material_grid.npy")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sim-dir", default=str(HERE),
+                    help="directory containing manifest_3d/material_grid")
+    ap.add_argument("--out", default=str(HERE / "web" / "collision_3d.js"),
+                    help="output JS file")
+    ap.add_argument("--global", dest="global_name", default="SIM3D_COLLISION",
+                    help="window global to assign")
+    args = ap.parse_args()
+
+    sim_dir = Path(args.sim_dir).expanduser().resolve()
+    man = json.loads((sim_dir / "manifest_3d.json").read_text())
+    M = np.load(sim_dir / "material_grid.npy")
     cell = man["cell_size_m"]
     nx, ny, nz = M.shape
 
@@ -129,9 +143,9 @@ def main():
                    for m in man["materials"]],
         class_note="classes[i] is the material id of boxes[i]; -1 = synthetic ground pad",
     )
-    (HERE / "web").mkdir(exist_ok=True)
-    p = HERE / "web" / "collision_3d.js"
-    p.write_text("window.SIM3D_COLLISION = " + json.dumps(out) + ";\n")
+    p = Path(args.out).expanduser().resolve()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"window.{args.global_name} = " + json.dumps(out) + ";\n")
     print(f"wrote {p} ({len(meter_boxes)} boxes, {p.stat().st_size / 1e3:.0f} KB) "
           f"from {int(solid.sum())} solid voxels")
     for c in sorted(per_class):

@@ -3,6 +3,8 @@
 
 # Trained surrogates (fetch via `make model`; released as surrogate-v1 / pl_unet3d)
 *.onnx
+!Physics Engine/3D Map Physics/SIM V1 3D/web/pl_unet3d.onnx
+!SIM3D/web/pl_unet3d.onnx
 *.pt
 
 # Training dataset shards (regenerate with the phase_b notebooks, or `make dataset-fetch`)

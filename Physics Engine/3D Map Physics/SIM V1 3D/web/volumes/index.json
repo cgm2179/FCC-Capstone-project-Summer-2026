@@ -3,40 +3,27 @@
  "modes": [
   "indoor",
   "o2i",
+  "outdoor",
   "vacuum"
  ],
  "grid_shape": [
-  262,
-  17,
-  132
+  129,
+  33,
+  129
  ],
- "cell_size_m": 0.3,
+ "cell_size_m": 2.0,
  "bands_mhz": [
-  619.0,
-  627.0,
-  1935.0,
-  2442.0,
-  2510.0,
-  2600.0,
-  3500.0,
-  3710.0,
-  5500.0,
-  6125.0
+  2412.0
  ],
  "mechanisms": [
-  "path_loss",
-  "reflection",
-  "diffraction",
-  "scattering",
-  "refraction",
-  "absorption"
+  "path_loss"
  ],
- "engine_ver": "15dc2e202c3be7d3",
+ "engine_ver": "c20d64d5aa83441b",
  "pl_layout": "band,x,y,z  float16 dB",
  "t_layout": "x,y,z  float16 NANOSECONDS (sentinel 65504 = unreachable)",
  "mech_layout": "m_<mech>_<txid>.bin = band,x,y,z float16 dB; tau_<mech>_<txid>.bin = x,y,z float16 ns",
- "count": 6,
- "bytes": 128168304,
+ "count": 7,
+ "bytes": 133659834,
  "volumes": [
   {
    "tx_vox": [
@@ -362,6 +349,59 @@
     "freq_log_hi_mhz": 6200.0
    },
    "bytes": 31748112
+  },
+  {
+   "txid": "tx_67-20-66",
+   "mode": "outdoor",
+   "key": "c9e74725a554d083",
+   "scene_sha": "d2e07cd1f07c36a7",
+   "engine_ver": "c20d64d5aa83441b",
+   "tx_vox": [
+    67,
+    20,
+    66
+   ],
+   "grid_shape": [
+    129,
+    33,
+    129
+   ],
+   "bands": [
+    2412.0
+   ],
+   "t_max_ns": 654.5,
+   "t_unreachable_ns": 65504.0,
+   "pl_file": "pl_volume_tx_67-20-66.bin",
+   "t_file": "t_volume_tx_67-20-66.bin",
+   "mechanisms": {
+    "path_loss": {
+     "pl_file": "m_path_loss_tx_67-20-66.bin",
+     "tau_file": "tau_path_loss_tx_67-20-66.bin",
+     "t_max_ns": 654.5,
+     "tau_convention": "eikonal",
+     "combine_as": "coherent",
+     "tau_geom_file": "tau_geom_path_loss_tx_67-20-66.bin",
+     "tau_geom_max_ns": 641.5,
+     "bytes": 3294918
+    }
+   },
+   "mech_bands": [
+    2412.0
+   ],
+   "mechanism_names": [
+    "path_loss"
+   ],
+   "t_freq_mhz": null,
+   "norm": {
+    "pl_min_db": 40.0,
+    "pl_range_db": 130.0,
+    "freq_log_lo_mhz": 600.0,
+    "freq_log_hi_mhz": 6200.0
+   },
+   "bytes": 5491530,
+   "created": 1785716715.7631078,
+   "last_used": 1785716715.7631078,
+   "hits": 0
   },
   {
    "txid": "tx_131-6-65",

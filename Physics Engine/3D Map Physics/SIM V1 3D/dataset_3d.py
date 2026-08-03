@@ -155,6 +155,19 @@ def make_input(static: np.ndarray, tx, freq_feat: float, coords: np.ndarray,
     return np.concatenate([static, dynamic_channels(tx, freq_feat, coords, cell_m)], 0)
 
 
+def build_input_volume(M: np.ndarray, tx, freq_mhz: float, norm: Norm,
+                       cell_m: float, n_classes: int = 6) -> np.ndarray:
+    """Convenience wrapper for one full surrogate input volume.
+
+    This is intentionally small glue around the lower-level helpers so the
+    browser can mirror one named reference: material one-hot channels first,
+    then Tx blob, frequency feature, and log-distance.
+    """
+    static = static_channels(M, n_classes)
+    coords = voxel_coords(M.shape)
+    return make_input(static, tx, norm.freq_feature(freq_mhz), coords, cell_m)
+
+
 def distance_m(tx, coords: np.ndarray, cell_m: float) -> np.ndarray:
     d2 = ((coords - np.asarray(tx, np.float32)[:, None, None, None]) ** 2).sum(0)
     return (np.sqrt(d2) * float(cell_m)).astype(np.float32)
@@ -287,13 +300,12 @@ def clip_report(scene, manifest: dict, mask: np.ndarray, norm: Norm,
                 n_probe: int = 4, bands=None, seed: int = 0) -> dict:
     """Fraction of interior voxels that saturate the normalization ceiling.
 
-    THE GATE THAT MATTERS BEFORE GENERATING ANYTHING. The target is
-    `clip(PL, 40, 170) dB`, but `SceneV3` direct path loss on this scene reaches
-    1,700+ dB because `crossing_loss` has no saturating obstruction model (the 2-D
-    engine's `effective_obstruction`, engine_v2.py:242). Where PL > 170 the target
-    is the constant 1.0, so a surrogate trained there learns a flat plateau and
-    still scores a flattering RMSE. Measured on the current scene: 78% clipped at
-    3500 MHz, 86% at 6125 MHz. Fix Pre-M4 first; see PLAN_3D_SIM.md.
+    Phase B's preflight refuses to generate when `worst_clipped_fraction` > 0.35 —
+    above that the target is mostly the constant 1.0 and a surrogate learns a flat
+    plateau. Pre-M4 (M2 satObs): `SceneV3.pathloss_maps` now caps direct crossing
+    loss via `sat_obs`, so production-scene clip fractions drop from ~80% to well
+    under the 35% gate. Keep this report — it is the regression tripwire if
+    `use_satobs` is turned off or the cap regresses.
     """
     rng = np.random.default_rng(seed)
     cells = np.argwhere(mask)

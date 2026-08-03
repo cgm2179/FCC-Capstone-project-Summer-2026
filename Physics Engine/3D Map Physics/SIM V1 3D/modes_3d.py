@@ -67,7 +67,8 @@ O2I_DB = {"low_loss": 15.0, "high_loss": 28.0}
 
 EXTERIOR_CLASS = 5           # exterior_glass — the envelope the plane wave lights
 FLOORPLAN_META = ROOT / "Physics Engine" / "2D" / "STEP_1" / "floorplan_meta.json"
-CITY_DIR = HERE / "city" / "NoMa_DC_buildings"
+CITY_DIR_FULL = HERE / "city" / "NoMa_DC_buildings"
+CITY_DIR_DEMO = HERE / "city_demo" / "NoMa_DC_tile"
 
 # The known transmitter (user-supplied): Forte Hall rooftop.
 FORTE_HALL_LONLAT = (-77.011420, 38.901550)
@@ -199,6 +200,14 @@ def facade_sources_3d(scene, bearing_deg, *, exterior_class=EXTERIOR_CLASS,
 
 DEFAULT_O2I_SOURCES = 48
 O2I_CACHE = HERE / "cache"
+
+
+def outdoor_scene_dir() -> Path:
+    if (CITY_DIR_FULL / "material_grid.npy").exists():
+        return CITY_DIR_FULL
+    if (CITY_DIR_DEMO / "material_grid.npy").exists():
+        return CITY_DIR_DEMO
+    return CITY_DIR_FULL
 
 
 def _o2i_cache_key(scene, bearing_deg, o2i_db, freqs, n_src, exterior_class):
@@ -344,7 +353,7 @@ MODES: dict[str, Mode] = {
     "outdoor": Mode(
         key="outdoor", label="Outdoor",
         summary="City block: buildings are one barrier class, streets are air.",
-        source="point", scene_dir=CITY_DIR, barrier_classes=(3,),
+        source="point", scene_dir=outdoor_scene_dir(), barrier_classes=(3,),
         mechanisms=("path_loss", "reflection", "diffraction"),
         notes="Ground reflection and terrain diffraction are not new physics — they are "
               "Reflection_3D and Diffraction_3D on a scene whose walls are buildings. "
@@ -364,6 +373,8 @@ def list_modes() -> list[str]:
 def get_mode(key: str) -> Mode:
     if key not in MODES:
         raise KeyError(f"unknown mode {key!r}; have {list(MODES)}")
+    if key == "outdoor":
+        MODES[key].scene_dir = outdoor_scene_dir()
     return MODES[key]
 
 

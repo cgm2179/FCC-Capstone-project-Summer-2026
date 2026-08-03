@@ -42,8 +42,8 @@
         <div class="choice-group">
           <button type="button" class="choice active" data-env="indoor">Indoor
             <span class="choice-hint">Controlled floor-plan / CAD model</span></button>
-          <button type="button" class="choice" data-env="outdoor" disabled>Outdoor
-            <span class="choice-hint">Separate project — coming soon</span></button>
+          <button type="button" class="choice" data-env="outdoor">Outdoor
+            <span class="choice-hint">NoMa DC demo tile / city mode</span></button>
         </div>
       </div>
       <div class="choice-block">
@@ -56,7 +56,7 @@
         </div>
       </div>
       <div class="step-actions">
-        <span class="step-note">Outdoor mode and full 2D↔3D unification arrive in a later milestone.</span>
+        <span class="step-note">Outdoor 3D uses the small committed NoMa DC demo tile; full city builds remain offline.</span>
         <button type="button" id="chooserGo" class="btn-primary" disabled>Continue →</button>
       </div>
     </div>
@@ -691,6 +691,8 @@
        _ANTENNA_CATALOG, consumed by Frontend/simulator/simulation3d.js. -->
   <script src="SIM3D/web/sim_assets_3d.js"></script>
   <script src="SIM3D/web/collision_3d.js"></script>
+  <script src="SIM3D/web/sim_assets_outdoor_3d.js"></script>
+  <script src="SIM3D/web/collision_outdoor_3d.js"></script>
   <script src="SIM3D/web/antenna_catalog_3d.js"></script>
 
   <!-- ===================================================================

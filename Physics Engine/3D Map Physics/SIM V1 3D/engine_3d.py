@@ -198,11 +198,13 @@ class SceneV3:
 
 
 def load_scene(sim_dir=HERE, barrier_classes=(3,)):
-    manifest = json.loads((Path(sim_dir) / "manifest_3d.json").read_text())
-    M = np.load(Path(sim_dir) / "material_grid.npy")
+    sim_dir = Path(sim_dir)
+    manifest = json.loads((sim_dir / "manifest_3d.json").read_text())
+    M = np.load(sim_dir / "material_grid.npy")
     scene = SceneV3(M, manifest, barrier_classes=barrier_classes)
+    scene.sim_dir = sim_dir
     try:
-        scene.inside = np.load(Path(sim_dir) / "inside_mask.npy")
+        scene.inside = np.load(sim_dir / "inside_mask.npy")
     except FileNotFoundError:
         pass
     return scene, manifest

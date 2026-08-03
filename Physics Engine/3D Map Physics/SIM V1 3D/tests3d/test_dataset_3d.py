@@ -202,13 +202,13 @@ def test_contract_writes_and_reloads(tmp_path, grid, manifest):
 
 # --------------------------------------------------------------------------- the gate
 @pytest.mark.slow
-def test_clip_report_flags_the_saturated_target(scene, manifest, inside_mask):
-    """Pre-M4 blocker, asserted rather than remembered.
+def test_clip_report_under_norm_ceiling(scene, manifest, inside_mask):
+    """Pre-M4 saturating-obstruction fix landed (M2 satObs) — targets stay in-window.
 
-    `SceneV3.crossing_loss` has no saturating obstruction model, so direct path loss
-    runs past 1,700 dB and most of the interior pins to the 170 dB normalization
-    ceiling. Phase B refuses to generate while that is true. When the Pre-M4 fix
-    lands this test flips — update it then, deliberately.
+    Before satObs, direct PL ran past 1,700 dB and ~80% of interior voxels pinned to the
+    170 dB norm ceiling. SceneV3.pathloss_maps now applies sat_obs to the direct crossing
+    loss, so Phase B's clip_report preflight (limit 0.35) passes and dataset generation
+    is unblocked. This test guards the fix: if it regresses, flip back to the old gate.
     """
     norm = D.load_norm(manifest)
     rep = D.clip_report(scene, manifest, inside_mask, norm, n_probe=1,
@@ -217,6 +217,6 @@ def test_clip_report_flags_the_saturated_target(scene, manifest, inside_mask):
     assert 0.0 <= rep["worst_clipped_fraction"] <= 1.0
     assert rep["clipped_fraction"][3500.0] >= rep["clipped_fraction"][619.0], \
         "higher band must clip at least as much"
-    assert rep["worst_clipped_fraction"] > 0.35, (
-        "the saturating-obstruction fix appears to have landed - retire the Phase B "
-        "preflight gate and update this test")
+    assert rep["worst_clipped_fraction"] < 0.35, (
+        "saturating-obstruction regress — Phase B preflight would refuse to generate; "
+        "check SceneV3.use_satobs / sat_obs")

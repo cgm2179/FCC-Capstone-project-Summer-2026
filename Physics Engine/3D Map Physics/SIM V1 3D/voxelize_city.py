@@ -49,6 +49,8 @@ usage:
   python "SIM V1 3D/voxelize_city.py"                       # NoMa OBJ · 2.5d · 1 m
   python "SIM V1 3D/voxelize_city.py" --mode 3d --cell 2
   python "SIM V1 3D/voxelize_city.py" --mesh city.glb --up-axis z --out city/Foo
+  python SIM3D/voxelize_city.py --cell 2 --origin-m 800 0 600 \
+      --size-m 256 64 256 --out city_demo/NoMa_DC_tile --no-preview
 """
 import argparse
 import json
@@ -184,8 +186,14 @@ def build_25d(verts_vox, tris, shape, cls, terrain_v=None):
     hm = np.full(nx * nz, -1.0, np.float64)        # roof height (voxel-Y) per (x,z)
     for t in tris:
         pts = tri_sample_points(verts_vox[t])
-        ix = np.clip(np.floor(pts[:, 0]).astype(np.int64), 0, nx - 1)
-        iz = np.clip(np.floor(pts[:, 2]).astype(np.int64), 0, nz - 1)
+        ijk = np.floor(pts).astype(np.int64)
+        ok = np.all((ijk >= 0) & (ijk < np.array(shape)), axis=1)
+        if not ok.any():
+            continue
+        pts = pts[ok]
+        ijk = ijk[ok]
+        ix = ijk[:, 0]
+        iz = ijk[:, 2]
         np.maximum.at(hm, ix * nz + iz, pts[:, 1])
     hm = hm.reshape(nx, nz)
 
@@ -299,6 +307,11 @@ def main():
                     help="occupancy mode (default 2.5d column fill)")
     ap.add_argument("--cell", type=float, default=1.0,
                     help="cubic voxel size in metres (default 1.0)")
+    ap.add_argument("--origin-m", type=float, nargs=3, default=None, metavar=("X", "Y", "Z"),
+                    help="crop origin in mesh metres after Web-Mercator scaling; with "
+                         "--size-m defines the AABB lower corner")
+    ap.add_argument("--size-m", type=float, nargs=3, default=None, metavar=("SX", "SY", "SZ"),
+                    help="crop size in metres; voxels outside origin/size are discarded")
     ap.add_argument("--building-class", type=int, default=BUILDING_CLASS,
                     help=f"RF class for buildings (default {BUILDING_CLASS} = concrete barrier)")
     ap.add_argument("--merc-lat", type=float, default=MERC_LAT_DEFAULT,
@@ -320,6 +333,8 @@ def main():
         out = ROOT / out
     out.mkdir(parents=True, exist_ok=True)
     cls = int(args.building_class)
+    if (args.origin_m is None) != (args.size_m is None):
+        raise SystemExit("--origin-m and --size-m must be provided together")
 
     print(f"loading {mesh_path.name} ({mesh_path.suffix.lower()}) ...")
     verts, tris, up = load_mesh(mesh_path, args.up_axis)
@@ -334,6 +349,25 @@ def main():
         verts[:, 2] *= merc            # Z horizontal (Y is up = true metres)
     lo = verts.min(0)
     span = verts.max(0) - lo
+    full_lo, full_span = lo.copy(), span.copy()
+    crop = args.origin_m is not None
+    if crop:
+        lo = np.asarray(args.origin_m, np.float64)
+        span = np.asarray(args.size_m, np.float64)
+        if np.any(span <= 0):
+            raise SystemExit("--size-m values must be positive")
+        hi = lo + span
+        tri_v = verts[tris]
+        tlo = tri_v.min(axis=1)
+        thi = tri_v.max(axis=1)
+        keep = np.all((thi >= lo) & (tlo <= hi), axis=1)
+        print(f"  full scaled bounds origin={np.round(full_lo, 2).tolist()} "
+              f"span={np.round(full_span, 2).tolist()}")
+        print(f"  crop origin={np.round(lo, 2).tolist()} size={np.round(span, 2).tolist()} "
+              f"keeps {int(keep.sum()):,}/{len(tris):,} triangles")
+        tris = tris[keep]
+        if len(tris) == 0:
+            raise SystemExit("crop contains no mesh triangles; choose a different --origin-m/--size-m")
     pitch = args.cell                  # m_per_unit = 1.0 -> pitch(units) == cell(m)
     nx, ny, nz = (np.ceil(span / pitch).astype(int) + 1).tolist()
     nvox = nx * ny * nz
@@ -385,6 +419,10 @@ def main():
         source_obj=src_rel, domain="city_outdoor", mode=args.mode,
         building_class=cls, cell_size_m=round(args.cell, 6), m_per_unit=1.0,
         merc_lat=args.merc_lat, merc_scale=round(merc, 6),
+        crop_origin_m=([round(float(x), 4) for x in lo] if crop else None),
+        crop_size_m=([round(float(x), 4) for x in span] if crop else None),
+        full_origin_m=[round(float(x), 4) for x in full_lo],
+        full_span_m=[round(float(x), 4) for x in full_span],
         terrain=bool(args.terrain), terrain_source=(str(args.terrain) if args.terrain else None),
         grid_shape=[nx, ny, nz],
         origin_units=[round(float(x), 4) for x in lo],

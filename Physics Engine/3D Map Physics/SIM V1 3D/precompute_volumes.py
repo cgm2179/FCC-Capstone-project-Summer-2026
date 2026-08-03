@@ -84,13 +84,17 @@ def tx_id(tx) -> str:
     return f"tx_{int(tx[0])}-{int(tx[1])}-{int(tx[2])}"
 
 
-def choose_tx(scene, n, *, stratify=True, seed=0, y_fixed=None):
+def choose_tx(scene, n, *, stratify=True, seed=0, y_fixed=None, scene_dir=None):
     """Pick n transmitter positions from valid_tx_mask.
 
     Stratified over an 8-way XZ octant split so the cache covers the floor rather than
     clustering in one room — the same idea as the 2D dataset's octant stratification.
     """
-    vt = np.load(HERE / "valid_tx_mask.npy")
+    mask_dir = Path(scene_dir or getattr(scene, "sim_dir", HERE))
+    vt = np.load(mask_dir / "valid_tx_mask.npy")
+    if vt.shape != scene.M.shape:
+        raise SystemExit(
+            f"{mask_dir / 'valid_tx_mask.npy'} shape {vt.shape} does not match scene {scene.M.shape}")
     if y_fixed is not None:
         m = np.zeros_like(vt)
         m[:, y_fixed, :] = vt[:, y_fixed, :]
@@ -381,6 +385,7 @@ def main(argv=None) -> int:
     if not info["available"]:
         raise SystemExit(f"mode {mode!r} unavailable: {info['unavailable_reason']}")
 
+    mode_cfg = MD.get_mode(mode)
     scene, manifest = MD.build_scene(mode)
     bands = ([float(x) for x in a.bands.split(",")] if a.bands else list(scene.freqs))
     mechs = resolve_mechanisms(mode, a.mechanisms)
@@ -392,7 +397,8 @@ def main(argv=None) -> int:
         band_sel = [min(range(len(bands)), key=lambda i: abs(bands[i] - w)) for w in want]
 
     n = a.list or a.n_tx
-    txs = choose_tx(scene, n, stratify=a.stratify, seed=a.seed, y_fixed=a.y)
+    txs = choose_tx(scene, n, stratify=a.stratify, seed=a.seed, y_fixed=a.y,
+                    scene_dir=mode_cfg.scene_dir)
     if a.list:
         for t in txs:
             print(tx_id(t), t)

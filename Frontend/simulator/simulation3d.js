@@ -23,9 +23,12 @@ import * as CANNON from 'cannon-es';
 import { smoothSurfaceForClass } from './smooth_surface.js';   // A2: smooth surface from the voxels
 import { voxelizeTriangles, objectToTriangles } from './voxelize_browser.js';   // B: imported-model voxelizer
 
-const COLLISION = window.SIM3D_COLLISION;
 const CATALOG   = window.SIM3D_ANTENNA_CATALOG;
-const MANIFEST  = (window.SIM3D_ASSETS && window.SIM3D_ASSETS.manifest_3d) || {};
+const INDOOR_ASSETS = window.SIM3D_ASSETS;
+const INDOOR_COLLISION = window.SIM3D_COLLISION;
+let ACTIVE_ASSETS = INDOOR_ASSETS;
+let COLLISION = INDOOR_COLLISION;
+let MANIFEST = (ACTIVE_ASSETS && ACTIVE_ASSETS.manifest_3d) || {};
 
 // WiFi band presets (Indoor default). value = centre frequency in MHz.
 const WIFI_BANDS = [
@@ -125,7 +128,7 @@ if (wfBand) WIFI_BANDS.forEach((b) => {
 // ---- three.js + cannon-es scene (lazy) ----
 let initialized = false;
 let renderer, scene, camera, controls, world;
-let wallMesh = null, center = null, extent = null;
+let wallMesh = null, center = null, extent = null, gridHelper = null;
 let wallMaterialC, antennaMaterialC;
 let fieldObj = null;              // static field point cloud (THREE.Points)
 let waveObj = null;               // animated wavefront shell (THREE.Mesh)
@@ -169,8 +172,8 @@ function ensureInit() {
   key.position.set(center.x + extent[0] * 0.3, extent[1] * 4 + 10, center.z - extent[2] * 0.2);
   scene.add(key);
 
-  const grid = new THREE.GridHelper(Math.max(extent[0], extent[2]) * 1.2, 40, 0xcdd8d3, 0xe1e8e4);
-  grid.position.set(center.x, 0, center.z); scene.add(grid);
+  gridHelper = new THREE.GridHelper(Math.max(extent[0], extent[2]) * 1.2, 40, 0xcdd8d3, 0xe1e8e4);
+  gridHelper.position.set(center.x, 0, center.z); scene.add(gridHelper);
 
   world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.81, 0) });
   world.broadphase = new CANNON.SAPBroadphase(world);
@@ -236,6 +239,7 @@ const DEFAULT_STYLE = { opacity: 0.55, roughness: 0.9, metalness: 0.04 };
 // grey — you cannot make glass translucent and concrete solid in the same draw call.
 // Six draw calls is nothing next to being able to see what the RF engine is solving on.
 let wallMeshes = [];
+let wallBodies = [];
 let surfaceMeshes = [];              // smooth marching-cubes surface (A2), one mesh per class
 const GEOM_CLIP = [];                // active geometry clip planes (0 or 1); shared by all meshes
 let clipPlane = null;                // the THREE.Plane cutting the building at the level
@@ -313,8 +317,34 @@ function buildBuilding() {
     const b = boxes[i];
     const body = new CANNON.Body({ mass: 0, material: wallMaterialC });
     body.addShape(new CANNON.Box(new CANNON.Vec3(b[3], b[4], b[5])));
-    body.position.set(b[0], b[1], b[2]); world.addBody(body);
+    body.position.set(b[0], b[1], b[2]); world.addBody(body); wallBodies.push(body);
   }
+}
+
+function disposeBuilding() {
+  disposeSurface();
+  for (const m of wallMeshes) {
+    scene.remove(m);
+    if (m.geometry) m.geometry.dispose();
+    if (m.material) m.material.dispose();
+  }
+  wallMeshes = [];
+  wallMesh = null;
+  if (world) for (const b of wallBodies) world.removeBody(b);
+  wallBodies = [];
+}
+
+function clearPlaced() {
+  for (const p of placed) {
+    if (p.mesh) {
+      scene.remove(p.mesh);
+      if (p.mesh.geometry) p.mesh.geometry.dispose();
+      if (p.mesh.material) p.mesh.material.dispose();
+    }
+    if (p.body && world) world.removeBody(p.body);
+  }
+  placed.splice(0, placed.length);
+  refreshLists();
 }
 
 // ---- Smooth surface (A2): rebuild the building as a smooth iso-surface of the SAME voxel grid
@@ -379,6 +409,76 @@ function raycastTargets() {
   return wallMeshes.length ? wallMeshes : [wallMesh];
 }
 
+// ---- Fixed scene swap (Indoor <-> Outdoor demo tile) ----------------------
+let ACTIVE_FIXED_SCENE = 'indoor';
+
+function resetFrameForActiveScene(resetCamera = true) {
+  if (!COLLISION) return;
+  extent = COLLISION.extent_m;
+  center = new THREE.Vector3(extent[0] / 2, extent[1] / 2, extent[2] / 2);
+  if (gridHelper && scene) {
+    scene.remove(gridHelper);
+    if (gridHelper.geometry) gridHelper.geometry.dispose();
+    if (gridHelper.material) gridHelper.material.dispose();
+    gridHelper = null;
+  }
+  if (scene) {
+    gridHelper = new THREE.GridHelper(Math.max(extent[0], extent[2]) * 1.2, 40, 0xcdd8d3, 0xe1e8e4);
+    gridHelper.position.set(center.x, 0, center.z);
+    scene.add(gridHelper);
+  }
+  if (camera && resetCamera) {
+    camera.position.set(center.x - extent[0] * 0.42,
+      Math.max(extent[0], extent[2]) * 0.8,
+      center.z + extent[2] * 1.4);
+    camera.updateProjectionMatrix();
+  }
+  if (controls) { controls.target.copy(center); controls.update(); }
+}
+
+function setFixedScene(kind) {
+  const outdoor = kind === 'outdoor';
+  const assets = outdoor ? window.SIM3D_ASSETS_OUTDOOR : INDOOR_ASSETS;
+  const collision = outdoor ? window.SIM3D_COLLISION_OUTDOOR : INDOOR_COLLISION;
+  if (!assets || !collision) {
+    if (outdoor) setStatus('Outdoor scene assets are not loaded (SIM3D/web/sim_assets_outdoor_3d.js and collision_outdoor_3d.js).');
+    return false;
+  }
+  if (ACTIVE_FIXED_SCENE === kind && !RUNTIME_SCENE) return true;
+  ACTIVE_FIXED_SCENE = kind;
+  ACTIVE_ASSETS = assets;
+  COLLISION = collision;
+  MANIFEST = (ACTIVE_ASSETS && ACTIVE_ASSETS.manifest_3d) || {};
+  GRID3 = null; GDIMS = null; INSIDE3 = null;
+  CELL_M = MANIFEST.cell_size_m || 0.3;
+  RUNTIME_SCENE = null;
+  window.SIM3D_VOLUME = null;
+  surrogateVol = null;
+  disposeField(); disposeLobes(); disposeVectors(); disposeInterference(); disposeSweep();
+  if (initialized) {
+    clearPlaced();
+    disposeBuilding();
+    DISPLAY.smooth = false; if (dispSmooth) dispSmooth.checked = false;
+    resetFrameForActiveScene(true);
+    const t0 = performance.now();
+    buildBuilding();
+    buildMs = Math.round(performance.now() - t0);
+    refreshMeta();
+    setStatus((outdoor ? 'Outdoor city tile' : 'Indoor 7th-floor scene') + ' loaded · ' + readyStatus());
+  } else {
+    resetFrameForActiveScene(false);
+  }
+  return true;
+}
+
+function activateOutdoorScene() {
+  return setFixedScene('outdoor');
+}
+
+function revertOutdoorScene() {
+  return setFixedScene('indoor');
+}
+
 // ---- Phase B: solve the sim on an IMPORTED model (browser-voxelized) ----
 // Point the engine's grid at a runtime voxelization so the analytic tier (marchPL) AND the
 // smooth surface run on the imported model instead of the fixed scene. A new scene means the
@@ -391,6 +491,7 @@ function setRuntimeScene(vox, name) {
   extent = vox.extent.slice();
   center = new THREE.Vector3(extent[0] / 2, extent[1] / 2, extent[2] / 2);
   window.SIM3D_VOLUME = null;                    // cached volumes belong to the fixed scene
+  surrogateVol = null;                           // scene-locked UNet contract belongs there too
   RUNTIME_SCENE = { name: name || 'imported model', dims: vox.dims };
   // hide the fixed voxel building; render the imported model as a smooth surface of its grid
   disposeField(); disposeSurface();
@@ -454,20 +555,12 @@ async function loadModelFile(file, realSizeM) {
 // Restore the built-in fixed scene (cached full physics).
 function revertToFixedScene() {
   if (!RUNTIME_SCENE) return;
-  RUNTIME_SCENE = null;
-  GRID3 = null; GDIMS = null; INSIDE3 = null;   // decodeGrid/decodeInside re-decode the fixed asset
-  CELL_M = MANIFEST.cell_size_m || 0.3;
-  extent = COLLISION.extent_m;
-  center = new THREE.Vector3(extent[0] / 2, extent[1] / 2, extent[2] / 2);
-  disposeField(); disposeSurface();
-  DISPLAY.smooth = false; if (dispSmooth) dispSmooth.checked = false;
-  for (const m of wallMeshes) m.visible = true;
-  if (controls) { controls.target.copy(center); controls.update(); }
-  refreshMeta();
+  setFixedScene(currentMode() === 'outdoor' ? 'outdoor' : 'indoor');
   if (vizMode) runVizMode(vizMode.value);
   if (modelRevert) modelRevert.style.display = 'none';
-  if (modelNote) modelNote.textContent = 'Built-in 7th floor (cached full physics).';
-  setStatus('Back to the built-in 7th-floor scene.');
+  if (modelNote) modelNote.textContent = currentMode() === 'outdoor'
+    ? 'Built-in outdoor city tile (cached full physics).'
+    : 'Built-in 7th floor (cached full physics).';
 }
 if (modelFile) modelFile.addEventListener('change', (e) => {
   const f = e.target.files && e.target.files[0];
@@ -577,7 +670,7 @@ function bandMult(fMHz) {
 let GRID3 = null, GDIMS = null;
 function decodeGrid() {
   if (GRID3) return GRID3;
-  const b64 = window.SIM3D_ASSETS && window.SIM3D_ASSETS.grid_b64;
+  const b64 = ACTIVE_ASSETS && ACTIVE_ASSETS.grid_b64;
   const dims = MANIFEST.grid_shape;
   if (!b64 || !dims) return null;
   const s = atob(b64), a = new Uint8Array(s.length);
@@ -588,7 +681,7 @@ function decodeGrid() {
 let INSIDE3 = null;
 function decodeInside() {
   if (INSIDE3) return INSIDE3;
-  const b64 = window.SIM3D_ASSETS && window.SIM3D_ASSETS.inside_b64;
+  const b64 = ACTIVE_ASSETS && ACTIVE_ASSETS.inside_b64;
   if (!b64 || !MANIFEST.grid_shape) return null;
   const s = atob(b64), a = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
@@ -621,7 +714,8 @@ const clampi = (v, n) => (v < 0 ? 0 : v >= n ? n - 1 : v);
 // coverage falls back to the P2 analytic march when no volume matches the Tx.
 const VOL_TOL = 20;              // voxels — precomputed Tx are sparse; match generously
 let volumeIndex = null;          // [] once fetched; entries = index.json sidecars
-const volumeCache = {};          // txid -> decoded volume
+const volumeCache = {};          // mode|txid -> decoded volume
+function volumeCacheKey(entry) { return (entry.mode || 'indoor') + '|' + entry.txid; }
 
 // ---- Propagation modes (M3) ----
 // The mode picks the SCENE and the SOURCE MODEL, so a volume solved in one mode is not
@@ -740,8 +834,9 @@ function matchVolume(txVox, mode) {
 // setCurrent=false is the prefetch path: decode into the cache without stealing the
 // volume the user is currently looking at.
 async function loadVolume(entry, { setCurrent = true } = {}) {
-  if (volumeCache[entry.txid]) {
-    const hit = volumeCache[entry.txid];
+  const cacheKey = volumeCacheKey(entry);
+  if (volumeCache[cacheKey]) {
+    const hit = volumeCache[cacheKey];
     hit.used = ++cacheClock;
     if (setCurrent) window.SIM3D_VOLUME = hit;
     return hit;
@@ -755,8 +850,8 @@ async function loadVolume(entry, { setCurrent = true } = {}) {
   const vol = { pl: new Uint16Array(plBuf), t: new Uint16Array(tBuf),
     dims: entry.grid_shape, bands: entry.bands, tx_vox: entry.tx_vox,
     t_max_ns: entry.t_max_ns, entry, used: ++cacheClock };
-  volumeCache[entry.txid] = vol;
-  evictToBudget(entry.txid);
+  volumeCache[cacheKey] = vol;
+  evictToBudget(cacheKey);
   if (setCurrent) { window.SIM3D_VOLUME = vol; prefetchNeighbours(entry); }
   return vol;
 }
@@ -776,7 +871,7 @@ function prefetchNeighbours(entry) {
   // must not be what pushes the renderer over, and each volume is ~12 MB decoded.
   if (cacheBytes() > BROWSER_CACHE_BUDGET * 0.6) return;
   const pool = volumesForMode(entry.mode || 'indoor')
-    .filter((e) => e.txid !== entry.txid && !volumeCache[e.txid]);
+    .filter((e) => e.txid !== entry.txid && !volumeCache[volumeCacheKey(e)]);
   if (!pool.length) return;
   const d = (e) => Math.hypot(e.tx_vox[0] - entry.tx_vox[0],
                               e.tx_vox[1] - entry.tx_vox[1],
@@ -813,6 +908,9 @@ const TIER = { CACHE: 'cached volume', SURROGATE: 'DL surrogate', ANALYTIC: 'ana
 // confident, wrong field. So the browser loads the model ONLY alongside a contract
 // sidecar that the trainer writes, and otherwise falls straight through to analytic.
 const SURROGATE = { session: null, spec: null, state: 'untried', note: '' };
+let surrogateVol = null;          // last ONNX result, denormalized to PL dB + tau ns
+let surrogatePending = null;
+let surrogatePendingKey = null;
 async function tryLoadSurrogate() {
   if (SURROGATE.state !== 'untried') return SURROGATE;
   SURROGATE.state = 'loading';
@@ -825,7 +923,7 @@ async function tryLoadSurrogate() {
     const specRes = await fetch('SIM3D/web/pl_unet3d.json');
     if (!specRes.ok) throw new Error('no input contract (pl_unet3d.json)');
     SURROGATE.spec = await specRes.json();
-    for (const eps of [['webgpu'], ['wasm']]) {
+    for (const eps of [['wasm'], ['webgpu']]) {
       try {
         SURROGATE.session = await ort.InferenceSession.create('SIM3D/web/pl_unet3d.onnx',
           { executionProviders: eps });
@@ -840,6 +938,109 @@ async function tryLoadSurrogate() {
     SURROGATE.note = 'not trained yet (M4) — ' + e.message;
   }
   return SURROGATE;
+}
+
+function sceneMatchesSurrogate(spec, dims) {
+  // Pure predicate — do not mutate SURROGATE.note here. Outdoor / imported grids
+  // legitimately fail the indoor-trained contract; stashing that as the global note
+  // made the status strip claim "scene grid mismatch" after a later successful run.
+  if (!spec || !dims) return false;
+  const sg = spec.grid_shape || [];
+  if (sg.length !== 3 || sg[0] !== dims[0] || sg[1] !== dims[1] || sg[2] !== dims[2]) return false;
+  if (spec.mode && spec.mode !== currentMode()) return false;
+  if (spec.scene_sha && MANIFEST.scene_sha && spec.scene_sha !== MANIFEST.scene_sha) return false;
+  return true;
+}
+
+function buildSurrogateInput(spec, materialGrid, dims, cellM, txVox, fMHz) {
+  const input = spec.input || {};
+  const nx = dims[0], ny = dims[1], nz = dims[2], n = nx * ny * nz;
+  const x = new Float32Array(9 * n);
+  const nMat = input.material_classes || 6;
+  for (let i = 0; i < n; i++) {
+    const c = materialGrid[i];
+    if (c >= 0 && c < nMat) x[c * n + i] = 1.0;
+  }
+  const sigma = input.tx_blob_sigma_cells || 2.0;
+  const denom = 2.0 * sigma * sigma;
+  const lo = Math.log10(input.freq_log_lo_mhz || 600);
+  const hi = Math.log10(input.freq_log_hi_mhz || 6200);
+  const freqFeat = (Math.log10(fMHz) - lo) / (hi - lo);
+  const minD = input.logdist_min_m || 1.0;
+  const div = input.logdist_divisor || 3.0;
+  const offBlob = 6 * n, offFreq = 7 * n, offLogD = 8 * n;
+  let i = 0;
+  for (let ix = 0; ix < nx; ix++)
+    for (let iy = 0; iy < ny; iy++)
+      for (let iz = 0; iz < nz; iz++, i++) {
+        const dx = ix - txVox[0], dy = iy - txVox[1], dz = iz - txVox[2];
+        const d2 = dx * dx + dy * dy + dz * dz;
+        x[offBlob + i] = Math.exp(-d2 / denom);
+        x[offFreq + i] = freqFeat;
+        x[offLogD + i] = Math.log10(Math.max(Math.sqrt(d2) * cellM, minD)) / div;
+      }
+  return x;
+}
+
+function surrogateMatches(vol, txVox, fMHz) {
+  return !!(vol && txVox && vol.freq_mhz === fMHz && vol.tx_vox[0] === txVox[0]
+    && vol.tx_vox[1] === txVox[1] && vol.tx_vox[2] === txVox[2]
+    && (!RUNTIME_SCENE) && vol.mode === currentMode());
+}
+function surrogateAt(vol, x, y, z) {
+  const NY = vol.dims[1], NZ = vol.dims[2];
+  return vol.pl[(x * NY + y) * NZ + z];
+}
+function surrogateTauAt(vol, x, y, z) {
+  const NY = vol.dims[1], NZ = vol.dims[2];
+  return vol.tau[(x * NY + y) * NZ + z];
+}
+async function runSurrogate(txVox, fMHz) {
+  const grid = decodeGrid();
+  const dims = GDIMS || MANIFEST.grid_shape;
+  if (!grid || !txVox || RUNTIME_SCENE) return null;
+  const ready = await tryLoadSurrogate();
+  if (ready.state !== 'ready') return null;
+  if (!sceneMatchesSurrogate(ready.spec, dims)) {
+    // leave state=ready so a later matching scene can still use the loaded session
+    return null;
+  }
+  const key = currentMode() + '|' + txVox.join(',') + '|' + fMHz + '|' + dims.join('x');
+  if (surrogateMatches(surrogateVol, txVox, fMHz)) return surrogateVol;
+  if (surrogatePending && surrogatePendingKey === key) return surrogatePending;
+  surrogatePendingKey = key;
+  SURROGATE.state = 'running';
+  surrogatePending = (async () => {
+    try {
+      const spec = ready.spec, n = dims[0] * dims[1] * dims[2];
+      const input = buildSurrogateInput(spec, grid, dims, CELL_M, txVox, fMHz);
+      const inName = (spec.input && spec.input.name) || ready.session.inputNames[0] || 'x';
+      const outName = (spec.output && spec.output.name) || ready.session.outputNames[0] || 'y';
+      const feeds = {};
+      feeds[inName] = new ort.Tensor('float32', input, [1, 9, dims[0], dims[1], dims[2]]);
+      const out = await ready.session.run(feeds);
+      const y = (out[outName] || out[Object.keys(out)[0]]).data;
+      const pl = new Float32Array(n), tau = new Float32Array(n);
+      const omin = spec.output.pl_min_db, orange = spec.output.pl_range_db;
+      const tauMax = spec.output.tau_max_ns || 400.0;
+      for (let i = 0; i < n; i++) {
+        pl[i] = Math.min(1, Math.max(0, y[i])) * orange + omin;
+        tau[i] = Math.min(1, Math.max(0, y[n + i])) * tauMax;
+      }
+      surrogateVol = { pl, tau, dims: dims.slice(), bands: spec.bands_mhz || [],
+        tx_vox: txVox.slice(), freq_mhz: fMHz, mode: currentMode(), spec };
+      SURROGATE.state = 'ready';
+      return surrogateVol;
+    } catch (e) {
+      SURROGATE.state = 'unavailable';
+      SURROGATE.note = 'inference failed — ' + (e && e.message || e);
+      return null;
+    } finally {
+      surrogatePending = null;
+      surrogatePendingKey = null;
+    }
+  })();
+  return surrogatePending;
 }
 
 // background-load the volume matching txVox in the current mode; call onReady() when it arrives
@@ -859,8 +1060,11 @@ function tryLoadVolume(txVox, onReady) {
 function reportNoVolume(txVox) {
   const m = currentMode(), label = (MODE_INFO[m] || {}).label;
   const pool = volumesForMode(m);
+  const mechHint = m === 'outdoor'
+    ? 'path_loss,reflection,diffraction'
+    : 'path_loss,reflection,diffraction,scattering,refraction,absorption';
   const solveHint = ' — run: python "SIM V1 3D/export_pl_volume.py" --mode ' + m
-    + ' --mechanisms path_loss,reflection,diffraction,scattering,refraction,absorption';
+    + ' --mechanisms ' + mechHint;
   if (volumeIndexError) {
     setStatus(label + ' · showing the analytic tier only — ' + volumeIndexError);
     return;
@@ -1123,22 +1327,25 @@ function showProbe(p) {
   const iz = clampi(Math.floor(p.z / CELL_M), D[2]);
   const freqMHz = Number(wfBand && wfBand.value) || 2437;
   let pl = null, tau = null;
+  const sTx = firstTx(); const sSrc = sTx ? sTx.body.position : center;
+  const sTxVox = sSrc ? [clampi(Math.floor(sSrc.x / CELL_M), D[0]),
+                         clampi(Math.floor(sSrc.y / CELL_M), D[1]),
+                         clampi(Math.floor(sSrc.z / CELL_M), D[2])] : null;
+  const sur = surrogateMatches(surrogateVol, sTxVox, freqMHz) ? surrogateVol : null;
   if (vol) {
     const bi = nearestBandIndex(vol, freqMHz);
     pl = plAt(vol, bi, ix, iy, iz);
     const tn = tAt(vol, ix, iy, iz);
     if (isFinite(tn) && tn < 65504) tau = tn;
+  } else if (sur) {
+    pl = surrogateAt(sur, ix, iy, iz);
+    tau = surrogateTauAt(sur, ix, iy, iz);
   } else if (decodeGrid()) {
-    const tx = firstTx(); const s = tx ? tx.body.position : center;
-    const txv = [clampi(Math.floor(s.x / CELL_M), GDIMS[0]),
-                 clampi(Math.floor(s.y / CELL_M), GDIMS[1]),
-                 clampi(Math.floor(s.z / CELL_M), GDIMS[2])];
     const mult = bandMult(freqMHz);
-    pl = marchPL(txv, ix, iy, iz, LOSS_DB.map((v) => v * mult), APM_DB.map((v) => v * mult),
+    pl = marchPL(sTxVox, ix, iy, iz, LOSS_DB.map((v) => v * mult), APM_DB.map((v) => v * mult),
       20 * Math.log10(freqMHz) + FSPL_CONST);
   } else {
-    const s = (firstTx() || { body: { position: center } }).body.position;
-    const d = Math.max(0.5, Math.hypot(p.x - s.x, p.y - s.y, p.z - s.z));
+    const d = Math.max(0.5, Math.hypot(p.x - sSrc.x, p.y - sSrc.y, p.z - sSrc.z));
     pl = 20 * Math.log10(d) + 20 * Math.log10(freqMHz) - 27.55;
   }
   if (pl == null || !isFinite(pl)) { hideProbe(); return; }
@@ -1283,20 +1490,27 @@ function runStaticField() {
   const mult = bandMult(freqMHz);
   const L = LOSS_DB.map((v) => v * mult), Ap = APM_DB.map((v) => v * mult);
   const f1 = 20 * Math.log10(freqMHz) + FSPL_CONST;         // fspl at 1 m
+  // Derive a voxel from the placed Tx, or from the scene centre when nothing is placed yet.
+  // matchVolume(null) already falls back to the mode's first cached solve; using the centre
+  // keeps outdoor/indoor demo Tx within VOL_TOL of the committed volumes (e.g. outdoor
+  // centre ≈ [64,16,64] vs cached tx_67-20-66).
   const txVox = GRID ? [clampi(Math.floor(src.x / CELL_M), GDIMS[0]),
                         clampi(Math.floor(src.y / CELL_M), GDIMS[1]),
                         clampi(Math.floor(src.z / CELL_M), GDIMS[2])] : null;
 
   // Prefer a precomputed full-physics PL volume when one matches the placed Tx;
   // otherwise render analytic now and upgrade in the background if one loads.
-  const vol = volMatches(window.SIM3D_VOLUME, txVox) ? window.SIM3D_VOLUME : null;
+  const curVol = window.SIM3D_VOLUME || null;
+  const vol = (txVox ? volMatches(curVol, txVox)
+    : (curVol && (curVol.entry.mode || 'indoor') === currentMode())) ? curVol : null;
+  const sur = (!vol && surrogateMatches(surrogateVol, txVox, freqMHz)) ? surrogateVol : null;
   const bandIdx = vol ? nearestBandIndex(vol, freqMHz) : 0;
   // Tier 1 miss: try to upgrade in the background (cache first, then surrogate), and render
   // the analytic floor immediately so the user is never looking at nothing. Skipped for an
   // imported runtime scene — its grid is unique, so no cached volume / surrogate can match.
-  if (!vol && txVox && !RUNTIME_SCENE) {
+  if (!vol && !RUNTIME_SCENE) {
     tryLoadVolume(txVox, () => { if (fieldObj) runStaticField(); });
-    tryLoadSurrogate();
+    if (!sur && txVox) runSurrogate(txVox, freqMHz).then((r) => { if (r && fieldObj) runStaticField(); });
   }
 
   const { sliced, g, yLo, yHi, yInc } = sampleBounds();     // full volume, or one prediction plane
@@ -1308,7 +1522,10 @@ function runStaticField() {
         if (vol) {
           pl = plAt(vol, bandIdx, clampi(Math.floor(x / CELL_M), vol.dims[0]),
             clampi(Math.floor(y / CELL_M), vol.dims[1]), clampi(Math.floor(z / CELL_M), vol.dims[2]));
-        } else if (GRID) {
+        } else if (sur) {
+          pl = surrogateAt(sur, clampi(Math.floor(x / CELL_M), sur.dims[0]),
+            clampi(Math.floor(y / CELL_M), sur.dims[1]), clampi(Math.floor(z / CELL_M), sur.dims[2]));
+        } else if (GRID && txVox) {
           pl = marchPL(txVox,
             clampi(Math.floor(x / CELL_M), GDIMS[0]),
             clampi(Math.floor(y / CELL_M), GDIMS[1]),
@@ -1341,15 +1558,18 @@ function runStaticField() {
   coverageLegend();
   // Name the tier that actually produced this picture — cached volume, surrogate, or the
   // analytic floor. Which engine drew it changes how much it should be trusted.
-  const tier = vol ? TIER.CACHE : (GRID ? TIER.ANALYTIC : TIER.ANALYTIC);
+  const tier = vol ? TIER.CACHE : sur ? TIER.SURROGATE : TIER.ANALYTIC;
   const srcLabel = vol ? TIER.CACHE + ' — full-physics solve (SceneV3 eikonal/Fresnel)'
-    : GRID ? TIER.ANALYTIC + ' — Motley-Keenan multiwall'
-           : TIER.ANALYTIC + ' — FSPL only (material grid unavailable)';
+    : sur ? TIER.SURROGATE + ' — ' + (SURROGATE.note || 'UNet3D')
+          : GRID ? TIER.ANALYTIC + ' — Motley-Keenan multiwall'
+                 : TIER.ANALYTIC + ' — FSPL only (material grid unavailable)';
   const fell = !vol && SURROGATE.state === 'unavailable'
     ? ' · surrogate tier skipped: ' + SURROGATE.note : '';
   setStatus('Static field · ' + srcLabel + ' @ ' + freqMHz + ' MHz · '
     + samples.length.toLocaleString() + ' samples'
-    + (vol ? ' · curved eikonal shadows + in-wall lag.' : GRID ? ' · walls shadow the field.' : '.')
+    + (vol ? ' · curved eikonal shadows + in-wall lag.'
+      : sur ? ' · ONNX Runtime inference.'
+            : GRID ? ' · walls shadow the field.' : '.')
     + fell);
   window.SIM3D_TIER = tier;
   lastSolveMs = Math.round(performance.now() - _t0);
@@ -2133,7 +2353,18 @@ function refreshModeNote() {
     : '  ·  ' + (n ? n + ' cached volume' + (n === 1 ? '' : 's') + '.'
                    : 'nothing cached for this mode yet.'));
 }
+function syncModeSelectWithApp() {
+  if (modeSel && window.appMode && window.appMode.environment === 'outdoor') {
+    modeSel.value = 'outdoor';
+  }
+}
 function applyMode() {
+  const wantOutdoor = currentMode() === 'outdoor';
+  if (wantOutdoor) {
+    if (!activateOutdoorScene()) return;
+  } else if (ACTIVE_FIXED_SCENE === 'outdoor' || RUNTIME_SCENE) {
+    revertOutdoorScene();
+  }
   refreshModeNote();
   hideProbe();                       // the probed point's values belong to the old scene
   // the Tx controls are meaningless when the source is a plane wave 416 m away
@@ -2142,12 +2373,14 @@ function applyMode() {
   // a volume from another mode is a different scene and a different source model, so it
   // must not survive the switch
   window.SIM3D_VOLUME = null;
+  surrogateVol = null;
   loadVolumeIndex().then(() => {
     refreshModeNote();
     if (vizMode) runVizMode(vizMode.value);
   });
 }
 if (modeSel) modeSel.addEventListener('change', applyMode);
+syncModeSelectWithApp();
 if (modeNote) applyMode();
 // changing the transmitter antenna type live-updates the lobe when in radiation mode
 if (txType) txType.addEventListener('change', () => {
@@ -2172,6 +2405,8 @@ function onResize() {
 const simBtn = document.getElementById('tabSimBtn');
 if (simBtn) simBtn.addEventListener('click', () => {
   requestAnimationFrame(() => {
+    syncModeSelectWithApp();
+    applyMode();
     if (window.appMode && window.appMode.dim === '3d' && viewport && viewport.offsetParent !== null) { ensureInit(); onResize(); }
   });
 });
@@ -2194,9 +2429,10 @@ window.__sim3d = {
   get mechChannels() { return mechCache; },
   get volumeIndex() { return volumeIndex; },
   // cache/offload handles: which tier drew the current field, and what is warm
-  currentMode, volumesForMode, matchVolume, tryLoadSurrogate, prefetchNeighbours,
+  currentMode, volumesForMode, matchVolume, tryLoadSurrogate, runSurrogate,
+  buildSurrogateInput, sceneMatchesSurrogate, prefetchNeighbours,
   get tier() { return window.SIM3D_TIER || null; },
-  get surrogate() { return { state: SURROGATE.state, note: SURROGATE.note }; },
+  get surrogate() { return { state: SURROGATE.state, note: SURROGATE.note, volume: surrogateVol }; },
   get warmVolumes() { return Object.keys(volumeCache); },
   get cacheBytes() { return cacheBytes(); },
   get cacheBudget() { return BROWSER_CACHE_BUDGET; },

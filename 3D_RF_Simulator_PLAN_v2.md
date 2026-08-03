@@ -1,5 +1,5 @@
 # Plan v2 — 3D RF Propagation Simulator (physics → surrogate → validated)
-*Updated 2026-08-02. Supersedes v1; status verified against the repo, not commit messages.*
+*Updated 2026-08-03. Supersedes v1; status verified against the repo, not commit messages.*
 
 ## Goal (unchanged)
 A 3D RF propagation simulator that implements the six EM mechanisms from the Seybold
@@ -13,9 +13,9 @@ cross-validated against real PCTEL G-flex scanner measurements.
 |---|---|---|
 | **M0** unblock · re-voxelize · register | ✅ **complete** | 2 documented test files never written (minor) |
 | **M1** complex-field spine | ✅ **complete** | — |
-| **M2** six mechanisms + demo | 🚧 **3 of 6** | Refraction + Absorption (0-byte stubs); **fix diffuse-dominates bug**; `georef.js` |
-| **M3** four modes + offload/cache | 🚧 **indoor/O2I done** | **outdoor has a grid but no cached city volumes** |
-| **M4** dataset + DL surrogate | ⬜ **~10%** | 27/30 shards; rewrite trainer; export `.onnx` + `.json` sidecar |
+| **M2** six mechanisms + demo | ✅ **complete** | optional in-wall τ clock; six mechanisms + satObs + georef shipped (PR #10) |
+| **M3** four modes + offload/cache | 🚧 **demo outdoor done** | full-city @ 1 m volumes still A100-scale; demo tile `129×33×129` + `tx_67-20-66` cached |
+| **M4** dataset + DL surrogate | 🚧 **browser path live** | smoke ONNX+JSON + inference wired; full Colab train still ⬜ (Pre-M4 clip gate cleared) |
 | **M5** validation vs scanner | ⬜ **absent** | `Construct_Reciever_3D` (0 B) + `validate_scanner_3d` (missing) — **the goal** |
 | **UI** usability layer (new) | ✅ **Tier 1** | Tiers 2–3 (link profile, result layers, multi-Tx, walk-vs-measured) |
 
@@ -32,57 +32,35 @@ cross-validated against real PCTEL G-flex scanner measurements.
    so v1's "re-export to add cellular" item is largely **already satisfied** for the indoor
    truth set. The outdoor truth set (`FCC_Walk_Outdoor_Indoor_Full/`) exists with n7x names.
 4. ✅ **`Antenna_Type_3D.py` restored** (961 lines); importers unblocked.
-5. ⚠️ **`phase_c3_train_colab.ipynb` still lacks** resumability / AMP / seed pinning / the
-   ONNX parity-gate — the fp32-at-load bug family is **not yet addressed** (M4 below).
+5. ✅ **M4 trainer plumbing is rewritten.** `phase_c3_train_colab.ipynb` now carries
+   resumability / AMP / seed pinning / ONNX parity, and `ShardDS` keeps fp16 shards in RAM
+   until `__getitem__`. The remaining M4 blocker is physics label quality, not trainer shape.
 
 ---
 
 ## Remaining work (what needs to be done)
 
-### M2 — finish the mechanisms + one correctness fix  🚧
-**Done:** `Diffraction_3D` (UTD, 405 L), `Reflection_3D` (image sources, 372 L),
-`Scattering_3D` (Degli-Esposti, 419 L); `export_pl_volume.py --mechanisms` +
-`precompute_volumes.py --mech-channels` write `m_<mech>_*.bin` / `tau_<mech>_*.bin`;
-browser `runMechanismField` / `runMechanismTimeLapse` live for the four implemented channels.
+### M2 — finish the mechanisms + one correctness fix  ✅
+**Done (PR #10):** six mechanisms (`Diffraction_3D`, `Reflection_3D`, `Scattering_3D`,
+`Refraction_3D`, `Absorption_3D` + path loss); diffuse-dominates fix (outbound wall loss +
+`satObs` on the direct path); `georef.js`; mech-channel volume export + browser views.
 
-**To do:**
-1. 🐛 **Fix the diffuse-scattering-dominates artifact (highest value).** At `tx_66-5-54` /
-   2442 MHz the diffuse channel (median 103 dB) beats the direct field (median **302 dB**)
-   in **94.6% of interior voxels**. Two root causes, both in existing code:
-   - `Scattering_3D._accumulate_*` charges wall loss on the **inbound** patch leg only
-     (`obs_tx`), so diffuse power leaks through structure unattenuated on the outbound leg.
-   - The direct path has **no saturating obstruction model** (the 2D engine's `satObs`), so
-     deep-shadow PL runs away to 300–500 dB. Port `satObs` into the 3D direct path.
-   *Until this is fixed the coverage map — and any dataset or validation built on it — is
-   dominated by an artifact.* This is now the binding correctness term (v1's "material
-   fidelity is binding" → resolved; "physics correctness" takes its place).
-2. ⬜ **`Refraction_3D.py`** (0 bytes → implement). Reuse `speed_field`, `arrival_time`,
-   `slab_transmission_coherent`; emits coherent **E**. Cheap/local.
-3. ⬜ **`Absorption_3D.py`** (0 bytes → implement). Reuse `Im(q)` from `electrical_thickness`,
-   `per_metre`/`fill_fraction`; emits a multiplier + **absorbed-power-density** viz artifact.
-   Removing these two 0-byte stubs is also what un-disables their two `viz3dMode` options.
-4. ⬜ **In-wall-slowdown clock (physics, optional but honest).** Reflection/diffraction/
-   scattering currently report vacuum path length, not the eikonal τ; the time-lapse works
-   around it with `tau_geom`. The real fix is charging those three for in-wall slowdown.
-5. ⬜ **`Frontend/2d-3d/georef.js`** (absent → create): `lonlatToPx` / `pxToLocalM` /
-   `localMToVox` / `voxToWorld` from `registration_3d.json` + `floorplan_meta.json`.
-   `viewer3d.js` still hardcodes `FLOOR_W/FLOOR_H` and rubber-sheets geographic CSVs — this
-   blocks registering the scanner walk onto the model, which M5 needs.
+**Optional remaining:**
+1. ⬜ **In-wall-slowdown clock.** Reflection/diffraction/scattering still report vacuum path
+   length, not eikonal τ; time-lapse works around it with `tau_geom`.
 
 ### M3 — finish outdoor  🚧
-**Done:** `modes_3d.py` (vacuum/indoor/o2i/outdoor registry), vacuum invariant gate,
-O2I facade sources, `cache_index.py` (content-addressed on a physics-source hash, LRU,
-`--verify`), three-tier `cached → surrogate → analytic`, neighbour prefetch. `index.json`
-carries 6 cached Tx (indoor ×4, o2i ×1, vacuum ×1).
+**Done:** mode registry + vacuum/O2I; three-tier cache; **demo outdoor tile**
+(`city_demo/NoMa_DC_tile`, `129×33×129` @ 2 m) with browser assets, one cached Tx
+(`tx_67-20-66` @ 2412 MHz), frontend outdoor scene swap, crop flags on `voxelize_city.py`,
+and `choose_tx`/`export_pl_volume` reading the mode's own `valid_tx_mask`.
 
 **To do:**
-1. ⬜ **Cache outdoor city volumes.** The grid exists (`SIM V1 3D/city/NoMa_DC_buildings/`,
-   `2768×74×1776` @ 1 m, from the complete `voxelize_city.py`) but **no `web/volumes/` entry
-   is a city Tx** — outdoor mode has geometry and renders nothing. Run `precompute_volumes.py`
-   on the city grid (A100; large) to populate the outdoor tier. Physics is ground reflection
-   + terrain diffraction, both already covered by the M2 modules.
+1. ⬜ **Full-city outdoor volumes (A100).** Rebuild `city/NoMa_DC_buildings/`
+   (`2768×74×1776` @ 1 m — gitignored, regenerable) and run `precompute_volumes.py --mode outdoor`
+   for a multi-Tx sweep. Demo tile unblocks the UI path without that RAM bill.
 
-### M4 — dataset + DL surrogate  ⬜  *(Colab A100, long unattended; SPEED is the binding concern)*
+### M4 — dataset + DL surrogate  🚧  *(Colab A100, long unattended; SPEED is the binding concern)*
 > **Speed strategy (user direction): train on xy/yz/zx 2-D PLANES, not full 3-D.** The 2-D
 > surrogate already hit 4.68 dB (tractable); decomposing the volume into the three axis-aligned
 > slice stacks keeps every network 2-D and composes to 3-D — "speed up solving exponentially,"
@@ -91,24 +69,26 @@ carries 6 cached Tx (indoor ×4, o2i ×1, vacuum ×1).
 > scene-locked surrogate), so today an imported model runs on the slow analytic tier; plane
 > surrogates generalize across geometry without a per-scene precompute.
 
-1. ⬜ **Finish the dataset:** 3 of 30 shards exist (`SIM V1 3D/dataset/shard_00{0,1,2}.npz`,
-   `splits.json` = 1198/151/151). Generate the remaining **27** against the **fixed** scene
-   and widened bands — *after the M2 scattering fix*, or the labels bake in the artifact.
-   Fix the `ShardDS.__init__` fp32-at-load bug (keep fp16 in RAM, cast in `__getitem__`).
-2. ⬜ **Rewrite `phase_c3_train_colab.ipynb`** — it is the OLD version (has an `onnx`/`parity`
-   mention but **no** checkpoint/resume, AMP autocast/GradScaler, seed pinning, or a hard
-   `assert worst ≤ 0.1 dB` gate). Port the proven 2D v3 pattern: Drive checkpoints every 2
-   epochs (full `{net,opt,sched,scaler,epoch,best}`), cosine LR, early stop, ONNX parity gate.
-   Physics-constraint losses from day one (FSPL floor, band ordering, causality τ≥d/c,
-   reciprocity, energy shells). **Target RMSE ≤ 5 dB.**
-3. ⬜ **Ship `pl_unet3d.onnx` + write `pl_unet3d.json`** to `SIM3D/web/`. The browser's
-   surrogate tier stays dark until BOTH exist (it refuses to guess the input contract);
-   the analytic mirror keeps everything working meanwhile, by design.
-4. 🔬 **Research branch (later):** per-mechanism complex surrogates `(log|E|, cos φ, sin φ)`;
+1. ✅ **Trainer rewritten:** `phase_c3_train_colab.ipynb` has checkpoint/resume, AMP,
+   deterministic seeds, early stop/cosine LR, physics-constraint losses, and an ONNX parity
+   gate. Do not rewrite it for scaffold work.
+2. ✅ **ShardDS fp32 bug fixed:** shards stay fp16/memmap-friendly and cast at sample time.
+3. 🚧 **Smoke ONNX + sidecar shipped:** `SIM3D/export_surrogate_smoke.py` writes
+   `SIM3D/web/pl_unet3d.onnx` + `pl_unet3d.json` with untrained weights and `"smoke": true`.
+   This validates the browser contract only; it makes **no** ≤5 dB RMSE claim.
+4. 🚧 **Browser inference wired:** `simulation3d.js` can build the 9-channel input, run
+   ONNX Runtime (WASM first), cache the denormalized PL/tau volume, and label the tier
+   `DL surrogate` when used.
+5. ⬜ **Full dataset + Colab train:** Pre-M4 clip gate is **cleared** (satObs → worst clip
+   ≪ 35%). Generate shards on Colab A100 via `phase_b3_dataset.ipynb`, train with
+   `phase_c3_train_colab.ipynb`, replace the smoke ONNX with a real ≤5 dB model.
+6. 🔬 **Plane surrogate scaffolded:** `plane_surrogate_3d.py` documents xy/yz/zx 2-D slice
+   training and compose-back-to-3-D as the speed strategy for arbitrary scenes.
+7. 🔬 **Research branch (later):** per-mechanism complex surrogates `(log|E|, cos φ, sin φ)`;
    FNO-vs-UNet on diffraction only; residual head + differentiable calibration.
 
 ### M5 — validation against the scanner data  ⬜  *(the goal)*
-> Depends on the M2 scattering fix — validating an artifact-dominated map is not meaningful.
+> M2 scattering/satObs fix has landed — validation against the physics map is now meaningful.
 
 1. ⬜ **`Construct_Reciever_3D.py`** (currently **0 bytes**): turn PL → RSRP/RSRQ/SINR/RSSI.
 2. ⬜ **`validate_scanner_3d.py`** (absent): compute the gates, write `validation_report.json`

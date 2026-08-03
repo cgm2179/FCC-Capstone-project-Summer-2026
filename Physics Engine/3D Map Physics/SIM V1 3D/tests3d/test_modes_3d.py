@@ -202,6 +202,46 @@ def test_outdoor_reports_how_to_build_its_scene_when_missing():
         assert "voxelize_city" in d["unavailable_reason"]
 
 
+def test_outdoor_demo_tile_makes_mode_available():
+    assert (MD.CITY_DIR_DEMO / "material_grid.npy").exists(), \
+        "the small outdoor demo tile should be committed for M3"
+    d = MD.describe("outdoor")
+    assert d["available"], d["unavailable_reason"]
+    sc, _ = MD.build_scene("outdoor")
+    assert getattr(sc, "sim_dir") == MD.get_mode("outdoor").scene_dir
+    assert list(sc.M.shape) == list(np.load(MD.CITY_DIR_DEMO / "material_grid.npy").shape)
+
+
+def test_choose_tx_loads_the_outdoor_scene_mask():
+    import precompute_volumes as PV
+
+    sc, _ = MD.build_scene("outdoor")
+    scene_dir = MD.get_mode("outdoor").scene_dir
+    valid = np.load(scene_dir / "valid_tx_mask.npy")
+    assert valid.shape == sc.M.shape
+    assert valid.shape != np.load(MD.HERE / "valid_tx_mask.npy").shape, \
+        "this test must catch accidental fallback to the indoor mask"
+    txs = PV.choose_tx(sc, 4, stratify=False, seed=7, scene_dir=scene_dir)
+    assert txs
+    assert all(valid[t] for t in txs)
+
+
+def test_outdoor_volume_index_entry_matches_demo_grid():
+    import json
+
+    sc, _ = MD.build_scene("outdoor")
+    vol_dir = MD.HERE / "web" / "volumes"
+    index = json.loads((vol_dir / "index.json").read_text())
+    outdoor = [e for e in index["volumes"] if e.get("mode") == "outdoor"]
+    assert outdoor, "expected one cached outdoor demo volume"
+    assert any(e["grid_shape"] == list(sc.M.shape) for e in outdoor)
+    e = next(e for e in outdoor if e["grid_shape"] == list(sc.M.shape))
+    assert e["bands"] == [2412.0]
+    assert e["mechanism_names"] == ["path_loss"]
+    assert (vol_dir / e["pl_file"]).exists()
+    assert (vol_dir / e["t_file"]).exists()
+
+
 # --------------------------------------------------------------------------- wiring
 def test_source_for_returns_the_right_shape_per_mode(scene):
     s = MD.source_for("indoor", scene, tx=(66, 5, 54))

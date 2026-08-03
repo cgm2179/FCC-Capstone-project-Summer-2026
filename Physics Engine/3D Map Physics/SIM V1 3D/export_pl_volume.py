@@ -78,6 +78,7 @@ def main():
     if not info["available"]:
         raise SystemExit(f"mode {mode!r} unavailable: {info['unavailable_reason']}")
 
+    mode_cfg = MD.get_mode(mode)
     scene, man = MD.build_scene(mode)
     if mode == "o2i":
         # no Tx voxel exists: the source is 416 m outside the grid
@@ -85,8 +86,8 @@ def main():
                                   bands=[float(scene.freqs[0])]).tx_vox)
         tx = np.array(txi, float)
     else:
-        vt = HERE / "valid_tx_mask.npy"
-        valid = np.load(vt) if vt.exists() else np.ones(scene.M.shape, bool)
+        vt = mode_cfg.scene_dir / "valid_tx_mask.npy" if mode_cfg.scene_dir else None
+        valid = np.load(vt) if vt and vt.exists() else np.ones(scene.M.shape, bool)
         tx = np.array(args.tx, float) if args.tx else pick_tx(valid)
         txi = [int(round(v)) for v in tx]
     nx, ny, nz = scene.M.shape

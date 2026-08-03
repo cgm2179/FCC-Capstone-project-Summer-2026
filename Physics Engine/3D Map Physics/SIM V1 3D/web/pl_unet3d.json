@@ -1,0 +1,90 @@
+{
+ "spec_version": "pl-unet3d-v1",
+ "model_file": "pl_unet3d.onnx",
+ "mode": "indoor",
+ "mechanisms": [
+  "path_loss"
+ ],
+ "grid_shape": [
+  262,
+  17,
+  132
+ ],
+ "cell_size_m": 0.3,
+ "scene_sha": "689d48a8799a62f4",
+ "bands_mhz": [
+  619.0,
+  627.0,
+  1935.0,
+  2442.0,
+  2510.0,
+  2600.0,
+  3500.0,
+  3710.0,
+  5500.0,
+  6125.0
+ ],
+ "input": {
+  "name": "x",
+  "layout": "N,C,X,Y,Z",
+  "dtype": "float32",
+  "channels": [
+   "material_onehot_0",
+   "material_onehot_1",
+   "material_onehot_2",
+   "material_onehot_3",
+   "material_onehot_4",
+   "material_onehot_5",
+   "tx_blob",
+   "freq_feat",
+   "log_distance"
+  ],
+  "material_classes": 6,
+  "tx_blob_sigma_cells": 2.0,
+  "logdist_divisor": 3.0,
+  "logdist_min_m": 1.0,
+  "freq_log_lo_mhz": 600.0,
+  "freq_log_hi_mhz": 6200.0
+ },
+ "output": {
+  "name": "y",
+  "layout": "N,C,X,Y,Z",
+  "channels": [
+   "pl_norm",
+   "tau_norm"
+  ],
+  "pl_min_db": 40.0,
+  "pl_range_db": 130.0,
+  "tau_max_ns": 400.0
+ },
+ "metrics": {
+  "smoke": true,
+  "rmse_pl_db": null,
+  "rmse_tau_ns": null,
+  "note": "Untrained random weights; validates ONNX/browser plumbing only."
+ },
+ "trained": false,
+ "exported_at": "2026-08-03T00:23:57Z",
+ "architecture": "UNet3D",
+ "base": 4,
+ "params": 92486,
+ "dummy_shape": [
+  32,
+  8,
+  32
+ ],
+ "dynamic_spatial_axes": true,
+ "torch": "2.13.0+cpu",
+ "smoke_check": {
+  "onnxruntime": "ok",
+  "ort_input": "x",
+  "ort_output": "y",
+  "ort_shape": [
+   1,
+   2,
+   32,
+   8,
+   32
+  ]
+ }
+}
