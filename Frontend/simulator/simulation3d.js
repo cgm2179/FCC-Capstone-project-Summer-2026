@@ -20,6 +20,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as CANNON from 'cannon-es';
+import { smoothSurfaceForClass } from './smooth_surface.js';   // A2: smooth surface from the voxels
+import { voxelizeTriangles, objectToTriangles } from './voxelize_browser.js';   // B: imported-model voxelizer
 
 const COLLISION = window.SIM3D_COLLISION;
 const CATALOG   = window.SIM3D_ANTENNA_CATALOG;
@@ -64,6 +66,13 @@ const dispScale     = document.getElementById('disp3dScale');
 const dispClasses   = document.getElementById('disp3dClasses');
 const dispThresh    = document.getElementById('disp3dThresh');
 const dispThreshVal = document.getElementById('disp3dThreshVal');
+const dispClipGeom  = document.getElementById('disp3dClipGeom');
+const dispClipAxis  = document.getElementById('disp3dClipAxis');
+const dispSmooth    = document.getElementById('disp3dSmooth');
+const modelFile     = document.getElementById('sim3dModelFile');    // Phase B: load a model to simulate
+const modelCell     = document.getElementById('sim3dModelCell');
+const modelRevert   = document.getElementById('sim3dModelRevert');
+const modelNote     = document.getElementById('sim3dModelNote');
 const metaEl        = document.getElementById('sim3dMeta');
 const probeEl       = document.getElementById('sim3dProbe');
 const probeBody     = document.getElementById('sim3dProbeBody');
@@ -75,7 +84,11 @@ function setStatus(msg) { if (statusEl) statusEl.textContent = msg || ''; }
 // How the solved volume is READ — never the physics. `plane`/`sliceY` cut a horizontal
 // prediction plane; `eirpDbm` turns path loss into RSRP so `classes`/`fixed` can show
 // received power in dBm the way WRAP's coverage view and the 2D sim do.
-const DISPLAY = { plane: false, sliceY: null, eirpDbm: 20, scale: 'auto', classes: false, threshDbm: -85 };
+const DISPLAY = { plane: false, sliceY: null, eirpDbm: 20, scale: 'auto', classes: false, threshDbm: -85,
+  // Geometry view (Phase A): cut the building at the level plane (clipGeom) along clipAxis
+  // ('y' = horizontal ground↔roof, 'x'/'z' = vertical elevation), and render the building as a
+  // smooth marching-cubes surface (smooth) instead of voxel cubes. Rendering only — cache-safe.
+  clipGeom: false, clipAxis: 'y', smooth: false };
 const RSRP_LO = -100, RSRP_HI = -40;                 // fixed received-power display window (dBm)
 const COV_GOOD = [0.13, 0.70, 0.29], COV_MARG = [0.98, 0.75, 0.18], COV_DEAD = [0.86, 0.28, 0.24];
 let lastSolveMs = 0;                                  // wall time of the last field solve
@@ -134,6 +147,7 @@ function ensureInit() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(w, h);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.localClippingEnabled = true;                    // per-material clip planes (geometry slice)
   viewport.appendChild(renderer.domElement);
   renderer.domElement.addEventListener('pointerdown', onPointerDown);
 
@@ -222,6 +236,9 @@ const DEFAULT_STYLE = { opacity: 0.55, roughness: 0.9, metalness: 0.04 };
 // grey — you cannot make glass translucent and concrete solid in the same draw call.
 // Six draw calls is nothing next to being able to see what the RF engine is solving on.
 let wallMeshes = [];
+let surfaceMeshes = [];              // smooth marching-cubes surface (A2), one mesh per class
+const GEOM_CLIP = [];                // active geometry clip planes (0 or 1); shared by all meshes
+let clipPlane = null;                // the THREE.Plane cutting the building at the level
 let buildMs = 0;
 
 // What the tab says once the scene is up. The material breakdown is the quickest way to
@@ -267,6 +284,7 @@ function buildBuilding() {
       transparent: st.opacity < 1, opacity: st.opacity,
       roughness: st.roughness, metalness: st.metalness,
       depthWrite: st.opacity > 0.6,
+      clippingPlanes: GEOM_CLIP,          // geometry slice (empty until the cut is enabled)
     });
     const mesh = new THREE.InstancedMesh(geo, mat, idxs.length);
     for (let k = 0; k < idxs.length; k++) {
@@ -299,6 +317,165 @@ function buildBuilding() {
   }
 }
 
+// ---- Smooth surface (A2): rebuild the building as a smooth iso-surface of the SAME voxel grid
+// (surface nets, smooth_surface.js), so the slice view reads as a clean model, not a block cloud.
+// Cache-safe: pure rendering. Built lazily on first "Smooth" toggle; the voxel cubes stay for
+// the fallback and as the raycast target.
+function buildSmoothSurface() {
+  const grid = decodeGrid();
+  if (!grid || !GDIMS) { setStatus('Smooth surface needs the material grid (SIM3D asset).'); return false; }
+  const [NX, NY, NZ] = GDIMS;
+  const palette = {};
+  for (const mm of (COLLISION.materials || [])) if (mm.color) palette[mm.id] = new THREE.Color(mm.color);
+  disposeSurface();
+  const t0 = performance.now();
+  for (const cls of [1, 2, 3, 4, 5]) {                 // structure classes; skip air (0)
+    const surf = smoothSurfaceForClass(grid, NX, NY, NZ, cls, CELL_M, 1);
+    if (!surf || !surf.positions.length) continue;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(surf.positions, 3));
+    g.setIndex(new THREE.BufferAttribute(surf.indices, 1));
+    g.computeVertexNormals();
+    const st = CLASS_STYLE[cls] || DEFAULT_STYLE;
+    const mat = new THREE.MeshStandardMaterial({
+      color: palette[cls] || new THREE.Color(0x9fb0bf),
+      transparent: st.opacity < 1, opacity: st.opacity,
+      roughness: st.roughness, metalness: st.metalness,
+      depthWrite: st.opacity > 0.6, side: THREE.DoubleSide,
+      clippingPlanes: GEOM_CLIP,
+    });
+    const mesh = new THREE.Mesh(g, mat);
+    mesh.userData.materialClass = cls;
+    mesh.renderOrder = cls === 5 ? 2 : 1;                // glass last
+    mesh.visible = false;
+    scene.add(mesh);
+    surfaceMeshes.push(mesh);
+  }
+  setStatus('Smooth surface · ' + surfaceMeshes.length + ' material shells · '
+    + Math.round(performance.now() - t0) + ' ms');
+  return surfaceMeshes.length > 0;
+}
+function disposeSurface() {
+  for (const m of surfaceMeshes) { scene.remove(m); m.geometry.dispose(); m.material.dispose(); }
+  surfaceMeshes = [];
+}
+function applyGeometryVisibility() {
+  for (const m of wallMeshes) m.visible = !DISPLAY.smooth;
+  for (const m of surfaceMeshes) m.visible = DISPLAY.smooth;
+}
+// Show either the voxel cubes or the smooth surface (built lazily on first use). The surface
+// build is ~1.5 s of synchronous surface-nets, so defer it behind a painted status message.
+function setGeometryMode() {
+  if (DISPLAY.smooth && !surfaceMeshes.length) {
+    setStatus('Building smooth surface…');
+    setTimeout(() => { buildSmoothSurface(); applyGeometryVisibility(); }, 0);
+    return;
+  }
+  applyGeometryVisibility();
+}
+// Raycast target for Tx/Rx placement — the VISIBLE geometry (surface in smooth mode, else cubes).
+function raycastTargets() {
+  if (DISPLAY.smooth && surfaceMeshes.length) return surfaceMeshes;
+  return wallMeshes.length ? wallMeshes : [wallMesh];
+}
+
+// ---- Phase B: solve the sim on an IMPORTED model (browser-voxelized) ----
+// Point the engine's grid at a runtime voxelization so the analytic tier (marchPL) AND the
+// smooth surface run on the imported model instead of the fixed scene. A new scene means the
+// cached volumes / DL surrogate cannot apply (they are keyed to the fixed grid), so it runs on
+// the analytic tier — stated honestly in the status line. `vox` is a voxelize_browser output.
+let RUNTIME_SCENE = null;
+function setRuntimeScene(vox, name) {
+  if (!ensureInit() || !vox) return false;
+  GRID3 = vox.grid; GDIMS = vox.dims; CELL_M = vox.cell_m; INSIDE3 = vox.inside;
+  extent = vox.extent.slice();
+  center = new THREE.Vector3(extent[0] / 2, extent[1] / 2, extent[2] / 2);
+  window.SIM3D_VOLUME = null;                    // cached volumes belong to the fixed scene
+  RUNTIME_SCENE = { name: name || 'imported model', dims: vox.dims };
+  // hide the fixed voxel building; render the imported model as a smooth surface of its grid
+  disposeField(); disposeSurface();
+  for (const m of wallMeshes) m.visible = false;
+  DISPLAY.smooth = true; if (dispSmooth) dispSmooth.checked = true;
+  buildSmoothSurface(); applyGeometryVisibility();
+  if (controls) { controls.target.copy(center); controls.update(); }
+  refreshMeta();
+  if (vizMode) runVizMode(vizMode.value);        // solve on the new grid (analytic tier)
+  setStatus('Simulating imported model “' + (name || '') + '” · ' + vox.dims.join('×')
+    + ' voxels @ ' + vox.cell_m.toFixed(2) + ' m · ' + vox.n_solid.toLocaleString()
+    + ' solid · analytic tier (new scene — cached volumes / surrogate do not apply).');
+  return true;
+}
+// Voxelize a loaded THREE model and switch the sim to it (deferred behind a status message).
+function simulateModel(object, name, realSizeM) {
+  if (!ensureInit()) return;
+  setStatus('Voxelizing “' + (name || 'model') + '” …');
+  setTimeout(() => {
+    const tris = objectToTriangles(THREE, object);
+    if (!tris.length) { setStatus('That model has no triangles to voxelize.'); return; }
+    // Fit ~160 voxels on the longest axis (robust to the model's units); real_longest_m sets
+    // the physical scale so path loss / distances come out in real metres.
+    const vox = voxelizeTriangles(tris, { resolution: 160, real_longest_m: realSizeM || 80,
+      barrierClass: 2, pad: 1 });
+    if (!vox) { setStatus('Voxelization produced an empty grid.'); return; }
+    setRuntimeScene(vox, name);
+  }, 0);
+}
+
+// Load a model file (.glb/.gltf with Draco, or .obj) and switch the sim to solving on it.
+async function loadModelFile(file, realSizeM) {
+  if (!ensureInit() || !file) return;
+  const name = file.name, ext = name.toLowerCase().split('.').pop();
+  setStatus('Loading “' + name + '” …');
+  const url = URL.createObjectURL(file);
+  try {
+    let object;
+    if (ext === 'glb' || ext === 'gltf') {
+      const [{ GLTFLoader }, { DRACOLoader }] = await Promise.all([
+        import('three/addons/loaders/GLTFLoader.js'),
+        import('three/addons/loaders/DRACOLoader.js'),
+      ]);
+      const loader = new GLTFLoader();
+      loader.setDRACOLoader(new DRACOLoader()
+        .setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.185.1/examples/jsm/libs/draco/'));
+      object = (await loader.loadAsync(url)).scene;
+    } else if (ext === 'obj') {
+      const { OBJLoader } = await import('three/addons/loaders/OBJLoader.js');
+      object = await new OBJLoader().loadAsync(url);
+    } else {
+      setStatus('Unsupported format “.' + ext + '” — use .glb, .gltf or .obj.'); return;
+    }
+    simulateModel(object, name, realSizeM);
+    if (modelRevert) modelRevert.style.display = '';
+    if (modelNote) modelNote.textContent = 'Simulating “' + name + '” (analytic tier — new scene, no cache).';
+  } catch (e) {
+    setStatus('Could not load “' + name + '”: ' + (e && e.message || e));
+  } finally { URL.revokeObjectURL(url); }
+}
+// Restore the built-in fixed scene (cached full physics).
+function revertToFixedScene() {
+  if (!RUNTIME_SCENE) return;
+  RUNTIME_SCENE = null;
+  GRID3 = null; GDIMS = null; INSIDE3 = null;   // decodeGrid/decodeInside re-decode the fixed asset
+  CELL_M = MANIFEST.cell_size_m || 0.3;
+  extent = COLLISION.extent_m;
+  center = new THREE.Vector3(extent[0] / 2, extent[1] / 2, extent[2] / 2);
+  disposeField(); disposeSurface();
+  DISPLAY.smooth = false; if (dispSmooth) dispSmooth.checked = false;
+  for (const m of wallMeshes) m.visible = true;
+  if (controls) { controls.target.copy(center); controls.update(); }
+  refreshMeta();
+  if (vizMode) runVizMode(vizMode.value);
+  if (modelRevert) modelRevert.style.display = 'none';
+  if (modelNote) modelNote.textContent = 'Built-in 7th floor (cached full physics).';
+  setStatus('Back to the built-in 7th-floor scene.');
+}
+if (modelFile) modelFile.addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (f) loadModelFile(f, Number(modelCell && modelCell.value) || 80);
+  e.target.value = '';                          // allow re-loading the same file
+});
+if (modelRevert) modelRevert.addEventListener('click', revertToFixedScene);
+
 function buildAntennaMesh(entry) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(entry.vertices.flat()), 3));
@@ -328,7 +505,7 @@ function onPointerDown(ev) {
   raycaster.setFromCamera(ndc, camera);
   // Test every class mesh, not just one: the building is now several InstancedMeshes, so
   // raycasting a single one would make whole materials unclickable.
-  const hit = raycaster.intersectObjects(wallMeshes.length ? wallMeshes : [wallMesh], false)[0];
+  const hit = raycaster.intersectObjects(raycastTargets(), false)[0];
   if (!hit) return;
   const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
   const pos = hit.point.clone().addScaledVector(normal, 0.4);
@@ -369,7 +546,7 @@ function ramp(t) {
 // This is the browser *analytic fallback* model (flat per-class loss_db + satObs);
 // the real Fresnel/Airy + eikonal solve is engine_3d.py SceneV3 (surfaced later, P6).
 const PHY        = MANIFEST.physics || {};
-const CELL_M     = MANIFEST.cell_size_m || 0.3;
+let CELL_M       = MANIFEST.cell_size_m || 0.3;   // `let`: a runtime imported scene can change it
 const STEP_CELL  = PHY.ray_step_cells != null ? PHY.ray_step_cells : 0.5;
 const N_EXP      = PHY.n_exp != null ? PHY.n_exp : 2.0;          // Motley-Keenan
 const D0_M       = PHY.d0_m != null ? PHY.d0_m : 1.0;
@@ -683,7 +860,7 @@ function reportNoVolume(txVox) {
   const m = currentMode(), label = (MODE_INFO[m] || {}).label;
   const pool = volumesForMode(m);
   const solveHint = ' — run: python "SIM V1 3D/export_pl_volume.py" --mode ' + m
-    + ' --mechanisms path_loss,reflection,diffraction,scattering';
+    + ' --mechanisms path_loss,reflection,diffraction,scattering,refraction,absorption';
   if (volumeIndexError) {
     setStatus(label + ' · showing the analytic tier only — ' + volumeIndexError);
     return;
@@ -726,6 +903,13 @@ const MECHS = [
     color: [0.93, 0.45, 0.85] },                                            // magenta
   { key: 'scattering',  label: 'Diffuse scattering', short: 'Diffuse',
     color: [0.48, 0.88, 0.52] },                                            // green
+  // Diagnostics: decompositions of the direct path, not summed into received power.
+  // Refraction shows the through-wall transmission loss + refractive delay; absorption
+  // shows where power is deposited into materials. Rendered as absolute maps, not shares.
+  { key: 'refraction',  label: 'Refraction (transmitted field)', short: 'Refracted',
+    color: [0.55, 0.75, 0.98], diagnostic: true },                         // light blue
+  { key: 'absorption',  label: 'Absorption (deposited power)', short: 'Absorbed',
+    color: [0.96, 0.55, 0.33], diagnostic: true },                         // warm orange
 ];
 const MECH_BY_KEY = Object.fromEntries(MECHS.map((m) => [m.key, m]));
 
@@ -922,7 +1106,7 @@ function probeAt(ev) {
     p = raycaster.ray.intersectPlane(
       new THREE.Plane(new THREE.Vector3(0, 1, 0), -DISPLAY.sliceY), new THREE.Vector3());
   } else {
-    const hit = raycaster.intersectObjects(wallMeshes.length ? wallMeshes : [wallMesh], false)[0];
+    const hit = raycaster.intersectObjects(raycastTargets(), false)[0];
     if (hit) p = hit.point.clone();
     else p = raycaster.ray.intersectPlane(
       new THREE.Plane(new THREE.Vector3(0, 1, 0), -(center ? center.y : extent[1] / 2)), new THREE.Vector3());
@@ -971,6 +1155,7 @@ function showProbe(p) {
   if (vol && !noSignal) {
     let best = -Infinity;
     for (const m of mechList(vol)) {
+      if (m.diagnostic) continue;               // refraction/absorption are not arriving paths
       const ch = mechCache[vol.entry.txid + '|' + m.key];
       if (!ch) continue;
       const cbi = chanBandIndex(ch, freqMHz);
@@ -1011,23 +1196,67 @@ if (probeClose) probeClose.addEventListener('click', hideProbe);
 // ---- Display-control wiring ----
 function reRunViz() { if (vizMode) runVizMode(vizMode.value); }
 function heightFromSlider() { return extent ? (Number(dispHeight.value) / 100) * extent[1] : null; }
+function sliderFrac() { return dispHeight ? Number(dispHeight.value) / 100 : 0.5; }
+function syncHeightEnabled() { if (dispHeight) dispHeight.disabled = !(DISPLAY.plane || DISPLAY.clipGeom); }
 function updateHeightLabel() {
   if (!dispHeightVal) return;
-  dispHeightVal.textContent = (DISPLAY.plane && DISPLAY.sliceY != null)
-    ? 'y = ' + DISPLAY.sliceY.toFixed(1) + ' m' : 'whole volume';
+  const bits = [];
+  if (DISPLAY.plane && DISPLAY.sliceY != null) bits.push('field y = ' + DISPLAY.sliceY.toFixed(1) + ' m');
+  if (DISPLAY.clipGeom) bits.push('cut ' + DISPLAY.clipAxis + ' = ' + (sliderFrac() * clipExtent()).toFixed(1) + ' m');
+  dispHeightVal.textContent = bits.length ? bits.join(' · ') : 'whole volume';
 }
+
+// ---- Geometry cut plane (A1): cut the building at the level — horizontal (ground↔roof) or vertical ----
+function clipExtent() {
+  return !extent ? 1 : DISPLAY.clipAxis === 'x' ? extent[0] : DISPLAY.clipAxis === 'z' ? extent[2] : extent[1];
+}
+function updateClipPlane() {
+  if (!extent) return;
+  if (!clipPlane) clipPlane = new THREE.Plane();
+  const ax = DISPLAY.clipAxis;
+  const n = ax === 'x' ? new THREE.Vector3(-1, 0, 0)
+          : ax === 'z' ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, -1, 0);
+  clipPlane.set(n, sliderFrac() * clipExtent());           // keep the part below / before the level
+}
+function applyGeomClip() {
+  // GEOM_CLIP holds 0 or 1 planes; every building/field material references it, so changing the
+  // COUNT needs a shader recompile (needsUpdate) — moving the plane is a free per-frame uniform.
+  GEOM_CLIP.length = 0;
+  if (DISPLAY.clipGeom) { updateClipPlane(); GEOM_CLIP.push(clipPlane); }
+  for (const m of wallMeshes) if (m.material) m.material.needsUpdate = true;
+  for (const m of surfaceMeshes) if (m.material) m.material.needsUpdate = true;
+  if (fieldObj && fieldObj.material) fieldObj.material.needsUpdate = true;
+}
+
 if (dispPlaneBtn) dispPlaneBtn.addEventListener('click', () => {
   DISPLAY.plane = !DISPLAY.plane;
   dispPlaneBtn.textContent = DISPLAY.plane ? 'Plane' : 'Full volume';
   dispPlaneBtn.classList.toggle('active', DISPLAY.plane);
-  if (dispHeight) dispHeight.disabled = !DISPLAY.plane;
+  syncHeightEnabled();
   DISPLAY.sliceY = DISPLAY.plane ? heightFromSlider() : null;
   updateHeightLabel(); reRunViz(); refreshMeta();
 });
 if (dispHeight) {
-  dispHeight.addEventListener('input', () => { DISPLAY.sliceY = heightFromSlider(); updateHeightLabel(); refreshMeta(); });
-  dispHeight.addEventListener('change', reRunViz);            // re-solve on release, not per pixel
+  dispHeight.addEventListener('input', () => {
+    if (DISPLAY.plane) DISPLAY.sliceY = heightFromSlider();
+    if (DISPLAY.clipGeom) updateClipPlane();               // live: moving the cut plane is cheap
+    updateHeightLabel(); refreshMeta();
+  });
+  dispHeight.addEventListener('change', () => { if (DISPLAY.plane) reRunViz(); });   // re-solve field on release
 }
+if (dispClipGeom) dispClipGeom.addEventListener('change', () => {
+  DISPLAY.clipGeom = dispClipGeom.checked;
+  syncHeightEnabled(); applyGeomClip(); updateHeightLabel(); refreshMeta();
+});
+if (dispClipAxis) dispClipAxis.addEventListener('change', () => {
+  DISPLAY.clipAxis = dispClipAxis.value;
+  if (DISPLAY.clipGeom) updateClipPlane();
+  updateHeightLabel(); refreshMeta();
+});
+if (dispSmooth) dispSmooth.addEventListener('change', () => {
+  DISPLAY.smooth = dispSmooth.checked;
+  setGeometryMode();                             // builds the surface lazily on first use
+});
 if (dispEirp) dispEirp.addEventListener('change', () => { DISPLAY.eirpDbm = Number(dispEirp.value) || 20; reRunViz(); });
 if (dispScale) dispScale.addEventListener('change', () => { DISPLAY.scale = dispScale.value; reRunViz(); });
 if (dispClasses) dispClasses.addEventListener('change', () => { DISPLAY.classes = dispClasses.checked; reRunViz(); });
@@ -1062,9 +1291,10 @@ function runStaticField() {
   // otherwise render analytic now and upgrade in the background if one loads.
   const vol = volMatches(window.SIM3D_VOLUME, txVox) ? window.SIM3D_VOLUME : null;
   const bandIdx = vol ? nearestBandIndex(vol, freqMHz) : 0;
-  // Tier 1 miss: try to upgrade in the background (cache first, then surrogate), and
-  // render the analytic floor immediately so the user is never looking at nothing.
-  if (!vol && txVox) {
+  // Tier 1 miss: try to upgrade in the background (cache first, then surrogate), and render
+  // the analytic floor immediately so the user is never looking at nothing. Skipped for an
+  // imported runtime scene — its grid is unique, so no cached volume / surrogate can match.
+  if (!vol && txVox && !RUNTIME_SCENE) {
     tryLoadVolume(txVox, () => { if (fieldObj) runStaticField(); });
     tryLoadSurrogate();
   }
@@ -1096,7 +1326,7 @@ function runStaticField() {
   // Instanced cubes (not THREE.Points — the WebGPU backend can't size points):
   // one small cube per sample, coloured/sized by the Display settings.
   const cube = new THREE.BoxGeometry(g * 0.42, g * 0.42, g * 0.42);
-  const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false });
+  const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, clippingPlanes: GEOM_CLIP });
   fieldObj = new THREE.InstancedMesh(cube, mat, samples.length);
   const dummy = new THREE.Object3D(), col = new THREE.Color();
   for (let i = 0; i < samples.length; i++) {
@@ -1172,9 +1402,14 @@ function runMechanismField(mech) {
     const _t0 = performance.now();
     const cbi = chanBandIndex(ch, freqMHz);          // channel bands may be a subset
     const tbi = nearestBandIndex(vol, ch.bands[cbi]); // matching band in the total volume
-    const isShare = mech !== 'path_loss';
+    // path loss and the diagnostics (refraction/absorption) are absolute maps; the true
+    // additive mechanisms (reflection/diffraction/scattering) are shown as a share of total.
+    const isShare = mech !== 'path_loss' && !(MECH_BY_KEY[mech] && MECH_BY_KEY[mech].diagnostic);
     const { sliced, g, yLo, yHi, yInc } = sampleBounds();  // full volume, or one prediction plane
     const inside = insideMaskFor(vol.dims);
+    // Absorption is deposited IN materials, so its map lives in wall voxels, not the air
+    // interior — it must NOT be masked to `inside` or nothing renders.
+    const wallDiag = mech === 'absorption';
     const NY = vol.dims[1], NZ = vol.dims[2];
     const samples = [];
     const lossMin = 45, lossMax = 130;
@@ -1185,7 +1420,7 @@ function runMechanismField(mech) {
           const ix = clampi(Math.floor(x / CELL_M), vol.dims[0]);
           const iy = clampi(Math.floor(y / CELL_M), NY);
           const iz = clampi(Math.floor(z / CELL_M), NZ);
-          if (inside && !inside[(ix * NY + iy) * NZ + iz]) continue;
+          if (inside && !wallDiag && !inside[(ix * NY + iy) * NZ + iz]) continue;
           const plM = chanAt(ch, cbi, ix, iy, iz);
           if (!isFinite(plM) || plM >= 65504) continue;
           let t;
@@ -1205,7 +1440,7 @@ function runMechanismField(mech) {
         }
 
     const cube = new THREE.BoxGeometry(g * 0.42, g * 0.42, g * 0.42);
-    const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false });
+    const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, clippingPlanes: GEOM_CLIP });
     fieldObj = new THREE.InstancedMesh(cube, mat, samples.length);
     const dummy = new THREE.Object3D(), col = new THREE.Color();
     for (let i = 0; i < samples.length; i++) {
@@ -1292,7 +1527,7 @@ function noMechData(meta, vol) {
   const have = vol ? mechList(vol).map((m) => m.label).join(', ') : '';
   setStatus(meta.label + ' · no mechanism channel in the cached volume'
     + (have ? ' (this Tx has: ' + have + ')' : '')
-    + ' — re-export with `python "SIM V1 3D/export_pl_volume.py" --mechanisms path_loss,reflection,diffraction,scattering`.');
+    + ' — re-export with `python "SIM V1 3D/export_pl_volume.py" --mechanisms path_loss,reflection,diffraction,scattering,refraction,absorption`.');
 }
 
 // ---- Radiation pattern: analytic gain lobes at each Tx (closed-form by kind) ----
@@ -1946,6 +2181,10 @@ window.__sim3d = {
   // debug/verification handles (mirrors the sandbox's window.__debug)
   get scene() { return scene; }, get camera() { return camera; }, get renderer() { return renderer; },
   get wallMesh() { return wallMesh; }, get wallMeshes() { return wallMeshes; },
+  get surfaceMeshes() { return surfaceMeshes; }, buildSmoothSurface, setGeometryMode,
+  // Phase B: imported-model voxelization + runtime scene swap
+  setRuntimeScene, simulateModel, voxelizeTriangles, objectToTriangles,
+  get runtimeScene() { return RUNTIME_SCENE; }, get gdims() { return GDIMS; }, get cellM() { return CELL_M; },
   get field() { return fieldObj; }, get wave() { return waveObj; },
   get lobe() { return lobeGroup; }, get vectors() { return vectorState; },
   get interference() { return interferenceState; }, get sweep() { return sweepState; },

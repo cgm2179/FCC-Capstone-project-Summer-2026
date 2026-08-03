@@ -8,6 +8,8 @@
   <script src="Data/records_data.js"></script>
   <script src="Data/floorplan_image.js"></script>
   <script src="Data/timeseries_data.js"></script>
+  <!-- Floor-plan georeference (affines + GCPs) for Frontend/2d-3d/georef.js -->
+  <script src="Data/floorplan_meta.js"></script>
   <link rel="stylesheet" href="Frontend/2d-3d/dashboard.css" />
   <link rel="stylesheet" href="Frontend/2d-3d/spectrum.css" />
   <link rel="stylesheet" href="Frontend/simulator/simulator.css" />
@@ -519,6 +521,21 @@
             diffraction · absorption · scattering) is the next milestone.</p>
           <div class="sim3d-layout">
             <aside class="sim3d-rail">
+              <!-- Model source (Phase B). Solve on the built-in fixed scene (cached full
+                   physics) OR voxelize an imported model in the browser and solve on that.
+                   An imported model is a new scene, so it runs on the analytic tier — no
+                   cached volume / surrogate (voxelize_browser.js + setRuntimeScene). -->
+              <section class="sim3d-step">
+                <h3><span class="step-n">M</span> Model</h3>
+                <p id="sim3dModelNote" class="sim3d-modenote">Built-in 7th floor (cached full physics). Load your own model to simulate on it — voxelized in-browser, analytic tier (no cache).</p>
+                <label class="sim-btn ghost" style="display:block; text-align:center; cursor:pointer;">Load model to simulate…
+                  <input type="file" id="sim3dModelFile" accept=".glb,.gltf,.obj" style="display:none">
+                </label>
+                <label class="sim3d-field">Real-world width (longest side)
+                  <span class="sim3d-cell"><input type="number" id="sim3dModelCell" min="1" max="5000" step="1" value="80"> m</span>
+                </label>
+                <button type="button" id="sim3dModelRevert" class="sim-btn ghost" style="display:none;">← Back to built-in scene</button>
+              </section>
               <!-- Propagation mode (M3). Chooses the scene AND the source model, so it
                    comes before the transmitter: in O2I there is no Tx to place, the
                    source is a macro cell 416 m outside the grid. Registry and the
@@ -585,17 +602,18 @@
                     <option value="sweep">Wavefront sweep (eikonal T)</option>
                     <option value="mechlapse">Mechanism time-lapse</option>
                     <!-- Per-mechanism views read the m_<mech>_*.bin channels written by
-                         export_pl_volume.py --mechanisms. Path loss shows absolute dB;
-                         the rest show each mechanism's share of the total power. -->
+                         export_pl_volume.py --mechanisms. Path loss and the diagnostics
+                         show absolute dB; reflection/diffraction/scattering show each
+                         mechanism's share of the total power. -->
                     <optgroup label="RF physics — per mechanism">
                       <option value="path_loss">Geometric spreading + transmission (S1–S7)</option>
                       <option value="reflection">Specular reflection / multipath</option>
                       <option value="diffraction">UTD diffraction (S8)</option>
                       <option value="scattering">Diffuse scattering</option>
                     </optgroup>
-                    <optgroup label="RF physics — module not built">
-                      <option value="refraction" disabled>Refraction</option>
-                      <option value="absorption" disabled>Absorption</option>
+                    <optgroup label="RF physics — diagnostics (decomposition)">
+                      <option value="refraction">Refraction (transmitted field)</option>
+                      <option value="absorption">Absorption (deposited power)</option>
                     </optgroup>
                   </select>
                 </label>
@@ -613,6 +631,17 @@
                   <input type="range" id="disp3dHeight" min="0" max="100" value="50" disabled>
                 </div>
                 <div class="sim-note" id="disp3dHeightVal">whole volume</div>
+                <!-- Geometry view (Phase A): the level slider above also cuts the building, and
+                     the model can be rendered as a smooth surface instead of voxel cubes. -->
+                <label class="sim3d-cbx"><input type="checkbox" id="disp3dClipGeom"> Cut model at this level</label>
+                <label class="sim3d-field">Cut direction
+                  <select id="disp3dClipAxis">
+                    <option value="y">Horizontal — ground ↔ roof</option>
+                    <option value="x">Vertical — along X</option>
+                    <option value="z">Vertical — along Z</option>
+                  </select>
+                </label>
+                <label class="sim3d-cbx"><input type="checkbox" id="disp3dSmooth"> Smooth surface (rebuild from voxels)</label>
                 <label class="sim3d-field">Transmit EIRP
                   <span class="sim3d-cell"><input type="number" id="disp3dEirp" min="-10" max="60" step="1" value="20"> dBm</span>
                 </label>

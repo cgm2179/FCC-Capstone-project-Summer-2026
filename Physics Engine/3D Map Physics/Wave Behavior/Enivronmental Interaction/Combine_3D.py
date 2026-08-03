@@ -104,8 +104,12 @@ def combine(contribs: Sequence["contracts.FieldGrid"], *,
         per_mech[c.mechanism] = c.power()
 
     # --- 4. earliest arrival across all mechanisms ------------------------
+    # Diagnostics (refraction/absorption) carry an excess-delay or no-arrival tau that is
+    # not a real first arrival, so they must not participate in T_first.
     T = np.full(ref.shape, np.inf, np.float32)
     for c in contribs:
+        if c.combine_as == contracts.DIAGNOSTIC:
+            continue
         t = np.asarray(c.tau_first, np.float32)
         t = np.nanmin(t, axis=0) if t.ndim == 4 else t
         T = np.minimum(T, np.where(np.isfinite(t), t, np.inf))

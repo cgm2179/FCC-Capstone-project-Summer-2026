@@ -109,9 +109,17 @@ def _lobe(cos_s, alpha_R):
 
 
 def solve(scene, tx, *, bands=None, S=0.3, alpha_R=4, patch_cells=2,
-          rx_downsample=2, max_patches=20000, backend="numpy", device=None,
-          progress=False) -> "contracts.FieldGrid":
-    """Diffuse scattered power for one Tx. Fills `p_incoh`; `E` stays zero."""
+          rx_downsample=2, max_patches=20000, outbound_loss=True, backend="numpy",
+          device=None, progress=False) -> "contracts.FieldGrid":
+    """Diffuse scattered power for one Tx. Fills `p_incoh`; `E` stays zero.
+
+    outbound_loss (default True): charge wall loss on BOTH legs of tx->patch->rx. The
+    inbound tx->patch leg uses obs_tx[patch]; the outbound patch->rx leg uses the extra
+    crossing loss to the receiver beyond that, obs_tx[rx] - obs_tx[patch] (clipped >= 0) --
+    reusing the single obs_tx field, so no extra crossing solves. Without it the diffuse
+    field radiated through structure for free and dominated deep-shadow voxels (94.7% of
+    the interior at tx_66-5-54); it is the outbound half of the path the effective-
+    roughness model must attenuate. Set False to recover the old (leaky) behaviour."""
     freqs = np.asarray(scene.freqs if bands is None else bands, float)
     bidx = [scene.band_index(f) for f in freqs]
     NX, NY, NZ = scene.NX, scene.NY, scene.NZ
@@ -142,10 +150,10 @@ def solve(scene, tx, *, bands=None, S=0.3, alpha_R=4, patch_cells=2,
 
     if backend == "torch":
         acc, tau_c = _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
-                                       alpha_R, diffuse_frac, device, progress)
+                                       alpha_R, diffuse_frac, device, progress, outbound_loss)
     else:
         acc, tau_c = _accumulate_numpy(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
-                                       alpha_R, diffuse_frac, progress)
+                                       alpha_R, diffuse_frac, progress, outbound_loss)
 
     # upsample the coarse diffuse field back to the full grid
     for i in range(len(freqs)):
@@ -195,12 +203,17 @@ def _upsample_tau(tau_c, shape, d):
 
 
 def _accumulate_numpy(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
-                      alpha_R, diffuse_frac, progress):
+                      alpha_R, diffuse_frac, progress, outbound_loss=True):
     """-> (power (nf, *coarse) float64, tau_first (*coarse) float32 seconds)."""
     cell = scene.cell
     out = np.zeros((len(freqs),) + R.shape[:3], np.float64)
     tau_min = np.full(R.shape[:3], np.inf, np.float32)
     Rf = R.reshape(-1, 3)
+    # wall loss from Tx to every coarse receiver — the outbound-leg reference (reuses obs_tx,
+    # so no extra crossing solves). The patch->rx leg is charged obs_rx - obs_tx[patch].
+    Ri = Rf.astype(np.int32)
+    obs_rx = (np.stack([np.asarray(obs_tx[bi])[Ri[:, 0], Ri[:, 1], Ri[:, 2]] for bi in bidx])
+              if outbound_loss else None)                          # (nf, n_coarse)
     for pi in range(len(pos)):
         p, n = pos[pi], nrm[pi]
         r_in = txv - p
@@ -231,14 +244,22 @@ def _accumulate_numpy(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
                        out=tau_min)
 
         for i, bi in enumerate(bidx):
-            lam = C0 / (freqs[i] * 1e6)
-            # incident power density at the patch (free-space spreading + wall crossings)
-            pl_in = scene.fspl1[bi] + 10.0 * scene.n_exp * np.log10(max(s_in, scene.d0))
-            pl_in += float(obs_tx[bi][int(p[0]), int(p[1]), int(p[2])])
-            p_in = 10.0 ** (-pl_in / 10.0) * area[pi] * cos_i
-            # diffuse re-radiation, 1/s^2 spreading outward
+            obs_p = float(obs_tx[bi][int(p[0]), int(p[1]), int(p[2])])
+            # free-space incident power at the patch; wall loss handled as a total below
+            pl_fs = scene.fspl1[bi] + 10.0 * scene.n_exp * np.log10(max(s_in, scene.d0))
+            p_in = 10.0 ** (-pl_fs / 10.0) * area[pi] * cos_i
             with np.errstate(divide="ignore", invalid="ignore"):
                 contrib = diffuse_frac * p_in * lobe / np.maximum(s_out ** 2, cell ** 2)
+            if outbound_loss:
+                # both legs: the tx->patch->rx path pays max(tx->patch, tx->rx) wall loss
+                # (= inbound obs_p + clipped outbound obs_rx-obs_p), saturated the SAME way
+                # as the direct path so the diffuse tail neither leaks nor runs away.
+                wall = np.maximum(obs_rx[i], obs_p)
+                if scene.use_satobs:
+                    wall = engine_3d.sat_obs(wall, scene.obs_T, scene.obs_S)
+                contrib = contrib * 10.0 ** (-wall / 10.0)
+            else:                                 # legacy: inbound leg only, uncapped
+                contrib = contrib * 10.0 ** (-obs_p / 10.0)
             contrib = np.where(live, contrib, 0.0)
             out[i] += contrib.reshape(R.shape[:3])
         if progress and pi % 500 == 0:
@@ -247,7 +268,7 @@ def _accumulate_numpy(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
 
 
 def _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
-                      alpha_R, diffuse_frac, device, progress):
+                      alpha_R, diffuse_frac, device, progress, outbound_loss=True):
     """-> (power (nf, *coarse) float64, tau_first (*coarse) float32 seconds)."""
     import torch
     if device is None:
@@ -258,6 +279,11 @@ def _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
     # widest dtype the device supports rather than silently degrading everywhere.
     acc_dt = torch.float32 if dev.type == "mps" else torch.float64
     cell = scene.cell
+    T_, S_, cap_on = scene.obs_T, scene.obs_S, scene.use_satobs
+
+    def _sat(w):                                   # torch mirror of engine_3d.sat_obs
+        return torch.where(w <= T_, w, T_ + S_ * (1.0 - torch.exp(-(w - T_) / S_)))
+
     Rf = torch.as_tensor(R.reshape(-1, 3), device=dev)
     P = torch.as_tensor(pos, device=dev)
     N = torch.as_tensor(nrm, device=dev)
@@ -273,20 +299,26 @@ def _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
     ok = (cos_i > 0) & (s_in > cell)
     spec = 2.0 * cos_i[:, None] * N - u_in
 
-    obs_t = [torch.as_tensor(np.asarray(obs_tx[bi]), device=dev) for bi in bidx]
+    obs_t = [torch.as_tensor(np.asarray(obs_tx[bi]), device=dev, dtype=acc_dt) for bi in bidx]
     sel = torch.nonzero(ok).flatten()
     if sel.numel() == 0:
         return (out.reshape((len(freqs),) + R.shape[:3]).cpu().numpy(),
                 tau_min.reshape(R.shape[:3]).cpu().numpy())
 
-    # Per-patch incident power, all patches and bands at once (n_patch, n_band).
+    # Free-space incident power per patch/band; the inbound obs_p and per-rx obs_rx wall
+    # fields are kept separate so the tx->patch->rx path can be charged max(obs_p, obs_rx)
+    # (saturated) per (patch, rx) in the chunk loop below.
     ixyz = P[sel].long()
+    Ri = Rf.long()
     p_in = torch.empty((sel.numel(), len(freqs)), dtype=acc_dt, device=dev)
+    obs_p = torch.empty((len(freqs), sel.numel()), dtype=acc_dt, device=dev)     # tx->patch
+    obs_rx = torch.empty((len(freqs), Rf.shape[0]), dtype=acc_dt, device=dev)    # tx->rx
     for i, bi in enumerate(bidx):
-        pl_in = (scene.fspl1[bi] + 10.0 * scene.n_exp
-                 * torch.log10(torch.clamp(s_in[sel], min=scene.d0))
-                 + obs_t[i][ixyz[:, 0], ixyz[:, 1], ixyz[:, 2]])
-        p_in[:, i] = (torch.pow(10.0, -pl_in / 10.0) * A[sel] * cos_i[sel]).to(acc_dt)
+        pl_fs = (scene.fspl1[bi] + 10.0 * scene.n_exp
+                 * torch.log10(torch.clamp(s_in[sel], min=scene.d0)))
+        p_in[:, i] = (torch.pow(10.0, -pl_fs / 10.0) * A[sel] * cos_i[sel]).to(acc_dt)
+        obs_p[i] = obs_t[i][ixyz[:, 0], ixyz[:, 1], ixyz[:, 2]]
+        obs_rx[i] = obs_t[i][Ri[:, 0], Ri[:, 1], Ri[:, 2]]
 
     # CHUNKED over patches rather than looped: the earlier per-patch Python loop issued
     # ~200k tiny kernels per Tx and left the A100 at 0% utilisation -- launch-bound, not
@@ -308,8 +340,18 @@ def _accumulate_torch(scene, pos, nrm, area, txv, R, freqs, bidx, obs_tx,
         radiates = (s_out > cell) & (lobe > 0)
         geo = (lobe / torch.clamp(s_out ** 2, min=cell ** 2)).to(acc_dt)
         geo = torch.where(s_out > cell, geo, torch.zeros((), dtype=acc_dt, device=dev))
-        # (n_band, c) @ (c, n_rx) -> (n_band, n_rx): one matmul per chunk
-        out += diffuse_frac * (p_in[k:k + chunk].T @ geo)
+        # per band: charge the two-leg wall loss (max of the endpoints, saturated) then
+        # reduce over the chunk's patches. Per-band because obs_rx/obs_p are band-dependent
+        # and no longer factor through a single matmul.
+        for i in range(len(bidx)):
+            if outbound_loss:
+                wall = torch.maximum(obs_rx[i][None, :], obs_p[i][k:k + chunk, None])
+                if cap_on:
+                    wall = _sat(wall)
+            else:                                  # legacy: inbound leg only, uncapped
+                wall = obs_p[i][k:k + chunk, None].expand(-1, n_rx)
+            att = torch.pow(10.0, -wall / 10.0)
+            out[i] += diffuse_frac * (p_in[k:k + chunk, i:i + 1] * geo * att).sum(0)
         # earliest two-leg delay, same chunk, one more batched reduction (not a per-patch
         # loop -- that is what left the A100 launch-bound before)
         t_chunk = (s_in_c[k:k + chunk, None] + s_out) / C0

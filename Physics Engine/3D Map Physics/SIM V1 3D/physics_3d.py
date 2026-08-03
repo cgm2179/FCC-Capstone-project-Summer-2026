@@ -43,6 +43,8 @@ MATERIALS = P.MATERIALS7
 permittivity = P.permittivity
 fresnel_coeffs = P.fresnel_coeffs
 electrical_thickness = P.electrical_thickness
+slab_transmission_coherent = P.slab_transmission_coherent      # Refraction_3D consumer
+slab_transmission_incoherent = P.slab_transmission_incoherent
 CrossingLUT = P.CrossingLUT
 
 
