@@ -168,7 +168,7 @@
         <a id="modeChange">change mode</a>
       </div>
       <h1 class="title">Indoor Walk Test Viewer</h1>
-      <p class="sub">Interactive NR Top-N signal map with network and band filtering.</p>
+      <p class="sub">Interactive multi-band signal map (all LTE + 5G NR bands picked up in the walk) with network, band, PCI &amp; channel filtering.</p>
 
       <div class="field">
         <label for="coverage">Coverage Mode</label>
@@ -283,9 +283,10 @@
           <li class="dim">EARFCN ↔ frequency: f<sub>DL</sub> = F<sub>DL-low</sub> +
             0.1·(EARFCN − N<sub>offs-DL</sub>) MHz; NR-ARFCN uses the 5/15/60 kHz
             global raster.</li>
-          <li class="dim">This walk test observed T-Mobile only (MCC 310 / MNC 260),
-            619.35–3 871.2 MHz, NR band mix n41 (1 461 rows), n71 (1 042),
-            n25 (948), n2 (647).</li>
+          <li class="dim">This viewer now shows every band the scanner picked up
+            (blind scan): 17 LTE E-UTRA bands + 15 NR bands, 619.35–3871.2 MHz.
+            Carrier is decoded from MCC/MNC where SIB1 was read — T-Mobile
+            (310/260) and Verizon (311/480, incl. LTE Band 13 700 MHz, PCI 396/397/398).</li>
         </ul>
       </div>
     </aside>

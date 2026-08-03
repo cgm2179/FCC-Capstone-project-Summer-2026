@@ -8,7 +8,10 @@
  * records_data.js / floorplan_image.js / timeseries_data.js (shared
  * global scope) and AFTER the DOM markup (top-level code calls getElementById).
  */
-    const ranges = {"rsrp": {"vmin": -112.332, "vmax": -83.488, "unit": "dBm"}, "rsrq": {"vmin": -15.508000000000001, "vmax": -11.06, "unit": "dB"}, "cinr": {"vmin": -0.924, "vmax": 17.923000000000002, "unit": "dB"}, "rssi": {"vmin": -88.92, "vmax": -64.77333333333335, "unit": "dBm"}};
+    // Physical signal limits — used only as hard floors/caps; computeDefaultRange
+    // sets the actual color scale from the selected band's own q10..q90, so every
+    // band (incl. weak C-band n77/n78 down to ~-136 dBm) auto-scales on its own.
+    const ranges = {"rsrp": {"vmin": -140.0, "vmax": -44.0, "unit": "dBm"}, "rsrq": {"vmin": -43.0, "vmax": 20.0, "unit": "dB"}, "cinr": {"vmin": -23.0, "vmax": 40.0, "unit": "dB"}, "rssi": {"vmin": -110.0, "vmax": 0.0, "unit": "dBm"}};
     const units = { rsrp: 'dBm', rsrq: 'dB', cinr: 'dB', rssi: 'dBm' };
     const metricLabels = { rsrp: 'RSRP (dBm)', rsrq: 'RSRQ (dB)', cinr: 'CINR (dB)', rssi: 'RSSI (dBm)' };
     const plotEl = document.getElementById('plot');
