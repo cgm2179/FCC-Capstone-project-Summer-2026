@@ -148,7 +148,7 @@ def find_bs_row(pci, band, network, carrier=None):
 
 def predict(pci=396, band=13, network="lte", carrier=None,
             eirp_dbm=62.0, gr_db=0.0, o2i_db=0.0, wall_sat_db=60.0,
-            bw_mhz=10.0, scs_khz=15.0):
+            bw_mhz=10.0, scs_khz=15.0, bearing_deg=None):
     meta = load_floorplan_meta()
     mpp = meta["meters_per_px"]
     H, W = meta["grid_shape"]
@@ -166,9 +166,18 @@ def predict(pci=396, band=13, network="lte", carrier=None,
     loss_db, loss_per_m = band_loss_vectors(mats, freq_mhz)
     grid_c = mk.consolidate_walls(grid, loss_db)
 
-    # arrival direction in pixel space: donor pixel (far) minus grid centre
-    bs_px, bs_py = lonlat_to_px(lon, lat, meta)
-    dir_px = (bs_px - W / 2.0, bs_py - H / 2.0)
+    # arrival direction in pixel space. Default: donor pixel (far) minus grid centre (site
+    # geometry). Override with an explicit arrival bearing (diagnostic, e.g. an inferred β*).
+    if bearing_deg is not None:
+        Linv = np.linalg.inv(np.array(meta["affine_px_to_local_m"])[:, :2])
+        er = np.radians(bearing_deg)
+        d = Linv @ np.array([np.sin(er), np.cos(er)])
+        dir_px = (float(d[0]), float(d[1]))
+        arrival_src = f"override β={bearing_deg:.0f}°"
+    else:
+        bs_px, bs_py = lonlat_to_px(lon, lat, meta)
+        dir_px = (bs_px - W / 2.0, bs_py - H / 2.0)
+        arrival_src = "site geometry"
 
     indoor = o2i_indoor_loss(grid_c, loss_db, loss_per_m, dir_px, mpp, wall_sat_db=wall_sat_db)
     pl = (fspl_db(d_bs, freq_mhz) + o2i_db + indoor).astype(np.float32)
@@ -179,7 +188,7 @@ def predict(pci=396, band=13, network="lte", carrier=None,
 
     outside = mk.outside_mask(grid_c)
     OUT.mkdir(parents=True, exist_ok=True)
-    tag = f"{pci}_{freq_mhz:.0f}MHz"
+    tag = f"{pci}_{freq_mhz:.0f}MHz" + (f"_b{int(bearing_deg)}" if bearing_deg is not None else "")
     np.save(OUT / f"pl_bs_{tag}.npy", pl)
     np.savez_compressed(OUT / f"metrics_bs_{tag}.npz", rsrp=rsrp, pl=pl, outside=outside,
                         meta=json.dumps(dict(pci=pci, band=band, network=network,
@@ -231,10 +240,13 @@ def main():
     ap.add_argument("--wall-sat-db", type=float, default=60.0)
     ap.add_argument("--bw-mhz", type=float, default=10.0)
     ap.add_argument("--scs-khz", type=float, default=15.0)
+    ap.add_argument("--bearing-deg", type=float, default=None,
+                    help="override arrival bearing (deg, compass); default = site geometry")
     args = ap.parse_args()
     predict(pci=args.pci, band=args.band, network=args.network, carrier=args.carrier,
             eirp_dbm=args.eirp_dbm, gr_db=args.gr_db, o2i_db=args.o2i_db,
-            wall_sat_db=args.wall_sat_db, bw_mhz=args.bw_mhz, scs_khz=args.scs_khz)
+            wall_sat_db=args.wall_sat_db, bw_mhz=args.bw_mhz, scs_khz=args.scs_khz,
+            bearing_deg=args.bearing_deg)
 
 
 if __name__ == "__main__":

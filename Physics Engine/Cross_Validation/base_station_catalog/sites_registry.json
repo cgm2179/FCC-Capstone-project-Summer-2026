@@ -30,13 +30,13 @@
           "bands_note": "Band 13 (751 MHz, PCI 396/397/398) is the primary validation case. '256' is unusual (no standard LTE/NR band 256) — recorded faithfully, likely a scanner artifact, to be confirmed.",
           "antenna_type": "panel",
           "antennas": [
-            {"antenna_id": 1, "pci": 397, "antenna_type": "panel", "azimuth_deg": null, "azimuth_source": "hypothesis", "azimuth_confidence": "low", "note": "sticky-note 'antenna 1' (top of building)"},
-            {"antenna_id": 2, "pci": 398, "antenna_type": "panel", "azimuth_deg": null, "azimuth_source": "hypothesis", "azimuth_confidence": "low", "note": "sticky-note 'antenna 2'"},
-            {"antenna_id": 3, "pci": 396, "antenna_type": "panel", "azimuth_deg": 57.0, "azimuth_source": "hypothesis", "azimuth_confidence": "low", "note": "sticky-note 'antenna 3' (hypothesis 396 or 397). 396 has the strongest indoor RSRP, so hypothesized to face the FCC HQ; ~57 deg is the Forte-Hall -> building bearing (arrival 237 deg at the building). Azimuths to be resolved from the 7/24 outdoor data in calibration."}
+            {"antenna_id": 1, "pci": 397, "antenna_type": "panel", "azimuth_deg": null, "azimuth_source": "fitted", "azimuth_confidence": "high", "inferred_arrival_bearing_deg": 261, "inferred_rho": 0.69, "note": "Direction inference (infer_direction.py): clean single-lobe arrival ~261 deg (WSW), all four metrics + every band agree, near the site geometry (237 deg). Building-facing sector illuminating the FCC floor from the SW."},
+            {"antenna_id": 2, "pci": 398, "antenna_type": "panel", "azimuth_deg": null, "azimuth_source": "fitted", "azimuth_confidence": "medium", "inferred_arrival_bearing_deg": 267, "inferred_rho": 0.57, "note": "Direction inference: SW/W arrival ~267 deg (broad plateau spanning 237 deg), consistent across NR bands. Also building-facing. Inferred from NR bands (LTE B13 has only 2 points)."},
+            {"antenna_id": 3, "pci": 396, "antenna_type": "panel", "azimuth_deg": null, "azimuth_source": "fitted", "azimuth_confidence": "low", "inferred_arrival_bearing_deg": 285, "inferred_rho": 0.44, "note": "Direction inference: NO clean single-direction fit. Aggregate arrival ~285 deg (rho 0.44); bands disagree (LTE B13 best-fit ~90 deg E rho 0.52, NR ~270-285 deg W); site geometry 237 deg gives rho -0.27. Multipath/reflection-dominated (or LTE-396 != NR-396). CONTRADICTS the sticky-note guess that 396 faces the building -- the data shows 397 & 398 are the building-facing sectors. 3D reflections (PR #27) needed to model 396."}
           ]
         }
       ],
-      "notes": "Highest-certainty site (known rooftop, known carrier, panel sectors). Distance ~415.9 m, arrival bearing ~237 deg to the floor plan (modes_3d.forte_hall_geometry)."
+      "notes": "Highest-certainty site (known rooftop, known carrier, panel sectors). Distance ~415.9 m, arrival bearing ~237 deg to the floor plan (modes_3d.forte_hall_geometry). Direction inference (PR #26 extension, infer_direction.py): PCI 397 (rho 0.69) & 398 (rho 0.57) illuminate the FCC floor from the SW, matching the geometry; PCI 396 does NOT (rho 0.44, bands inconsistent, site 237 deg -> rho -0.27) -- correcting the sticky-note hypothesis that 396 was the building-facing panel."
     },
     {
       "site_id": "BS2_900_nj_ave",

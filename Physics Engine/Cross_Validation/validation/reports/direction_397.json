@@ -1,0 +1,81 @@
+{
+  "pci": 397,
+  "site_geometry_bearing_deg": 237.0,
+  "step_deg": 3.0,
+  "bands_used": [
+    "lte_B13",
+    "lte_B67",
+    "nr_fr1_B26",
+    "nr_fr1_B5",
+    "nr_fr1_B65",
+    "nr_fr1_B66",
+    "nr_fr1_B77",
+    "nr_fr1_B78",
+    "nr_fr1_B256"
+  ],
+  "best_by_metric": {
+    "rsrp": {
+      "beta": 261.0,
+      "rho": 0.688
+    },
+    "rsrq": {
+      "beta": 261.0,
+      "rho": 0.572
+    },
+    "cinr": {
+      "beta": 261.0,
+      "rho": 0.596
+    },
+    "rssi": {
+      "beta": 264.0,
+      "rho": 0.597
+    }
+  },
+  "best_by_band_rsrp": {
+    "lte_B13": {
+      "beta_rsrp": 264.0,
+      "rho_rsrp": 0.729,
+      "n": 50
+    },
+    "lte_B67": {
+      "beta_rsrp": 264.0,
+      "rho_rsrp": 0.767,
+      "n": 49
+    },
+    "nr_fr1_B26": {
+      "beta_rsrp": 264.0,
+      "rho_rsrp": 0.845,
+      "n": 112
+    },
+    "nr_fr1_B5": {
+      "beta_rsrp": 270.0,
+      "rho_rsrp": 0.852,
+      "n": 118
+    },
+    "nr_fr1_B65": {
+      "beta_rsrp": 249.0,
+      "rho_rsrp": 0.506,
+      "n": 28
+    },
+    "nr_fr1_B66": {
+      "beta_rsrp": 135.0,
+      "rho_rsrp": 0.694,
+      "n": 26
+    },
+    "nr_fr1_B77": {
+      "beta_rsrp": 255.0,
+      "rho_rsrp": 0.648,
+      "n": 116
+    },
+    "nr_fr1_B78": {
+      "beta_rsrp": 231.0,
+      "rho_rsrp": 0.59,
+      "n": 83
+    },
+    "nr_fr1_B256": {
+      "beta_rsrp": 216.0,
+      "rho_rsrp": 0.826,
+      "n": 21
+    }
+  }
+}
