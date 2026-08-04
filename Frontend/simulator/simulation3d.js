@@ -867,6 +867,32 @@ function applyImportedScene(object, vox, name, token, heavy, cached, workerHasGr
   setRuntimeScene(vox, name, token);
 }
 
+// Base64 → Uint8Array (mirrors decodeGrid's atob loop).
+function b64ToU8(b64) {
+  const s = atob(b64), a = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
+  return a;
+}
+// Load a preprocessed model (a .vox.json from preprocess_cad.mjs): the material grid was voxelized
+// OFFLINE from the FULL-resolution CAD, so the physics is faithful to the intended geometry BY
+// CONSTRUCTION — the browser never voxelizes a decimated mesh. Display uses the grid-derived smooth
+// surface (the decimated .display.glb is cosmetic only and never feeds the solve).
+async function loadPreprocessedModel(file) {
+  let json;
+  try { json = JSON.parse(await file.text()); }
+  catch (e) { setStatus('Could not parse “' + file.name + '” as a preprocessed .vox.json.'); return; }
+  if (!json.grid_b64 || !json.dims || !json.cell_m || !json.extent) {
+    setStatus('“' + file.name + '” is not a preprocessed model (needs grid_b64 + dims + cell_m + extent).'); return;
+  }
+  const grid = b64ToU8(json.grid_b64);
+  const inside = json.inside_b64 ? b64ToU8(json.inside_b64) : new Uint8Array(grid.length);
+  const vox = { grid, dims: json.dims, cell_m: json.cell_m, inside, extent: json.extent, n_solid: json.n_solid || 0 };
+  applyImportedScene(null, vox, json.name || file.name, 'rt:' + (++rtCounter), true, false, false);   // heavy → smooth surface
+  if (modelNote) modelNote.textContent = 'Simulating “' + (json.name || file.name)
+    + '” · analytic tier · preprocessed grid — physics on the full-resolution CAD (' + json.dims.join('×') + ' voxels).';
+  if (modelRevert) modelRevert.style.display = '';
+}
+
 // Voxelize a loaded THREE model and switch the sim to it (deferred behind a status message).
 // The same object is kept as the visual CAD shell (fitted to the new voxel extent).
 function simulateModel(object, name, sizeOrBounds, cacheKey) {
@@ -902,6 +928,7 @@ function simulateModel(object, name, sizeOrBounds, cacheKey) {
 async function loadModelFile(file, bounds) {
   if (!ensureInit() || !file) return;
   const name = file.name, ext = name.toLowerCase().split('.').pop();
+  if (ext === 'json') { await loadPreprocessedModel(file); return; }   // preprocessed .vox.json (faithful grid)
   // A large .obj is parsed as text on the main thread (the memory-spike / crash path the Gemini note
   // flagged). This loader already supports Draco .glb, which decodes off-thread and is ~10× smaller —
   // so nudge toward it rather than silently chewing on a 300 MB wall of text.
