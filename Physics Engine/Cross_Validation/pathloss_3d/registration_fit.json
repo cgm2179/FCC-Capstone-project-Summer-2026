@@ -1,0 +1,25 @@
+{
+  "version": "regfit-v1",
+  "note": "px(floor-plan 1150x515) -> voxel (NX,NZ): vx=a*px+b*py+c, vz=d*px+e*py+f. Moment/PCA fit of the 2D inside footprint to the 3D voxel footprint, flip-disambiguated + translation-polished by IoU.",
+  "grid_shape": [
+    262,
+    132
+  ],
+  "flips": [
+    -1,
+    1
+  ],
+  "footprint_iou": 0.389,
+  "affine_px_to_vox": [
+    [
+      -0.21228080765295268,
+      -0.002038022310192499,
+      257.0275444411237
+    ],
+    [
+      -0.001974472679483199,
+      0.23826393016764272,
+      -3.277374811700291
+    ]
+  ]
+}

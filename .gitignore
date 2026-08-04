@@ -70,3 +70,6 @@ Data/basemap_image.js
 Physics Engine/Cross_Validation/pathloss_2d/out/
 Data/pl2d_crossval.js
 Physics Engine/Cross_Validation/validation/reports/*.png
+
+# PR #27 — regenerable 3D O2I volumes (rebuild with pathloss_3d/predict_o2i_3d.py)
+Physics Engine/Cross_Validation/pathloss_3d/out/

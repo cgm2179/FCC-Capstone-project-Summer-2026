@@ -82,14 +82,19 @@ def _enu(lon, lat, lon0, lat0):
     return float(x), float(y)
 
 
-def forte_hall_geometry(meta_path: Path | None = None) -> dict:
-    """Range and arrival bearing from the building to the known transmitter.
+RX_FLOOR_AGL_M = 21.0   # FCC HQ 7th-floor receiver plane (~7 storeys); see sites_registry
+
+
+def base_station_geometry(lon: float, lat: float, meta_path: Path | None = None,
+                          *, elev_m: float | None = None) -> dict:
+    """Range + arrival bearing from the floor-plan centre to ANY base station (lon, lat).
 
     Derived from the floor plan's own QGIS-fitted georeference, so it moves if the
-    registration is refit and never silently disagrees with the 2D pipeline.
-
-    Returns distance_m, arrival_bearing_deg (compass direction the wave comes FROM,
-    the convention `facade_sources_3d` takes) and the propagation direction.
+    registration is refit and never silently disagrees with the 2D pipeline. Returns
+    distance_m, arrival_bearing_deg (compass direction the wave comes FROM — the
+    convention `facade_sources_3d` takes), and the propagation direction. When `elev_m`
+    (antenna height AGL) is given, also returns the vertical elevation angle vs the
+    receiver floor (RX_FLOOR_AGL_M) — near 0 for Forte Hall (~20 m) at 415 m.
     """
     p = Path(meta_path or FLOORPLAN_META)
     if not p.exists():
@@ -106,12 +111,12 @@ def forte_hall_geometry(meta_path: Path | None = None) -> dict:
     bx = A[0, 0] * cx + A[0, 1] * cy + A[0, 2]
     by = A[1, 0] * cx + A[1, 1] * cy + A[1, 2]
 
-    tx_e, tx_n = _enu(*FORTE_HALL_LONLAT, lon0, lat0)
+    tx_e, tx_n = _enu(lon, lat, lon0, lat0)
     dE, dN = tx_e - bx, tx_n - by
     dist = float(np.hypot(dE, dN))
     arrival = float(np.degrees(np.arctan2(dE, dN)) % 360.0)
-    return {
-        "tx_lonlat": list(FORTE_HALL_LONLAT),
+    out = {
+        "tx_lonlat": [float(lon), float(lat)],
         "origin_lonlat": [lon0, lat0],
         "building_centre_local_m": [round(bx, 2), round(by, 2)],
         "tx_local_m": [round(tx_e, 1), round(tx_n, 1)],
@@ -122,6 +127,16 @@ def forte_hall_geometry(meta_path: Path | None = None) -> dict:
                       "from affine_px_to_local_m at the raster centre",
         "source": str(p),
     }
+    if elev_m is not None:
+        out["elev_m"] = float(elev_m)
+        out["elevation_angle_deg"] = round(
+            float(np.degrees(np.arctan2(elev_m - RX_FLOOR_AGL_M, max(dist, 1e-6)))), 2)
+    return out
+
+
+def forte_hall_geometry(meta_path: Path | None = None) -> dict:
+    """The known Forte Hall macro cell — a thin wrapper over base_station_geometry."""
+    return base_station_geometry(*FORTE_HALL_LONLAT, meta_path=meta_path)
 
 
 def fspl_db(distance_m: float, f_mhz: float) -> float:

@@ -1,0 +1,43 @@
+{
+  "pci": 396,
+  "band": 13,
+  "network": "lte",
+  "inferred_arrival_bearing_deg": 90.0,
+  "rho_at_inferred": 0.521,
+  "rho_at_direct_237": -0.205,
+  "forte_hall_lonlat": [
+    -77.01142,
+    38.90155
+  ],
+  "fcc_centroid_lonlat": [
+    -77.007395,
+    38.903586
+  ],
+  "interpretation": "396 arrives from the E; a single specular bounce off a building EAST of the FCC with a WSW-facing fa\u00e7ade (see facade_azimuth_deg) turns Forte Hall's SW signal into the observed east arrival.",
+  "reflector_candidates": [
+    {
+      "distance_m": 80,
+      "lon": -77.006471,
+      "lat": 38.903586,
+      "r_to_forte_deg": 242.1,
+      "r_to_fcc_deg": 270.0,
+      "facade_azimuth_deg": 256.1
+    },
+    {
+      "distance_m": 150,
+      "lon": -77.005662,
+      "lat": 38.903586,
+      "r_to_forte_deg": 245.6,
+      "r_to_fcc_deg": 270.0,
+      "facade_azimuth_deg": 257.8
+    },
+    {
+      "distance_m": 250,
+      "lon": -77.004506,
+      "lat": 38.903586,
+      "r_to_forte_deg": 249.3,
+      "r_to_fcc_deg": 270.0,
+      "facade_azimuth_deg": 259.6
+    }
+  ]
+}
