@@ -22,6 +22,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as CANNON from 'cannon-es';
 import { smoothSurfaceForClass } from './smooth_surface.js';   // A2: smooth surface from the voxels
 import { voxelizeTriangles, objectToTriangles } from './voxelize_browser.js';   // B: imported-model voxelizer
+import { makeMarchPL } from './solve_core.js';   // shared analytic kernel (also runs in sim_worker.js)
 
 const CATALOG   = window.SIM3D_ANTENNA_CATALOG;
 const INDOOR_ASSETS = window.SIM3D_ASSETS;
@@ -89,7 +90,9 @@ const dispCad       = document.getElementById('disp3dCad');
 const dispVoxels    = document.getElementById('disp3dVoxels');
 const dispWash      = document.getElementById('disp3dWash');
 const modelFile     = document.getElementById('sim3dModelFile');    // Phase B: load a model to simulate
-const modelCell     = document.getElementById('sim3dModelCell');
+const sizeX         = document.getElementById('sim3dSizeX');         // sandbox real-world bounds (m)
+const sizeY         = document.getElementById('sim3dSizeY');
+const sizeZ         = document.getElementById('sim3dSizeZ');
 const modelRevert   = document.getElementById('sim3dModelRevert');
 const modelNote     = document.getElementById('sim3dModelNote');
 const metaEl        = document.getElementById('sim3dMeta');
@@ -790,14 +793,14 @@ function revertOutdoorScene() {
 // cached volumes / DL surrogate cannot apply (they are keyed to the fixed grid), so it runs on
 // the analytic tier — stated honestly in the status line. `vox` is a voxelize_browser output.
 let RUNTIME_SCENE = null;
-function setRuntimeScene(vox, name) {
+function setRuntimeScene(vox, name, token) {
   if (!ensureInit() || !vox) return false;
   GRID3 = vox.grid; GDIMS = vox.dims; CELL_M = vox.cell_m; INSIDE3 = vox.inside;
   extent = vox.extent.slice();
   center = new THREE.Vector3(extent[0] / 2, extent[1] / 2, extent[2] / 2);
   window.SIM3D_VOLUME = null;                    // cached volumes belong to the fixed scene
   surrogateVol = null;                           // scene-locked UNet contract belongs there too
-  RUNTIME_SCENE = { name: name || 'imported model', dims: vox.dims };
+  RUNTIME_SCENE = { name: name || 'imported model', dims: vox.dims, _token: token || ('rt:' + (++rtCounter)) };
   // hide the fixed voxel building; keep the imported CAD mesh if we mounted one
   disposeField(); disposeSurface();
   for (const m of wallMeshes) m.visible = false;
@@ -818,30 +821,94 @@ function setRuntimeScene(vox, name) {
     + ' solid · analytic tier (new scene — cached volumes / surrogate do not apply).');
   return true;
 }
+// ---- Imported-model helpers (Phase 2: sandbox bounds · IndexedDB voxel cache · mesh decimation) ----
+const HEAVY_TRIS = 800000;     // above this, skip the full visual mesh and show the smooth voxel surface
+
+// The sandbox is a real-world box the user sizes in metres (X · Y height · Z). Voxels stay ISOTROPIC,
+// so every world↔voxel conversion + marchPL are unchanged; voxelize_browser fits the model inside it.
+function readSandboxBounds() {
+  return [Number(sizeX && sizeX.value) || 80, Number(sizeY && sizeY.value) || 30, Number(sizeZ && sizeZ.value) || 80];
+}
+function boundsKey(b) { return Array.isArray(b) ? b.map((v) => +v || 0).join('x') : ('L' + (b || 80)); }
+
+// Voxelizing a model at a given sandbox size is deterministic → cache the grid in IndexedDB keyed by
+// file identity + bounds, so re-importing the SAME file skips objectToTriangles AND voxelize entirely.
+const VOX_DB = 'sim3d-voxel-cache', VOX_STORE = 'vox';
+function voxDbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(VOX_DB, 1);
+    r.onupgradeneeded = () => { const db = r.result; if (!db.objectStoreNames.contains(VOX_STORE)) db.createObjectStore(VOX_STORE); };
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function voxCacheGet(key) {
+  try {
+    const db = await voxDbOpen();
+    return await new Promise((res) => {
+      const q = db.transaction(VOX_STORE, 'readonly').objectStore(VOX_STORE).get(key);
+      q.onsuccess = () => res(q.result || null); q.onerror = () => res(null);
+    });
+  } catch (e) { return null; }
+}
+function voxCachePut(key, val) {
+  voxDbOpen().then((db) => { db.transaction(VOX_STORE, 'readwrite').objectStore(VOX_STORE).put(val, key); }).catch(() => {});
+}
+
+// Mount the visual + switch the sim to an imported voxel grid. Shared by the cache-hit path (no worker
+// round-trip) and the worker-voxelize reply. `workerHasGrid` = the worker already holds this grid (a
+// fresh voxelize) vs must be sent it (cache hit → ensureWorkerGrid ships GRID3 for the solve).
+function applyImportedScene(object, vox, name, token, heavy, cached, workerHasGrid) {
+  DISPLAY.cad = !heavy; if (dispCad) dispCad.checked = DISPLAY.cad;
+  if (!heavy && object) mountCadObject(object, vox.extent);   // heavy → the smooth voxel surface stands in
+  if (modelNote) modelNote.textContent = 'Simulating “' + (name || 'model') + '” · analytic tier'
+    + (cached ? ' · voxel grid from cache' : ' · voxelized in-browser')
+    + (heavy ? ' · smooth surface (mesh decimated)' : '') + '.';
+  workerGridToken = workerHasGrid ? token : null;
+  setRuntimeScene(vox, name, token);
+}
+
 // Voxelize a loaded THREE model and switch the sim to it (deferred behind a status message).
 // The same object is kept as the visual CAD shell (fitted to the new voxel extent).
-function simulateModel(object, name, realSizeM) {
+function simulateModel(object, name, sizeOrBounds, cacheKey) {
   if (!ensureInit()) return;
   setStatus('Voxelizing “' + (name || 'model') + '” …');
-  setTimeout(() => {
+  // Array → sandbox-bounds mode (user X/Y/Z); number → legacy longest-axis metres (programmatic callers).
+  const opts = Array.isArray(sizeOrBounds)
+    ? { resolution: 160, bounds_m: sizeOrBounds, barrierClass: 2, pad: 1 }
+    : { resolution: 160, real_longest_m: sizeOrBounds || 80, barrierClass: 2, pad: 1 };
+  if (solveWorker) {
+    // Off-thread: extract triangles here (needs THREE) and transfer them to the worker to voxelize —
+    // this is the import stall for a large model. The Tx solve that follows (setRuntimeScene →
+    // runVizMode → runStaticField) then runs in the worker on the grid it keeps resident.
     const tris = objectToTriangles(THREE, object);
     if (!tris.length) { setStatus('That model has no triangles to voxelize.'); return; }
-    // Fit ~160 voxels on the longest axis (robust to the model's units); real_longest_m sets
-    // the physical scale so path loss / distances come out in real metres.
-    const vox = voxelizeTriangles(tris, { resolution: 160, real_longest_m: realSizeM || 80,
-      barrierClass: 2, pad: 1 });
+    const token = 'rt:' + (++rtCounter);
+    pendingVoxelize = { object, name, token, cacheKey, heavy: (tris.length / 9 | 0) > HEAVY_TRIS };
+    solveWorker.postMessage({ type: 'voxelize', id: token, tris, opts, phys: mainPhys() }, [tris.buffer]);
+    return;
+  }
+  setTimeout(() => {                              // fallback: no Worker support → voxelize inline
+    const tris = objectToTriangles(THREE, object);
+    if (!tris.length) { setStatus('That model has no triangles to voxelize.'); return; }
+    const vox = voxelizeTriangles(tris, opts);
     if (!vox) { setStatus('Voxelization produced an empty grid.'); return; }
-    DISPLAY.cad = true; if (dispCad) dispCad.checked = true;
-    mountCadObject(object, vox.extent);
-    setRuntimeScene(vox, name);
+    const heavy = (tris.length / 9 | 0) > HEAVY_TRIS;
+    if (cacheKey) voxCachePut(cacheKey, Object.assign({ heavy }, vox));
+    applyImportedScene(object, vox, name, 'rt:' + (++rtCounter), heavy, false, false);
   }, 0);
 }
 
 // Load a model file (.glb/.gltf with Draco, or .obj) and switch the sim to solving on it.
-async function loadModelFile(file, realSizeM) {
+async function loadModelFile(file, bounds) {
   if (!ensureInit() || !file) return;
   const name = file.name, ext = name.toLowerCase().split('.').pop();
-  setStatus('Loading “' + name + '” …');
+  // A large .obj is parsed as text on the main thread (the memory-spike / crash path the Gemini note
+  // flagged). This loader already supports Draco .glb, which decodes off-thread and is ~10× smaller —
+  // so nudge toward it rather than silently chewing on a 300 MB wall of text.
+  const bigObj = ext === 'obj' && file.size > 60 * 1024 * 1024;
+  setStatus('Loading “' + name + '” …' + (bigObj
+    ? ' — ' + (file.size / 1048576 | 0) + ' MB .obj parses on the main thread; a Draco .glb loads far faster & lighter'
+    : ''));
   const url = URL.createObjectURL(file);
   try {
     let object;
@@ -860,9 +927,12 @@ async function loadModelFile(file, realSizeM) {
     } else {
       setStatus('Unsupported format “.' + ext + '” — use .glb, .gltf or .obj.'); return;
     }
-    simulateModel(object, name, realSizeM);
+    // IndexedDB cache: same file + same sandbox bounds → reuse the stored grid (skips voxelize entirely).
+    const cacheKey = 'vox:' + name + ':' + file.size + ':' + (file.lastModified || 0) + ':' + boundsKey(bounds);
+    const hit = await voxCacheGet(cacheKey);
+    if (hit && hit.grid) applyImportedScene(object, hit, name, 'rt:' + (++rtCounter), !!hit.heavy, true, false);
+    else simulateModel(object, name, bounds, cacheKey);
     if (modelRevert) modelRevert.style.display = '';
-    if (modelNote) modelNote.textContent = 'Simulating “' + name + '” (analytic tier — new scene, no cache).';
   } catch (e) {
     setStatus('Could not load “' + name + '”: ' + (e && e.message || e));
   } finally { URL.revokeObjectURL(url); }
@@ -879,7 +949,7 @@ function revertToFixedScene() {
 }
 if (modelFile) modelFile.addEventListener('change', (e) => {
   const f = e.target.files && e.target.files[0];
-  if (f) loadModelFile(f, Number(modelCell && modelCell.value) || 80);
+  if (f) loadModelFile(f, readSandboxBounds());
   e.target.value = '';                          // allow re-loading the same file
 });
 if (modelRevert) modelRevert.addEventListener('click', revertToFixedScene);
@@ -968,8 +1038,8 @@ const APM_DB     = MATS.map((m) => m.loss_per_m_db || 0);
 const FREQS      = MANIFEST.freqs_mhz || [2442, 3500, 5500, 6125];
 const FREQ_MULT  = MANIFEST.freq_loss_mult || {};
 
-// saturating wall-loss (flat-dB diffraction stand-in). satObs(x) from simulator_tab.js:31.
-function satObs(x) { return x <= SAT_T ? x : SAT_T + SAT_S * (1 - Math.exp(-(x - SAT_T) / SAT_S)); }
+// (the saturating wall-loss cap — satObs — now lives inside makeMarchPL in solve_core.js, so the
+//  analytic kernel is defined once and shared with the solve worker.)
 
 // per-band wall-loss multiplier by nearest manifest band — the WiFi presets in
 // #wf3dBand (2412/5180/…) don't match freq_loss_mult keys (2442/3500/5500/6125).
@@ -1522,27 +1592,147 @@ function chanBandIndex(ch, fMHz) {
   return bi;
 }
 
-// PL(dB) from Tx voxel to sample voxel: Motley-Keenan spreading + per-crossing
-// wall loss (R3 runs count once) + Beer-Lambert furniture + satObs. Direct port
-// of pathlossPhysics's inner loop (simulator_tab.js:42-55). L/Ap = dB × band mult.
-function marchPL(tx, sx, sy, sz, L, Ap, f1) {
-  const NX = GDIMS[0], NY = GDIMS[1], NZ = GDIMS[2];
-  const dx = sx - tx[0], dy = sy - tx[1], dz = sz - tx[2];
-  const distC = Math.hypot(dx, dy, dz);
-  const dm = Math.max(distC * CELL_M, D0_M);
-  const K = Math.max(1, Math.ceil(distC / STEP_CELL));
-  let wall = 0, perM = 0, cur = -1;
-  for (let k = 0; k <= K; k++) {
-    const t = k / K;
-    const xi = clampi(Math.round(tx[0] + t * dx), NX);
-    const yi = clampi(Math.round(tx[1] + t * dy), NY);
-    const zi = clampi(Math.round(tx[2] + t * dz), NZ);
-    const c = GRID3[(xi * NY + yi) * NZ + zi];
-    if (c !== cur) { cur = c; if (L[c] > 0) wall += L[c]; }   // R3: new run counts once
-    perM += Ap[c];
+// PL(dB) from Tx voxel to sample voxel: Motley-Keenan spreading + per-crossing wall loss (R3 runs
+// count once) + Beer-Lambert furniture + satObs cap. The kernel is single-sourced in solve_core.js
+// (also run by sim_worker.js); `makeMarchPL`'s getter reads the LIVE grid/constants, so an imported
+// scene (new GRID3/CELL_M) is picked up with no rebuild. Signature is unchanged, so every existing
+// call site (probe, radiation lobes, interference, coverage fallback) works as before. The getter is
+// called once per marchPL call — cheap for those bounded callers; the heavy coverage sweep of this
+// same function runs in the worker (see runStaticField's analytic dispatch).
+const marchPL = makeMarchPL(() => ({
+  grid: GRID3, dims: GDIMS, cellM: CELL_M,
+  nExp: N_EXP, d0M: D0_M, stepCell: STEP_CELL, satT: SAT_T, satS: SAT_S,
+}));
+
+// ---- Off-main-thread solve (Web Worker) ----------------------------------------------------------
+// The analytic per-voxel marchPL sweep and imported-model voxelization used to run synchronously on
+// the UI thread — that is the whole "Page Unresponsive" freeze. Both now run in sim_worker.js. The
+// cached-volume and surrogate tiers stay on the main thread (bounded typed-array reads, no freeze).
+let solveWorker = null;
+try {
+  if (typeof Worker !== 'undefined')
+    solveWorker = new Worker(new URL('./sim_worker.js', import.meta.url), { type: 'module' });
+} catch (e) { console.warn('[sim3d] solve worker unavailable — solving on the main thread.', e); solveWorker = null; }
+
+let solveGen = 0;                 // bumped by EVERY runStaticField call; stale worker replies are dropped
+let pendingSolve = null;          // { gen, t0, freqMHz, autoTx, isWash } for the in-flight analytic solve
+let pendingVoxelize = null;       // { object, name, token } for the in-flight import
+let workerGridToken = null;       // which scene grid the worker currently holds (see gridToken())
+let rtCounter = 0;                // unique id per imported runtime scene
+
+function mainPhys() { return { nExp: N_EXP, d0M: D0_M, stepCell: STEP_CELL, satT: SAT_T, satS: SAT_S }; }
+// Identity of the grid the analytic solve needs: a per-import token for runtime scenes, else the
+// fixed indoor/outdoor scene (distinct, since their grids differ). ensureWorkerGrid ships the current
+// GRID3 to the worker whenever this differs from what it holds.
+function gridToken() { return RUNTIME_SCENE ? RUNTIME_SCENE._token : ('fixed:' + currentMode()); }
+function ensureWorkerGrid() {
+  if (!solveWorker) return;
+  const tok = gridToken();
+  if (workerGridToken === tok) return;      // runtime scenes are already resident from voxelize
+  if (!GRID3 || !GDIMS) return;
+  const copy = GRID3.slice();               // transfer a copy — the main thread keeps GRID3
+  solveWorker.postMessage({ type: 'setGrid', id: tok, grid: copy, dims: GDIMS.slice(),
+    cellM: CELL_M, phys: mainPhys() }, [copy.buffer]);
+  workerGridToken = tok;
+}
+
+// Post the analytic coverage solve to the worker. Returns immediately; handleSolveReply draws the
+// result when it arrives (if still the latest generation).
+function dispatchAnalyticSolve(o) {
+  ensureWorkerGrid();
+  const disp = { classes: DISPLAY.classes, scale: DISPLAY.scale, eirpDbm: DISPLAY.eirpDbm,
+    threshDbm: DISPLAY.threshDbm, rsrpLo: RSRP_LO, rsrpHi: RSRP_HI,
+    covGood: COV_GOOD, covMarg: COV_MARG, covDead: COV_DEAD };
+  pendingSolve = { gen: o.gen, t0: o.t0, freqMHz: o.freqMHz, autoTx: o.autoTx, isWash: DISPLAY.wash };
+  if (DISPLAY.wash) {
+    const yPlane = (DISPLAY.plane && DISPLAY.sliceY != null) ? DISPLAY.sliceY : (extent[1] * 0.45);
+    const res = Math.max(128, Math.min(384, Math.round(Math.max(extent[0], extent[2]) / Math.max(CELL_M, 0.05))));
+    const nx = res, nz = Math.max(64, Math.round(res * extent[2] / extent[0]));
+    solveWorker.postMessage({ type: 'solve', gen: o.gen, kind: 'wash', disp, phys: mainPhys(),
+      params: { txVox: o.txVox, L: o.L, Ap: o.Ap, f1: o.f1, nx, nz,
+        ex: extent[0], ez: extent[2], yPlane } });
+  } else {
+    solveWorker.postMessage({ type: 'solve', gen: o.gen, kind: 'cloud', disp, phys: mainPhys(),
+      params: { txVox: o.txVox, L: o.L, Ap: o.Ap, f1: o.f1,
+        bounds: { g: o.bounds.g, yLo: o.bounds.yLo, yHi: o.bounds.yHi, yInc: o.bounds.yInc,
+          ex: extent[0], ez: extent[2], sliced: o.bounds.sliced } } });
   }
-  wall += perM * (distC / K) * CELL_M;                        // furniture (dB/m × length)
-  return f1 + 10 * N_EXP * Math.log10(dm) + satObs(wall);
+  setStatus('Solving · ' + TIER.ANALYTIC + ' — Motley-Keenan multiwall @ ' + o.freqMHz + ' MHz …');
+}
+
+// Mesh builders shared by the worker reply (mirror the tails of buildCoverageWash / runStaticField;
+// kept here because they touch THREE + the scene).
+function washMeshFromPixels(pixels, nx, nz, yPlane) {
+  const cv = document.createElement('canvas'); cv.width = nx; cv.height = nz;
+  cv.getContext('2d').putImageData(new ImageData(pixels, nx, nz), 0, 0);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter; tex.flipY = false;
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.78,
+    depthWrite: false, side: THREE.DoubleSide, clippingPlanes: GEOM_CLIP });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(extent[0], extent[2]), mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(extent[0] / 2, yPlane + 0.03, extent[2] / 2);
+  mesh.renderOrder = 3; mesh.userData.isWash = true;
+  scene.add(mesh); return mesh;
+}
+function cloudMeshFromSamples(flat, count) {
+  const g = sampleBounds().g;
+  const cube = new THREE.BoxGeometry(g * 0.42, g * 0.42, g * 0.42);
+  const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, clippingPlanes: GEOM_CLIP });
+  const mesh = new THREE.InstancedMesh(cube, mat, count);
+  const dummy = new THREE.Object3D(), col = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    const o = i * 7;
+    dummy.position.set(flat[o], flat[o + 1], flat[o + 2]); dummy.scale.setScalar(0.5 + flat[o + 3] * 1.6); dummy.updateMatrix();
+    mesh.setMatrixAt(i, dummy.matrix);
+    col.setRGB(flat[o + 4], flat[o + 5], flat[o + 6]); mesh.setColorAt(i, col);
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  scene.add(mesh); return mesh;
+}
+
+function handleSolveReply(m) {
+  const ps = pendingSolve;
+  if (!ps || m.gen !== solveGen) return;                 // a newer solve (or scene) superseded this one
+  pendingSolve = null;
+  if (m.ok === false) { setStatus('Solve failed in worker: ' + (m.error || 'unknown')); return; }
+  disposeField();
+  const n = (m.kind === 'wash') ? m.kept : m.count;
+  fieldObj = (m.kind === 'wash')
+    ? washMeshFromPixels(m.pixels, m.nx, m.nz, m.yPlane)
+    : cloudMeshFromSamples(m.samples, m.count);
+  coverageLegend();
+  window.SIM3D_TIER = TIER.ANALYTIC;
+  const unit = (m.kind === 'wash') ? ' texels' : ' samples';
+  const where = (m.kind === 'wash') ? ' · smooth wash @ y=' + m.yPlane.toFixed(1) + ' m' : '';
+  setStatus('Static field · ' + TIER.ANALYTIC + ' — Motley-Keenan multiwall @ ' + ps.freqMHz + ' MHz'
+    + where + ' · ' + n.toLocaleString() + unit + ' · walls shadow the field.'
+    + (ps.autoTx ? ' · default rooftop Tx — Place on model to move it.' : ''));
+  lastSolveMs = Math.round(performance.now() - ps.t0);
+  refreshMeta();
+}
+
+function handleVoxelizeReply(m) {
+  const pv = pendingVoxelize;
+  if (!pv || pv.token !== m.id) return;
+  pendingVoxelize = null;
+  if (!m.ok) { setStatus('Voxelization produced an empty grid.'); return; }
+  if (pv.cacheKey) voxCachePut(pv.cacheKey, Object.assign({ heavy: pv.heavy }, m.vox));   // store for reuse
+  // worker kept this grid resident from voxelize → workerHasGrid = true (ensureWorkerGrid skips re-send).
+  applyImportedScene(pv.object, m.vox, pv.name, pv.token, pv.heavy, false, true);
+}
+
+if (solveWorker) {
+  solveWorker.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === 'solve') handleSolveReply(m);
+    else if (m.type === 'voxelize') handleVoxelizeReply(m);
+    // 'setGrid' acks and 'error' are advisory — nothing to draw.
+    else if (m.type === 'error') console.warn('[sim3d] worker error:', m.error);
+  };
+  solveWorker.onerror = (e) => console.warn('[sim3d] worker onerror:', e.message || e);
 }
 
 // dB colour legend under the viewport (viridis weak→strong, dB end-labels).
@@ -1888,6 +2078,7 @@ function defaultRooftopTx() {
 function runStaticField() {
   if (!ensureInit()) return;
   const _t0 = performance.now();
+  const myGen = ++solveGen;      // any worker solve still in flight from an earlier gen is now stale
   const placedTx = firstTx();
   // Geometry-aware field: march Tx→sample through the material grid (analytic Motley-Keenan).
   const GRID = decodeGrid();
@@ -1932,6 +2123,16 @@ function runStaticField() {
   }
 
   const { sliced, g, yLo, yHi, yInc } = sampleBounds();     // full volume, or one prediction plane
+
+  // Analytic tier → the Web Worker (this per-voxel marchPL sweep is the UI freeze). The cached-volume
+  // and surrogate tiers stay on the synchronous path below (bounded typed-array reads, no freeze). If
+  // no Worker is available we fall through and solve inline — unchanged behavior. disposeField() above
+  // already cleared the old field; handleSolveReply draws the result if it is still the latest gen.
+  if (!vol && !sur && GRID && txVox && solveWorker) {
+    dispatchAnalyticSolve({ txVox, L, Ap, f1, freqMHz, autoTx, gen: myGen, t0: _t0,
+      bounds: { sliced, g, yLo, yHi, yInc } });
+    return;
+  }
 
   // Sample PL at a world point — shared by the wash canvas and the cube cloud.
   function samplePlAt(x, y, z) {
