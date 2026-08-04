@@ -72,6 +72,58 @@ MERC_LAT_DEFAULT = 38.90     # NoMa, Washington DC (Web-Mercator scale reference
 # cost/RAM scale with the voxel count. Warn past this (≈0.5 GB just for coords).
 ENGINE_VOXEL_WARN = 40_000_000
 
+# ------------------------------------------------------------- georeference (EPSG:3857 anchor cube)
+# The NoMa render is a LOCAL metre frame (verts near the origin) PLUS a small "anchor" cube placed at
+# the ABSOLUTE Web-Mercator (EPSG:3857) coordinate of the local origin — the prepped OBJ has `o Cube`
+# at `v 8572395 0 4707866` (|easting| / height / northing = the FCC block). So
+#     local = epsg3857(lon,lat) - merc_anchor
+# makes lon/lat <-> voxel exact with no BlenderGIS-origin guessing (verified: puts all six donors
+# inside the city and reproduces Forte->FCC = 416 m vs the measured 415). One sign quirk: EPSG X here
+# is WEST-positive (X = -easting), mirroring the indoor floor-plan registration flip. Scenes store true
+# ground metres (local X/Z compressed by merc_scale = cos(merc_lat)); these helpers read the manifest
+# (merc_anchor + merc_scale + origin_units + cell) and undo it consistently.
+R_MERC = 6_378_137.0            # EPSG:3857 sphere radius
+ANCHOR_MIN_M = 1e6              # verts past this |X| are the absolute-Mercator anchor, not local geometry
+
+
+def lonlat_to_merc(lon, lat):
+    """(x, z) in ABSOLUTE EPSG:3857 metres. x = -easting (this render's X runs west); z = northing."""
+    x = -R_MERC * math.radians(lon)
+    z = R_MERC * math.log(math.tan(math.pi / 4.0 + math.radians(lat) / 2.0))
+    return x, z
+
+
+def merc_to_lonlat(x, z):
+    lon = -math.degrees(x / R_MERC)
+    lat = math.degrees(2.0 * math.atan(math.exp(z / R_MERC)) - math.pi / 2.0)
+    return lon, lat
+
+
+def lonlat_to_vox(man, lon, lat, height_m=None):
+    """(vx, vz) [or (vx, vy, vz) if height_m] voxel coords for a lon/lat in a georeferenced city scene.
+
+    Needs `man['epsg']==3857` + `man['merc_anchor']`. local = epsg3857(lon,lat) - anchor;
+    scaled = merc_scale * local; vox = (scaled - origin_units)/cell (height uses the unscaled Y origin)."""
+    if man.get("epsg") != 3857 or "merc_anchor" not in man:
+        raise ValueError("lonlat_to_vox needs a georeferenced EPSG:3857 city scene (re-voxelize with the anchor cube)")
+    merc = float(man.get("merc_scale", 1.0)); cell = float(man["cell_size_m"])
+    o = man["origin_units"]; anch = man["merc_anchor"]
+    ox, oz = lonlat_to_merc(lon, lat)
+    vx = (merc * (ox - anch[0]) - o[0]) / cell
+    vz = (merc * (oz - anch[1]) - o[2]) / cell
+    if height_m is None:
+        return vx, vz
+    return vx, (float(height_m) - o[1]) / cell, vz
+
+
+def vox_to_lonlat(man, vx, vz):
+    """Inverse of lonlat_to_vox (horizontal only)."""
+    merc = float(man.get("merc_scale", 1.0)); cell = float(man["cell_size_m"])
+    o = man["origin_units"]; anch = man["merc_anchor"]
+    ox = (vx * cell + o[0]) / merc + anch[0]
+    oz = (vz * cell + o[2]) / merc + anch[1]
+    return merc_to_lonlat(ox, oz)
+
 
 def parse_obj(path):
     """(verts (V,3) float64, tris (T,3) int32). Polygons fan-triangulated;
@@ -294,6 +346,39 @@ def city_manifest(template, **over):
     return man
 
 
+def _selftest():
+    """Georeference round-trips (pure math) + donor placement in the NoMa_FCC_tile if built."""
+    ok, fails = 0, []
+
+    def check(name, cond, msg=""):
+        nonlocal ok
+        if cond:
+            ok += 1; print(f"  PASS  {name}")
+        else:
+            fails.append(name); print(f"  FAIL  {name}  {msg}")
+
+    for lon, lat in [(-77.01142, 38.90155), (-77.0074, 38.90359)]:
+        x, z = lonlat_to_merc(lon, lat); rlon, rlat = merc_to_lonlat(x, z)
+        check(f"merc round-trip {lon},{lat}", abs(rlon - lon) < 1e-9 and abs(rlat - lat) < 1e-9,
+              f"{rlon},{rlat}")
+    man = dict(epsg=3857, merc_scale=math.cos(math.radians(38.9)), cell_size_m=3.0,
+               origin_units=[-674.8, 0.0, -495.3], merc_anchor=[8572395.0, 4707865.5])
+    vx, vz = lonlat_to_vox(man, -77.0074, 38.90359)
+    rlon, rlat = vox_to_lonlat(man, vx, vz)
+    check("lonlat->vox->lonlat round-trip", abs(rlon + 77.0074) < 1e-6 and abs(rlat - 38.90359) < 1e-6,
+          f"{rlon},{rlat}")
+
+    tile = HERE / "city" / "NoMa_FCC_tile"
+    if (tile / "manifest_3d.json").exists():
+        m2 = json.loads((tile / "manifest_3d.json").read_text())
+        nx, ny, nz = np.load(tile / "material_grid.npy").shape
+        allin = all(0 <= (v := lonlat_to_vox(m2, lon, lat))[0] < nx and 0 <= v[1] < nz
+                    for lon, lat in [(-77.01142, 38.90155), (-77.0074, 38.90359), (-77.00848, 38.90309)])
+        check("NoMa_FCC_tile: Forte/FCC/BS6 land inside", allin)
+    print(f"\n{ok} passed, {len(fails)} failed")
+    return 1 if fails else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -322,8 +407,18 @@ def main():
                     help="DEM heightmap .npy (metres) — outdoor ground follows REAL terrain "
                          "instead of a flat plane (2.5d mode). Fetch for the scene bbox with "
                          "fetch_terrain_opentopo.py (needs an OpenTopography API key).")
+    ap.add_argument("--bbox-lonlat", type=float, nargs=4, default=None,
+                    metavar=("LON_MIN", "LAT_MIN", "LON_MAX", "LAT_MAX"),
+                    help="crop to a lon/lat box (needs an absolute EPSG:3857 mesh); converts to the "
+                         "Mercator AABB crop. E.g. the 7/24 walk: -77.0144 38.900 -77.0005 38.908")
+    ap.add_argument("--bbox-pad-m", type=float, default=100.0,
+                    help="metres of padding around --bbox-lonlat (default 100; keeps donor rooftops "
+                         "+ first-bounce reflectors inside the tile)")
     ap.add_argument("--no-preview", action="store_true", help="skip the preview PNG")
+    ap.add_argument("--test", action="store_true", help="run the georeference self-test (no voxelize)")
     args = ap.parse_args()
+    if args.test:
+        raise SystemExit(_selftest())
 
     mesh_path = Path(args.mesh) if args.mesh else ROOT / DEFAULT_OBJ
     if not mesh_path.is_absolute():
@@ -341,6 +436,23 @@ def main():
     print(f"  {len(verts)} verts, {len(tris)} triangles  "
           f"up-axis={up}{' (auto)' if args.up_axis == 'auto' else ''}")
 
+    # separate the absolute-Mercator ANCHOR cube (the georeference marker) from the local city.
+    # It sits at EPSG:3857 metres (|coord| >> the local frame), so it would both wreck the AABB and
+    # add a phantom building; drop it and keep its centre as the local origin's Mercator coordinate.
+    cube_v = (np.abs(verts) > ANCHOR_MIN_M).any(axis=1)
+    merc_anchor = None
+    if cube_v.any():
+        T = verts[cube_v].mean(0)
+        merc_anchor = [float(T[0]), float(T[2])]
+        keep = ~cube_v
+        remap = -np.ones(len(verts), np.int64); remap[keep] = np.arange(int(keep.sum()))
+        tris = remap[tris[keep[tris].all(1)]]
+        verts = verts[keep]
+        alon, alat = merc_to_lonlat(T[0], T[2])
+        print(f"  anchor cube -> local origin lon {alon:.5f} lat {alat:.5f} "
+              f"({int(cube_v.sum())} anchor verts dropped, {len(verts)} local verts kept)")
+    epsg3857 = merc_anchor is not None
+
     # ---- scale: metres already; optional Web-Mercator horizontal correction ---
     merc = math.cos(math.radians(args.merc_lat)) if args.merc_lat else 1.0
     if merc != 1.0:
@@ -350,6 +462,23 @@ def main():
     lo = verts.min(0)
     span = verts.max(0) - lo
     full_lo, full_span = lo.copy(), span.copy()
+
+    if args.bbox_lonlat is not None:
+        if not epsg3857:
+            raise SystemExit("--bbox-lonlat needs the EPSG:3857 anchor cube (absolute-Mercator marker) in the mesh")
+        lon0, lat0, lon1, lat1 = args.bbox_lonlat
+        cx, cz = [], []
+        for lo_ in (lon0, lon1):
+            for la_ in (lat0, lat1):
+                ox, oz = lonlat_to_merc(lo_, la_)               # absolute EPSG:3857
+                cx.append(merc * (ox - merc_anchor[0]))         # -> local -> scaled (true-metre) frame
+                cz.append(merc * (oz - merc_anchor[1]))
+        pad = float(args.bbox_pad_m)
+        args.origin_m = [min(cx) - pad, float(full_lo[1]), min(cz) - pad]
+        args.size_m = [max(cx) - min(cx) + 2 * pad, float(full_span[1]), max(cz) - min(cz) + 2 * pad]
+        print(f"  --bbox-lonlat {args.bbox_lonlat} +{pad:.0f} m -> crop "
+              f"origin={[round(x, 1) for x in args.origin_m]} size={[round(x, 1) for x in args.size_m]}")
+
     crop = args.origin_m is not None
     if crop:
         lo = np.asarray(args.origin_m, np.float64)
@@ -414,9 +543,25 @@ def main():
         src_rel = str(mesh_path.relative_to(ROOT))
     except ValueError:
         src_rel = str(mesh_path)
+
+    geo = {}
+    if epsg3857:                                    # bake the lon/lat anchor so BS placement is exact
+        def _ll(sx, sz):   # scaled-local (X,Z) -> lon/lat: undo merc_scale, add the anchor back
+            return merc_to_lonlat(sx / merc + merc_anchor[0], sz / merc + merc_anchor[1])
+        olon, olat = _ll(lo[0], lo[2])
+        cs = [_ll(lo[0] + ex, lo[2] + ez) for ex in (0.0, float(span[0])) for ez in (0.0, float(span[2]))]
+        lons = [c[0] for c in cs]; lats = [c[1] for c in cs]
+        geo = dict(epsg=3857, merc_R=R_MERC,
+                   merc_anchor=[round(merc_anchor[0], 3), round(merc_anchor[1], 3)],
+                   origin_lonlat=[round(olon, 7), round(olat, 7)],
+                   bbox_lonlat=[round(min(lons), 7), round(min(lats), 7),
+                                round(max(lons), 7), round(max(lats), 7)])
+        print(f"  EPSG:3857 anchor · scene bbox lon/lat {geo['bbox_lonlat']}")
+
     man = city_manifest(
         template,
         source_obj=src_rel, domain="city_outdoor", mode=args.mode,
+        **geo,
         building_class=cls, cell_size_m=round(args.cell, 6), m_per_unit=1.0,
         merc_lat=args.merc_lat, merc_scale=round(merc, 6),
         crop_origin_m=([round(float(x), 4) for x in lo] if crop else None),

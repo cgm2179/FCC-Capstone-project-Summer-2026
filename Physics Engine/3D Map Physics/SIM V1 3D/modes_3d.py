@@ -139,6 +139,46 @@ def forte_hall_geometry(meta_path: Path | None = None) -> dict:
     return base_station_geometry(*FORTE_HALL_LONLAT, meta_path=meta_path)
 
 
+def city_base_station_vox(manifest, lon, lat, elev_m, *, scene=None, search_radius_m=30.0):
+    """Voxel Tx for a donor base station in a georeferenced OUTDOOR city scene.
+
+    The outdoor sibling of `base_station_geometry`: horizontal position from the scene's
+    `voxelize_city.lonlat_to_vox` (EPSG:3857 anchor), vertical from the antenna height AGL.
+    The lat/lon pins (Apple Maps) can sit a few metres off the main tower, so snap horizontally
+    to the TALLEST building column within `search_radius_m` (the real rooftop near the pin) and
+    place the antenna one voxel above that roof (rooftop mount, in air). Returns (ix, iy, iz)."""
+    import voxelize_city as VC
+    vx, vz = VC.lonlat_to_vox(manifest, lon, lat)
+    NX, NY, NZ = manifest["grid_shape"]
+    cell = float(manifest["cell_size_m"])
+    ix = int(np.clip(round(vx), 0, NX - 1)); iz = int(np.clip(round(vz), 0, NZ - 1))
+    iy = int(np.clip(round(float(elev_m) / cell), 1, NY - 1))
+    if scene is not None:
+        M = scene.M
+        r = max(1, int(round(search_radius_m / cell)))
+        x0, x1 = max(0, ix - r), min(NX, ix + r + 1)
+        z0, z1 = max(0, iz - r), min(NZ, iz + r + 1)
+        sub = M[x0:x1, :, z0:z1] > 0                                  # (wx, NY, wz)
+        ys = np.arange(NY)[None, :, None]
+        top = np.where(sub, ys, -1).max(axis=1)                       # (wx, wz) roof height per column
+        has = top >= 0
+        if has.any():
+            # Snap to the building column whose ROOF HEIGHT best matches the known antenna height
+            # (with a light nearer-is-better tiebreak). The Apple-Maps pin can land on a low edge
+            # structure or next to a taller neighbour, so height-match beats both "nearest" and
+            # "tallest": Forte -> its ~20 m tower, not a 3 m ledge or a 57 m neighbour.
+            gx, gz = np.meshgrid(np.arange(x0, x1), np.arange(z0, z1), indexing="ij")
+            dist = np.sqrt((gx - ix) ** 2 + (gz - iz) ** 2) * cell
+            score = np.where(has, np.abs(top * cell - float(elev_m)) + 0.05 * dist, 1e18)
+            jx, jz = np.unravel_index(int(np.argmin(score)), score.shape)
+            ix, iz = x0 + int(jx), z0 + int(jz)
+            iy = int(top[jx, jz]) + 1                                  # just above the roof (air)
+        iy = min(iy, NY - 1)
+        while iy < NY - 1 and M[ix, iy, iz] > 0:                       # guarantee an air voxel
+            iy += 1
+    return (ix, iy, iz)
+
+
 def fspl_db(distance_m: float, f_mhz: float) -> float:
     return 20.0 * np.log10(max(distance_m, 1e-6)) + 20.0 * np.log10(f_mhz) - 27.55
 
