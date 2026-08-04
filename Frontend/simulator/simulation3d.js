@@ -822,7 +822,11 @@ function setRuntimeScene(vox, name, token) {
   return true;
 }
 // ---- Imported-model helpers (Phase 2: sandbox bounds · IndexedDB voxel cache · mesh decimation) ----
-const HEAVY_TRIS = 800000;     // above this, skip the full visual mesh and show the smooth voxel surface
+// Above this many triangles, skip the full visual mesh and fall back to the smooth voxel surface.
+// Set high so a decimated import (the preprocess/Draco GLB is typically ~1-3M tris) renders as the
+// REAL CAD — the built-in 7th floor is ~5M tris and the WebGPU renderer handles it fine; the smooth
+// surface is only a safety net for a pathologically large raw mesh.
+const HEAVY_TRIS = 8000000;
 
 // The sandbox is a real-world box the user sizes in metres (X · Y height · Z). Voxels stay ISOTROPIC,
 // so every world↔voxel conversion + marchPL are unchanged; voxelize_browser fits the model inside it.
