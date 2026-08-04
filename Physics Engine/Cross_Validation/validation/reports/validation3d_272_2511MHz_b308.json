@@ -1,0 +1,17 @@
+{
+  "dim": "3D",
+  "site_id": "BS4_55_m_st",
+  "pci": 272,
+  "band": 41,
+  "network": "nr_fr1",
+  "freq_mhz": 2510.55,
+  "bearing_deg": 308.4,
+  "elev_m": 11.0,
+  "n_points": 10,
+  "measured_mean": -119.5,
+  "predicted_mean_raw": -109.33,
+  "level_calibration_db": -10.16,
+  "rmse_raw_db": 13.41,
+  "rmse_after_level_cal_db": 8.74,
+  "spearman_rho": 0.285
+}

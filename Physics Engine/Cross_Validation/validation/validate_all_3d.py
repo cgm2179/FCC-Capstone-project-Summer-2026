@@ -21,7 +21,10 @@ import argparse
 import csv
 import json
 import sys
+from collections import defaultdict
 from pathlib import Path
+
+import numpy as np
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
@@ -85,6 +88,36 @@ def run(min_n=20):
               f"{x['freq_mhz']:>6.0f} {x['pci']:>5} {x['n']:>4} {rho:>7} "
               f"{x['rmse_after_level_cal_db']:>8.1f}d {x['level_calibration_db']:>+6.1f}  "
               f"{'ANCHOR' if x['anchor'] else ''}")
+    # per-base-station rollup — the headline "how good is 3D path loss per site"
+    bysite = defaultdict(list)
+    for x in rows:
+        if x["spearman_rho"] is not None:
+            bysite[x["site_id"]].append(x["spearman_rho"])
+    print(f"\n{'-'*92}\nPer base station (ρ before level cal, higher = physics matches the measured shape):")
+    site_stats = {}
+    for site in sorted(bysite, key=lambda s: -float(np.median(bysite[s]))):
+        v = np.array(bysite[site])
+        site_stats[site] = dict(cells=len(v), rho_median=round(float(np.median(v)), 3),
+                                rho_mean=round(float(v.mean()), 3), rho_best=round(float(v.max()), 3),
+                                rho_min=round(float(v.min()), 3))
+        print(f"  {site:20} cells={len(v):>2}  ρ median {np.median(v):+.2f}  mean {v.mean():+.2f}  "
+              f"best {v.max():+.2f}  worst {v.min():+.2f}")
+    # sites in the catalog that had NO validatable cell (below n threshold / no indoor data)
+    all_sites = set()
+    with open(CATALOG, newline="", encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            if not (r.get("status") or "").startswith("na"):
+                all_sites.add(r["site_id"])
+    missing = sorted(all_sites - set(bysite))
+    if missing:
+        print(f"  (no validatable cell, n<{min_n} indoors): {', '.join(missing)}")
+
+    # fold the rollup into the summary JSON
+    summ = json.loads((REPORTS / "validation3d_summary.json").read_text())
+    summ["per_base_station"] = site_stats
+    summ["sites_without_data"] = missing
+    (REPORTS / "validation3d_summary.json").write_text(json.dumps(summ, indent=2))
+
     anch = [x for x in rows if x["anchor"] and x["spearman_rho"] is not None]
     if anch:
         best = max(anch, key=lambda x: x["spearman_rho"])

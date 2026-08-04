@@ -1,0 +1,17 @@
+{
+  "dim": "3D",
+  "site_id": "BS6_1005_n_capitol",
+  "pci": 256,
+  "band": 2,
+  "network": "lte",
+  "freq_mhz": 1970.0,
+  "bearing_deg": 239.6,
+  "elev_m": 50.7,
+  "n_points": 16,
+  "measured_mean": -112.05,
+  "predicted_mean_raw": -106.29,
+  "level_calibration_db": -5.77,
+  "rmse_raw_db": 15.26,
+  "rmse_after_level_cal_db": 14.13,
+  "spearman_rho": 0.159
+}
