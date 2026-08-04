@@ -1,0 +1,17 @@
+{
+  "dim": "3D",
+  "site_id": "BS7_forte_hall",
+  "pci": 396,
+  "band": 13,
+  "network": "lte",
+  "freq_mhz": 751.0,
+  "bearing_deg": 237.0,
+  "elev_m": 20.0,
+  "n_points": 72,
+  "measured_mean": -106.7,
+  "predicted_mean_raw": -111.59,
+  "level_calibration_db": 4.89,
+  "rmse_raw_db": 20.74,
+  "rmse_after_level_cal_db": 20.16,
+  "spearman_rho": -0.273
+}

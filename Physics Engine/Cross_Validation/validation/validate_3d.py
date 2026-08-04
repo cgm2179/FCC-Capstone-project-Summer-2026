@@ -40,8 +40,6 @@ def sample2(grid, a, b):
 
 
 def validate(pci=397, band=13, network="lte", npz=None):
-    reg = json.loads(REG3D.read_text())
-    sx = reg["px_to_vox_scale"]["x"]; sz = reg["px_to_vox_scale"]["z"]; rx_y = int(reg["rx_y_vox"])
     if npz is None:
         cands = sorted(PL3D_OUT.glob(f"metrics3d_bs_{pci}_*MHz.npz"))
         if not cands:
@@ -49,15 +47,28 @@ def validate(pci=397, band=13, network="lte", npz=None):
         npz = cands[0]
     d = np.load(npz, allow_pickle=True)
     meta = json.loads(str(d["meta"]))
-    sl = d["rsrp"][:, rx_y, :]                       # (NX, NZ) rx-height slice
+    frame = str(d["frame"]) if "frame" in d.files else "vox"
 
     recs = V.measured_points(V.load_records(), network, band, pci)
     if not recs:
         raise SystemExit(f"no measured points for {network} band {band} pci {pci}")
     px = np.array([r["px"] for r in recs]); py = np.array([r["py"] for r in recs])
     meas = np.array([r["rsrp"] for r in recs])
-    vx, vz = px * sx, py * sz
-    pred = sample2(sl, vx, vz)
+
+    if frame == "px":                    # accurate-geometry field, floor-plan px frame (Commit 2)
+        pred = V.sample_bilinear(d["rsrp"], px, py)       # rsrp is (H,W)=(py,px)
+        plot_x, plot_y = px, py
+    else:                                # legacy voxel frame -> px→vox registration (Commit 1)
+        reg = json.loads(REG3D.read_text()); rx_y = int(reg["rx_y_vox"])
+        aff = reg.get("affine_px_to_vox"); sl = d["rsrp"][:, rx_y, :]
+        if aff is not None:
+            (a, b, c), (d0, e, f) = aff
+            vx = a * px + b * py + c; vz = d0 * px + e * py + f
+        else:
+            sx = reg["px_to_vox_scale"]["x"]; sz = reg["px_to_vox_scale"]["z"]
+            vx, vz = px * sx, py * sz
+        pred = sample2(sl, vx, vz)
+        plot_x, plot_y = vx, vz
 
     resid = meas - pred
     bias = float(resid.mean()); rmse_raw = float(np.sqrt((resid ** 2).mean()))
@@ -76,7 +87,7 @@ def validate(pci=397, band=13, network="lte", npz=None):
     tag = f"{pci}_{meta.get('freq_mhz'):.0f}MHz" + (
         f"_b{int(meta['bearing_deg'])}" if "_b" in npz.stem else "")
     (REPORTS / f"validation3d_{tag}.json").write_text(json.dumps(report, indent=2))
-    _plot(vx, vz, meas, pred_cal, resid - bias, report, REPORTS / f"validation3d_{tag}.png")
+    _plot(plot_x, plot_y, meas, pred_cal, resid - bias, report, REPORTS / f"validation3d_{tag}.png")
 
     print(f"[3D] PCI {pci} B{band} {meta.get('freq_mhz'):.0f} MHz  n={len(recs)}  "
           f"arrival {meta.get('bearing_deg')}°")

@@ -328,6 +328,131 @@ def bs_field_3d(scene, bearing_deg, *, bands=None, o2i_db=O2I_DB["low_loss"],
     return fg
 
 
+# ------------------------------------------------------ explicit directional O2I march (Commit 2)
+# A single PARALLEL wavefront marched along the arrival direction — the 3-D lift of the 2-D
+# `o2i_indoor_loss`, and an EXPLICIT directional path loss (only the wall-march term varies in
+# space, so it alone sets ρ; the outdoor spreading + O2I penetration are a calibrated level).
+#
+# NOTE ON WHERE THIS IS USED: the INDOOR O2I cross-validation does NOT march the Sandbox voxel
+# scene — a full bearing sweep showed that grid caps ρ at ≈0.22 for any direction (crude/generic
+# geometry), while the fine floor-plan grid reaches 0.64. So the indoor O2I predictor
+# (Cross_Validation/pathloss_3d/predict_o2i_3d.py) marches the ACCURATE floor-plan grid in the px
+# frame instead. These voxel-scene marchers remain the right tool for the OUTDOOR city voxel scene
+# (Commit 4), where there is no finer 2-D grid to fall back to.
+REG3D_PATH = HERE / "registration_3d.json"
+
+
+def arrival_dir_vox(bearing_deg, elevation_angle_deg=0.0, *, meta_path=None, reg_path=None):
+    """Unit arrival direction (toward the donor) in VOXEL axes (X,Y_up,Z).
+
+    Derived through the SAME georeference chain the rest of the pipeline uses, NOT the
+    `facade_sources_3d` "+X=east" convention (which the registration shows is mirrored —
+    voxel +X actually runs west). compass bearing → ENU → floor-plan px (inverse
+    `affine_px_to_local_m`) → voxel (the diagonal `affine_px_to_vox` sign/scale). The
+    vertical component comes from the elevation angle (≈0 for Forte Hall)."""
+    meta = json.loads(Path(meta_path or FLOORPLAN_META).read_text())
+    Linv = np.linalg.inv(np.asarray(meta["affine_px_to_local_m"], float)[:, :2])
+    br = np.radians(float(bearing_deg))
+    dpx = Linv @ np.array([np.sin(br), np.cos(br)])          # px-space dir toward the donor
+    reg = json.loads(Path(reg_path or REG3D_PATH).read_text())
+    aff = reg.get("affine_px_to_vox")
+    if aff is None:                                          # legacy scale-only fallback
+        aX = eZ = reg["px_to_vox_scale"]["x"]
+    else:
+        aX, eZ = aff[0][0], aff[1][1]                        # diagonal: px_x→X, px_y→Z
+    ux, uz = aX * dpx[0], eZ * dpx[1]
+    h = float(np.hypot(ux, uz)) or 1.0
+    ux, uz = ux / h, uz / h
+    phi = np.radians(float(elevation_angle_deg))
+    u = np.array([np.cos(phi) * ux, np.sin(phi), np.cos(phi) * uz], np.float64)
+    n = float(np.linalg.norm(u)) or 1.0
+    return (u / n).astype(np.float32)
+
+
+def material_loss_arrays(manifest, n=256):
+    """(loss_db, loss_per_m) indexed by material class id, from the manifest materials table.
+
+    The engine's `crossing_loss` uses the CrossingLUT (Fresnel/Airy); this explicit march
+    uses the FLAT per-crossing `loss_db` + per-metre `loss_per_m_db` table — exactly the
+    Motley-Keenan model the validated 2-D pipeline uses."""
+    loss_db = np.zeros(n, np.float32)
+    loss_per_m = np.zeros(n, np.float32)
+    for m in manifest.get("materials", []):
+        i = int(m["id"])
+        loss_db[i] = float(m.get("loss_db", 0.0))
+        loss_per_m[i] = float(m.get("loss_per_m_db", 0.0))
+    return loss_db, loss_per_m
+
+
+def o2i_wall_loss_3d(scene, u_from, *, loss_db, loss_per_m, step_cells=0.5,
+                     wall_sat_db=60.0, mask=None, chunk=8000):
+    """Indoor obstruction loss (dB) for a plane wave arriving along `u_from` (voxel axes).
+
+    3-D lift of the 2-D `o2i_indoor_loss`: from every (masked) voxel, march ONE parallel ray
+    toward the donor, count contiguous wall-material runs once (Motley-Keenan) + per-metre
+    bulk clutter, saturate at `wall_sat_db`. Voxels outside `mask` are +inf (masked later)."""
+    M = scene.M
+    NX, NY, NZ = M.shape
+    cell = float(scene.cell)
+    u = np.asarray(u_from, np.float32); u = u / (np.linalg.norm(u) or 1.0)
+    K = int(np.ceil(float(np.linalg.norm([NX, NY, NZ])) / step_cells)) + 2
+    s = np.arange(K, dtype=np.float32) * step_cells
+    seg_m = step_cells * cell
+    wall_ids = [c for c in range(len(loss_db)) if loss_db[c] > 0]
+    bulk_ids = [c for c in range(len(loss_per_m)) if loss_per_m[c] > 0]
+
+    ins = scene.inside if mask is None else mask
+    ins = np.ones(M.shape, bool) if ins is None else np.asarray(ins, bool)
+    V = np.argwhere(ins).astype(np.float32)                  # (Nvox,3) voxels we solve
+    out = np.full(V.shape[0], np.inf, np.float32)
+    for c0 in range(0, V.shape[0], chunk):
+        vv = V[c0:c0 + chunk]
+        sx = vv[:, 0:1] + s[None, :] * u[0]
+        sy = vv[:, 1:2] + s[None, :] * u[1]
+        sz = vv[:, 2:3] + s[None, :] * u[2]
+        valid = (sx >= 0) & (sx < NX) & (sy >= 0) & (sy < NY) & (sz >= 0) & (sz < NZ)
+        xi = np.clip(sx.round(), 0, NX - 1).astype(np.int32)
+        yi = np.clip(sy.round(), 0, NY - 1).astype(np.int32)
+        zi = np.clip(sz.round(), 0, NZ - 1).astype(np.int32)
+        mats = np.where(valid, M[xi, yi, zi], -1)            # -1 = off-grid sentinel (int8-safe)
+        extra = np.zeros(mats.shape[0], np.float32)
+        for c in wall_ids:
+            hit = mats == c
+            runs = hit[:, 0].astype(np.int32) + (hit[:, 1:] & ~hit[:, :-1]).sum(1, dtype=np.int32)
+            extra += loss_db[c] * runs
+        for c in bulk_ids:
+            extra += loss_per_m[c] * (mats == c).sum(1) * seg_m
+        out[c0:c0 + chunk] = wall_sat_db * -np.expm1(-extra / wall_sat_db)
+    full = np.zeros(M.shape, np.float32)     # unsolved voxels: 0 wall loss (free space, finite)
+    full[ins] = out
+    return full
+
+
+def o2i_pl_3d(scene, manifest, bearing_deg, freq_mhz, *, elevation_angle_deg=0.0,
+              level_db=0.0, ple_n=None, d0_m=None, distance_m=None,
+              step_cells=0.5, wall_sat_db=60.0, mask=None):
+    """Explicit directional O2I path loss PL(NX,NY,NZ) in dB.
+
+        PL(v) = outdoor_leg + O2I_penetration + indoor_walls(v)
+
+    `indoor_walls(v)` (the only spatially-varying term → the ρ driver) is the parallel-ray
+    Motley-Keenan march. The outdoor spreading + penetration collapse into the single
+    additive `level_db` the caller passes (the calibration fits it), so ρ is set by the
+    march alone. When `level_db` is 0 and `distance_m` is given, a plain log-distance outdoor
+    leg is added for a physically-sensible absolute level."""
+    u = arrival_dir_vox(bearing_deg, elevation_angle_deg)
+    loss_db, loss_per_m = material_loss_arrays(manifest)
+    walls = o2i_wall_loss_3d(scene, u, loss_db=loss_db, loss_per_m=loss_per_m,
+                             step_cells=step_cells, wall_sat_db=wall_sat_db, mask=mask)
+    lvl = float(level_db)
+    if lvl == 0.0 and distance_m is not None:
+        n_exp = float(scene.n_exp if ple_n is None else ple_n)
+        d0 = float(scene.d0 if d0_m is None else d0_m)
+        bi = scene.band_index(freq_mhz)
+        lvl = float(scene.fspl1[bi] + 10.0 * n_exp * np.log10(max(distance_m, d0)))
+    return (walls + lvl).astype(np.float32), u
+
+
 # --------------------------------------------------------------------------- registry
 @dataclass
 class Mode:
