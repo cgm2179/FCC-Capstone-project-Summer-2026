@@ -48,6 +48,11 @@ Sandbox_Version_3D_Simulation_1.obj/
 claude-colab-main/
 colab-mcp-main/
 
+# Unity WebGL port — a SEPARATE nested git repo with its own origin
+# (github.com/cgm2179/indoor-outdoor-walk-test-with-Unity-Engine). Kept out of this
+# repo entirely so the two histories never mix.
+Unity_RF_Simulator/
+
 # Local development virtualenv (created by the environment update script)
 .venv/
 

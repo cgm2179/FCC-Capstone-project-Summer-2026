@@ -40,6 +40,19 @@ const WIFI_BANDS = [
   { v: 5745, label: '5 GHz · UNII-3 ch 149 (5745 MHz)' },
 ];
 
+// Cellular band presets (the donor bands the walk / base-station catalog observed). value = MHz.
+// Used by the "Coverage type: Cellular" toggle so the city runs at the real carrier frequencies.
+const CELLULAR_BANDS = [
+  { v: 619, label: 'n71 · 617 MHz (T-Mobile 600)' },
+  { v: 751, label: 'B13 · 751 MHz (Verizon 700c — Forte Hall)' },
+  { v: 884.5, label: 'n5/n26 · 884 MHz (850)' },
+  { v: 1970, label: 'B2/B25 · 1970 MHz (PCS)' },
+  { v: 2145, label: 'B4/B66 · 2145 MHz (AWS)' },
+  { v: 2174.5, label: 'n65/n66 · 2175 MHz (AWS-ext)' },
+  { v: 2355, label: 'B30 · 2355 MHz (WCS)' },
+  { v: 3710, label: 'n77/n78 · 3710 MHz (C-band)' },
+];
+
 // ---- DOM handles ----
 const viewport = document.getElementById('sim3dViewport');
 const statusEl = document.getElementById('sim3dStatus');
@@ -128,8 +141,22 @@ function fillAntennaSelect(sel, swatchEl) {
 }
 fillAntennaSelect(txType, txSwatch);
 fillAntennaSelect(rxType, null);
-if (wfBand) WIFI_BANDS.forEach((b) => {
-  const o = document.createElement('option'); o.value = b.v; o.textContent = b.label; wfBand.appendChild(o);
+// Coverage type (WiFi | Cellular) swaps the band <select> between the two presets. marchPL and the
+// cached/surrogate readers are already frequency-driven, so this needs no physics change.
+const covType = document.getElementById('cov3dType');
+function populateBands(list) {
+  if (!wfBand) return;
+  const prev = wfBand.value;
+  wfBand.innerHTML = '';
+  list.forEach((b) => {
+    const o = document.createElement('option'); o.value = b.v; o.textContent = b.label; wfBand.appendChild(o);
+  });
+  if (list.some((b) => String(b.v) === prev)) wfBand.value = prev;   // keep the band if still offered
+}
+populateBands(WIFI_BANDS);
+if (covType) covType.addEventListener('change', () => {
+  populateBands(covType.value === 'cellular' ? CELLULAR_BANDS : WIFI_BANDS);
+  if (wfBand) wfBand.dispatchEvent(new Event('change'));            // re-solve the field at the new band
 });
 
 // ---- three.js + cannon-es scene (lazy) ----
@@ -337,10 +364,12 @@ function buildBuilding() {
   }
   // Voxels are the physics / volume grid — hide them visually unless the user opts in.
   applyGeometryVisibility();
-  // Default prediction-plane height once extent is known (WinProp-style wash).
+  // Default prediction-plane height once extent is known (WinProp-style wash). Outdoor drops to
+  // ~street level (a pedestrian coverage plane), not the mid-scene default the indoor floor wants.
   if (DISPLAY.plane && DISPLAY.sliceY == null) {
-    DISPLAY.sliceY = extent[1] * 0.45;
-    if (dispHeight) { dispHeight.value = '45'; dispHeight.disabled = false; }
+    const frac = ACTIVE_FIXED_SCENE === 'outdoor' ? 0.05 : 0.45;
+    DISPLAY.sliceY = extent[1] * frac;
+    if (dispHeight) { dispHeight.value = String(Math.round(frac * 100)); dispHeight.disabled = false; }
     if (dispPlaneBtn) {
       dispPlaneBtn.textContent = 'Plane';
       dispPlaneBtn.classList.add('active');
@@ -354,6 +383,7 @@ function buildBuilding() {
 function disposeBuilding() {
   disposeSurface();
   disposeCad();
+  disposeOsmGround();
   for (const m of wallMeshes) {
     scene.remove(m);
     if (m.geometry) m.geometry.dispose();
@@ -398,11 +428,14 @@ function buildSmoothSurface() {
     g.setIndex(new THREE.BufferAttribute(surf.indices, 1));
     g.computeVertexNormals();
     const st = CLASS_STYLE[cls] || DEFAULT_STYLE;
+    // Outdoor: keep the buildings translucent so the street-level coverage wash reads through them
+    // (an opaque city block hides the very field the user came to see).
+    const op = ACTIVE_FIXED_SCENE === 'outdoor' ? Math.min(st.opacity, 0.35) : st.opacity;
     const mat = new THREE.MeshStandardMaterial({
       color: palette[cls] || new THREE.Color(0x9fb0bf),
-      transparent: st.opacity < 1, opacity: st.opacity,
+      transparent: op < 1, opacity: op,
       roughness: st.roughness, metalness: st.metalness,
-      depthWrite: st.opacity > 0.6, side: THREE.DoubleSide,
+      depthWrite: op > 0.6, side: THREE.DoubleSide,
       clippingPlanes: GEOM_CLIP,
     });
     const mesh = new THREE.Mesh(g, mat);
@@ -658,6 +691,7 @@ function setFixedScene(kind) {
   COLLISION = collision;
   MANIFEST = (ACTIVE_ASSETS && ACTIVE_ASSETS.manifest_3d) || {};
   GRID3 = null; GDIMS = null; INSIDE3 = null;
+  DISPLAY.sliceY = null;                 // recompute the prediction-plane height for the new scene
   CELL_M = MANIFEST.cell_size_m || 0.3;
   RUNTIME_SCENE = null;
   window.SIM3D_VOLUME = null;
@@ -678,12 +712,68 @@ function setFixedScene(kind) {
     buildBuilding();
     buildMs = Math.round(performance.now() - t0);
     if (outdoor && DISPLAY.smooth) setGeometryMode();
+    if (outdoor) buildOsmGround();                 // drape the 2D OSM map under the 3D city
     refreshMeta();
     setStatus((outdoor ? 'Outdoor city tile' : 'Indoor 7th-floor scene') + ' loaded · ' + readyStatus());
   } else {
     resetFrameForActiveScene(false);
   }
   return true;
+}
+
+// ---- 2D OSM basemap draped on the ground of the outdoor scene --------------
+// A north-up OpenStreetMap raster for the tile's lon/lat bbox, stitched from slippy tiles in the
+// browser and laid flat at y≈0 UNDER the voxel buildings — the "2D map under the 3D city" context.
+// The tile is EPSG:3857-georeferenced (manifest bbox_lonlat); the voxel X axis runs WEST (see the
+// voxelizer), so the raster is oriented to line its streets up with the buildings.
+let osmGround = null;
+function disposeOsmGround() {
+  if (!osmGround) return;
+  scene.remove(osmGround);
+  osmGround.geometry.dispose();
+  if (osmGround.material.map) osmGround.material.map.dispose();
+  osmGround.material.dispose();
+  osmGround = null;
+}
+async function buildOsmGround() {
+  disposeOsmGround();
+  const bbox = MANIFEST.bbox_lonlat;
+  if (!bbox || !extent || MANIFEST.epsg !== 3857) return;          // needs the georeferenced tile
+  const [lonW, latS, lonE, latN] = bbox;
+  const Z = 17, TS = 256;
+  const toTile = (lon, lat) => { const n = 2 ** Z, lr = lat * Math.PI / 180;
+    return [(lon + 180) / 360 * n, (1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2 * n]; };
+  const [fxW, fyN] = toTile(lonW, latN), [fxE, fyS] = toTile(lonE, latS);
+  const x0 = Math.floor(fxW), x1 = Math.floor(fxE), y0 = Math.floor(fyN), y1 = Math.floor(fyS);
+  const cnv = document.createElement('canvas');
+  cnv.width = (x1 - x0 + 1) * TS; cnv.height = (y1 - y0 + 1) * TS;
+  const cx = cnv.getContext('2d');
+  const jobs = [];
+  for (let tx = x0; tx <= x1; tx++) for (let ty = y0; ty <= y1; ty++) {
+    jobs.push(new Promise((res) => { const im = new Image(); im.crossOrigin = 'anonymous';
+      im.onload = () => { cx.drawImage(im, (tx - x0) * TS, (ty - y0) * TS); res(); };
+      im.onerror = () => res();
+      im.src = `https://tile.openstreetmap.org/${Z}/${tx}/${ty}.png`; }));
+  }
+  await Promise.all(jobs);
+  if (ACTIVE_FIXED_SCENE !== 'outdoor') return;                    // scene changed while fetching
+  const sx0 = (fxW - x0) * TS, sy0 = (fyN - y0) * TS, sw = (fxE - fxW) * TS, sh = (fyS - fyN) * TS;
+  const crop = document.createElement('canvas');
+  crop.width = Math.max(1, Math.round(sw)); crop.height = Math.max(1, Math.round(sh));
+  crop.getContext('2d').drawImage(cnv, sx0, sy0, sw, sh, 0, 0, crop.width, crop.height);
+  const tex = new THREE.CanvasTexture(crop);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  // Orient: raster is north-up / east-right; the sim world has +X west, +Z north (see voxelizer).
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.center.set(0.5, 0.5); tex.repeat.set(-1, 1);                 // flip E–W so west maps to +X
+  const geo = new THREE.PlaneGeometry(extent[0], extent[2]);
+  const mat = new THREE.MeshBasicMaterial({ map: tex });
+  osmGround = new THREE.Mesh(geo, mat);
+  osmGround.rotation.x = -Math.PI / 2;                             // lie flat in the XZ plane
+  osmGround.position.set(extent[0] / 2, -0.3, extent[2] / 2);      // just under the buildings
+  osmGround.renderOrder = -1;
+  scene.add(osmGround);
+  setStatus('OSM basemap draped under the city (' + crop.width + '×' + crop.height + ' px).');
 }
 
 function activateOutdoorScene() {
@@ -1040,7 +1130,9 @@ async function loadVolumeIndex() {
 }
 // Volumes written before M3 carry no `mode`; they were all the indoor floor.
 function volumesForMode(mode) {
-  return (volumeIndex || []).filter((e) => (e.mode || 'indoor') === mode);
+  const g = GDIMS;   // a volume solved on a different grid (e.g. the old demo tile) must NOT be
+  return (volumeIndex || []).filter((e) => (e.mode || 'indoor') === mode   // reused on this scene
+    && (!g || !e.grid_shape || (e.grid_shape[0] === g[0] && e.grid_shape[1] === g[1] && e.grid_shape[2] === g[2])));
 }
 function matchVolume(txVox, mode) {
   const pool = volumesForMode(mode || currentMode());
@@ -1151,6 +1243,14 @@ function nearestBandIndex(vol, fMHz) {
   let bi = 0, bd = Infinity;
   for (let i = 0; i < vol.bands.length; i++) { const d = Math.abs(vol.bands[i] - fMHz); if (d < bd) { bd = d; bi = i; } }
   return bi;
+}
+// A cached volume is only honest near the frequency it was solved for; using the 2.4 GHz city
+// volume for a 751 MHz cellular request would mislabel the field. Beyond ~25% off, prefer the
+// analytic tier, which recomputes at the requested frequency (so Cellular renders correctly).
+function volBandOk(vol, fMHz) {
+  if (!vol || !vol.bands || !vol.bands.length) return false;
+  const b = vol.bands[nearestBandIndex(vol, fMHz)];
+  return Math.max(b, fMHz) / Math.max(1, Math.min(b, fMHz)) <= 1.25;
 }
 // ---- Resolution order: cached volume → DL surrogate → analytic fallback ----
 // The analytic JS mirror is the guaranteed-correct floor, not a placeholder: the
@@ -1764,34 +1864,61 @@ if (dispThresh) {
   dispThresh.addEventListener('change', reRunViz);
 }
 
+// When nothing is placed on the CITY / an imported model, radiate from a sensible default
+// rooftop (tallest roof near the centre = a macro-cell site) instead of the scene centre —
+// which sits INSIDE the buildings there, so every ray is blocked and the coverage renders
+// empty. Derived from the material grid, since the browser has no valid_tx mask for these scenes.
+function defaultRooftopTx() {
+  const GRID = decodeGrid();
+  if (!GRID || !GDIMS) return null;
+  const NX = GDIMS[0], NY = GDIMS[1], NZ = GDIMS[2];
+  const cx = NX >> 1, cz = NZ >> 1, R = Math.max(6, Math.round(40 / CELL_M));
+  let best = null, bestScore = -Infinity;
+  for (let x = Math.max(0, cx - R); x < Math.min(NX, cx + R); x++)
+    for (let z = Math.max(0, cz - R); z < Math.min(NZ, cz + R); z++) {
+      let top = -1;
+      for (let y = NY - 1; y >= 1; y--) { if (GRID[(x * NY + y) * NZ + z] > 0) { top = y; break; } }
+      if (top < 0) continue;
+      const score = top - 0.15 * Math.hypot(x - cx, z - cz);
+      if (score > bestScore) { bestScore = score; best = [x, Math.min(NY - 1, top + 1), z]; }
+    }
+  return best;
+}
+
 function runStaticField() {
   if (!ensureInit()) return;
   const _t0 = performance.now();
   const placedTx = firstTx();
-  const src = placedTx ? placedTx.body.position : center;
+  // Geometry-aware field: march Tx→sample through the material grid (analytic Motley-Keenan).
+  const GRID = decodeGrid();
+  // Auto-place a rooftop source for the city / imported scenes when the user hasn't yet — the
+  // scene centre is inside a building there, so marchPL returns all-loss and renders nothing.
+  let autoTx = null;
+  if (!placedTx && GRID && (currentMode() === 'outdoor' || RUNTIME_SCENE)) autoTx = defaultRooftopTx();
+  const src = placedTx ? placedTx.body.position
+    : autoTx ? { x: (autoTx[0] + 0.5) * CELL_M, y: (autoTx[1] + 0.5) * CELL_M, z: (autoTx[2] + 0.5) * CELL_M }
+             : center;
   const freqMHz = Number(wfBand && wfBand.value) || 2437;
   disposeField();
   disposeLobes(); disposeVectors(); disposeInterference(); disposeSweep(); // field replaces others
 
-  // Geometry-aware field: march Tx→sample through the material grid (analytic
-  // Motley-Keenan). Falls back to free space if the grid asset is unavailable.
-  const GRID = decodeGrid();
   const mult = bandMult(freqMHz);
   const L = LOSS_DB.map((v) => v * mult), Ap = APM_DB.map((v) => v * mult);
   const f1 = 20 * Math.log10(freqMHz) + FSPL_CONST;         // fspl at 1 m
-  // Derive a voxel from the placed Tx, or from the scene centre when nothing is placed yet.
-  // matchVolume(null) already falls back to the mode's first cached solve; using the centre
-  // keeps outdoor/indoor demo Tx within VOL_TOL of the committed volumes (e.g. outdoor
-  // centre ≈ [64,16,64] vs cached tx_67-20-66).
-  const txVox = GRID ? [clampi(Math.floor(src.x / CELL_M), GDIMS[0]),
+  // Derive a voxel from the placed Tx (or the auto rooftop / scene centre when nothing is placed).
+  // matchVolume(null) already falls back to the mode's first cached solve; the centre keeps demo
+  // Tx within VOL_TOL of the committed volumes (e.g. outdoor centre ≈ [64,16,64] vs cached tx).
+  const txVox = autoTx || (GRID ? [clampi(Math.floor(src.x / CELL_M), GDIMS[0]),
                         clampi(Math.floor(src.y / CELL_M), GDIMS[1]),
-                        clampi(Math.floor(src.z / CELL_M), GDIMS[2])] : null;
+                        clampi(Math.floor(src.z / CELL_M), GDIMS[2])] : null);
+  window.__sim3dAutoTx = autoTx;   // surfaced in the status line below
 
   // Prefer a precomputed full-physics PL volume when one matches the placed Tx;
   // otherwise render analytic now and upgrade in the background if one loads.
   const curVol = window.SIM3D_VOLUME || null;
   const vol = (txVox ? volMatches(curVol, txVox)
-    : (curVol && (curVol.entry.mode || 'indoor') === currentMode())) ? curVol : null;
+    : (curVol && (curVol.entry.mode || 'indoor') === currentMode()))
+    && volBandOk(curVol, freqMHz) ? curVol : null;
   const sur = (!vol && surrogateMatches(surrogateVol, txVox, freqMHz)) ? surrogateVol : null;
   const bandIdx = vol ? nearestBandIndex(vol, freqMHz) : 0;
   // Tier 1 miss: try to upgrade in the background (cache first, then surrogate), and render
@@ -1841,6 +1968,7 @@ function runStaticField() {
       + (vol ? ' · curved eikonal shadows + in-wall lag.'
         : sur ? ' · ONNX Runtime inference.'
               : GRID ? ' · walls shadow the field.' : '.')
+      + (autoTx ? ' · default rooftop Tx — Place on model to move it.' : '')
       + fell);
     window.SIM3D_TIER = tier;
     lastSolveMs = Math.round(performance.now() - _t0);

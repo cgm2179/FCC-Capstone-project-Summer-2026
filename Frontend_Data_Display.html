@@ -604,7 +604,13 @@
               </section>
               <section class="sim3d-step">
                 <h3><span class="step-n">2</span> Waveform</h3>
-                <label class="sim3d-field">Band (WiFi presets)
+                <label class="sim3d-field">Coverage type
+                  <select id="cov3dType">
+                    <option value="wifi">WiFi</option>
+                    <option value="cellular">Cellular (donor bands)</option>
+                  </select>
+                </label>
+                <label class="sim3d-field">Band
                   <select id="wf3dBand"></select>
                 </label>
                 <div class="sim3d-radios">
@@ -651,8 +657,8 @@
                       <option value="scattering">Diffuse scattering</option>
                     </optgroup>
                     <optgroup label="RF physics — diagnostics (decomposition)">
-                      <option value="refraction">Refraction (transmitted field)</option>
-                      <option value="absorption">Absorption (deposited power)</option>
+                      <option value="refraction" disabled>Refraction — module stub (not built)</option>
+                      <option value="absorption" disabled>Absorption — module stub (not built)</option>
                     </optgroup>
                   </select>
                 </label>
