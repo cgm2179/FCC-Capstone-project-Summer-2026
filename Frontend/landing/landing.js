@@ -137,6 +137,26 @@
     const voxer = outdoor ? 'voxelize_city.py' : 'voxelize.py';
     if (voxSrc) voxSrc.innerHTML = 'The model is voxelized into a material grid by <code>' +
       voxer + '</code>. Pick how buildings are turned into voxels:';
+    // Imported model: reflect IT (name + estimated grid) here, not the built-in scene's grid.
+    const imp = window.appImport && window.appImport.modelFiles;
+    if (imp && imp.length) {
+      const names = Array.from(imp).map((f) => f.name).join(', ');
+      voxExtentM = [80, 30, 80];      // default sandbox bounds; the Simulation tab lets you resize
+      if (voxSrc) voxSrc.innerHTML = 'Your imported model is voxelized into a material grid <b>in the browser</b> on the Simulation tab (analytic tier). Pick the voxelization:';
+      if (geoBox) {
+        const est = estimateGrid(window.appVoxel.cell_m);
+        const rows = [
+          ['Imported model', names],
+          ['Processing', 'voxelized in-browser on import'],
+          ['Sandbox bounds', voxExtentM.join(' × ') + ' m (default — adjust in the Simulation tab)'],
+          ['Grid estimate', est ? (est.g.join(' × ') + ' = ' + est.n.toLocaleString() + ' voxels') : '—'],
+        ];
+        geoBox.innerHTML = rows.map((r) => '<div class="k">' + r[0] + '</div><div class="v">' + r[1] + '</div>').join('');
+      }
+      if (matBox) matBox.innerHTML = '<li>barrier (walls) · default multiwall loss (dB per crossing)</li>';
+      renderVoxNote();
+      return;
+    }
     const A = window.SIM3D_ASSETS && window.SIM3D_ASSETS.manifest_3d;
     voxExtentM = (A && A.grid_shape && A.cell_size_m)
       ? A.grid_shape.map((n) => n * A.cell_size_m) : null;
