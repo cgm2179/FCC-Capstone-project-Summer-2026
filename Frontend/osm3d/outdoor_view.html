@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link href="https://cdn.osmbuildings.org/4.1.1/OSMBuildings.css" rel="stylesheet">
   <script src="https://cdn.osmbuildings.org/4.1.1/OSMBuildings.js"></script>
-  <!-- base-station catalog (window.BASE_STATIONS) + the baked 7/24 outdoor walk (window.OUTDOOR_WALK) -->
+  <!-- base-station catalog (window.BASE_STATIONS) + the baked, tagged 7/24 outdoor walk -->
   <script src="../../Data/base_stations.js"></script>
   <script src="../../Data/outdoor_walk.js"></script>
   <style>
@@ -27,6 +27,8 @@
                     background: linear-gradient(90deg, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000); }
     #legend .lr { display: flex; justify-content: space-between; width: 180px; }
     #legend .fcc { color: #2c7fb8; font-weight: 600; }
+    #filterNote { position: absolute; top: 10px; right: 10px; z-index: 500; background: rgba(10,18,36,.82); color: #dfe6f2;
+                  border-radius: 8px; padding: 6px 10px; font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.2); max-width: 260px; }
   </style>
 </head>
 <body>
@@ -42,6 +44,7 @@
       <option value="indoor">Indoor building (FCC 7th floor)</option>
     </select>
   </div>
+  <div id="filterNote">Whole 7/24 walk · <span id="shownN">0</span> pts</div>
   <div id="legend">
     <div><span class="fcc">◉ FCC</span> (walk centre) · ▲ base stations</div>
     <div>7/24 walk — RSRP</div>
@@ -51,45 +54,72 @@
 
   <script>
   'use strict';
-  var WALK = (window.OUTDOOR_WALK && window.OUTDOOR_WALK.points) || [];
-  var FCC = (window.OUTDOOR_WALK && window.OUTDOOR_WALK.fcc) || { lon: -77.00740, lat: 38.90359 };
-  var FORTE = { lon: -77.011420, lat: 38.901550 };
+  var W = window.OUTDOOR_WALK || { pts: [], ops: [], nets: [], bands: [], chs: [], fcc: { lon: -77.00740, lat: 38.90359 } };
+  var FCC = W.fcc, FORTE = { lon: -77.011420, lat: 38.901550 };
   var BS = (window.BASE_STATIONS || []).filter(function (s) { return s.lat != null; });
+  // reconstruct tagged points from the packed rows: [lon,lat,rsrp,pci,opIdx,netIdx,bandIdx,chIdx]
+  var PTS = (W.pts || []).map(function (r) {
+    return { lon: r[0], lat: r[1], rsrp: r[2], pci: r[3], op: W.ops[r[4]], net: W.nets[r[5]], band: W.bands[r[6]], ch: W.chs[r[7]] };
+  });
+  // active sidebar filter — '' / 'all' means no constraint on that dimension
+  var filter = { operator: '', network: '', band: '', pci: '', channel: '' };
+  function on(v) { return v && v !== 'all' && v !== 'All'; }
+  function matches(p) {
+    if (on(filter.operator) && p.op !== filter.operator) return false;
+    if (on(filter.network) && p.net !== filter.network) return false;
+    if (on(filter.band) && String(p.band) !== String(filter.band)) return false;
+    if (on(filter.pci) && String(p.pci) !== String(filter.pci)) return false;
+    if (on(filter.channel) && String(p.ch) !== String(filter.channel)) return false;
+    return true;
+  }
+  function shown() { return PTS.filter(matches); }
 
-  // RSRP → jet-ish colour (−120 weak blue … −60 strong red)
   function rsrpColor(v) {
     var t = Math.max(0, Math.min(1, (v + 120) / 60));
-    var stops = [[0, 0, 255], [0, 255, 255], [0, 255, 0], [255, 255, 0], [255, 0, 0]];
-    var x = t * (stops.length - 1), i = Math.floor(x), f = x - i;
-    var a = stops[i], b = stops[Math.min(i + 1, stops.length - 1)];
+    var st = [[0, 0, 255], [0, 255, 255], [0, 255, 0], [255, 255, 0], [255, 0, 0]];
+    var x = t * (st.length - 1), i = Math.floor(x), f = x - i, a = st[i], b = st[Math.min(i + 1, st.length - 1)];
     return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * f) + ',' + Math.round(a[1] + (b[1] - a[1]) * f) + ',' + Math.round(a[2] + (b[2] - a[2]) * f) + ')';
   }
 
-  // ---------- 2D: Leaflet OSM map, FCC centred, whole walk as dots + base stations ----------
+  // ---------- 2D Leaflet ----------
   var map2d = L.map('map2d', { zoomControl: true, preferCanvas: true }).setView([FCC.lat, FCC.lon], 16);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap · © CARTO', maxZoom: 20, subdomains: 'abcd'
-  }).addTo(map2d);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '© OpenStreetMap · © CARTO', maxZoom: 20, subdomains: 'abcd' }).addTo(map2d);
   var walkLayer = L.layerGroup().addTo(map2d);
-  WALK.forEach(function (p) {
-    L.circleMarker([p.lat, p.lon], { radius: 3, stroke: false, fillColor: rsrpColor(p.rsrp), fillOpacity: 0.85 })
-      .bindTooltip('RSRP ' + p.rsrp + ' dBm', { direction: 'top' }).addTo(walkLayer);
-  });
+  function renderWalk2d() {
+    walkLayer.clearLayers();
+    var pts = shown(), n = 0;
+    pts.forEach(function (p) {
+      L.circleMarker([p.lat, p.lon], { radius: 3, stroke: false, fillColor: rsrpColor(p.rsrp), fillOpacity: 0.85 })
+        .bindTooltip(p.op + ' · ' + p.net.toUpperCase() + ' B' + p.band + ' · PCI ' + p.pci + ' · RSRP ' + p.rsrp + ' dBm', { direction: 'top' })
+        .addTo(walkLayer);
+      n++;
+    });
+    document.getElementById('shownN').textContent = n;
+  }
   BS.forEach(function (s) {
-    var isForte = s.site_id === 'BS7_forte_hall';
-    L.marker([s.lat, s.lon]).addTo(map2d)
-      .bindPopup('<b>' + s.name + '</b><br>' + (isForte ? 'Verizon donor · PCI 396/397/398' : (s.status || '')) + '<br>' + (s.building_height_m || '?') + ' m');
+    L.marker([s.lat, s.lon]).addTo(map2d).bindPopup('<b>' + s.name + '</b><br>' + (s.building_height_m || '?') + ' m');
   });
   L.circleMarker([FCC.lat, FCC.lon], { radius: 9, color: '#fff', weight: 2, fillColor: '#2c7fb8', fillOpacity: 1 })
-    .bindTooltip('FCC — 7th-floor walk centre', { permanent: false, direction: 'right' }).addTo(map2d);
+    .bindTooltip('FCC — 7th-floor walk centre', { direction: 'right' }).addTo(map2d);
+  renderWalk2d();
 
-  // ---------- 3D: OSM Buildings, same content as extruded features ----------
-  var map3d = null, built3d = false;
-  var M_PER_DEG_LAT = 111320;
-  function square(lon, lat, sizeM, height, color) {
-    var dLat = sizeM / M_PER_DEG_LAT, dLon = sizeM / (M_PER_DEG_LAT * Math.cos(lat * Math.PI / 180));
-    return { type: 'Feature', properties: { height: height, minHeight: 0, color: color, roofColor: color, wallColor: color },
+  // ---------- 3D OSM Buildings ----------
+  var map3d = null, built3d = false, walk3dLayer = null;
+  var M = 111320;
+  function square(lon, lat, sizeM, h, color) {
+    var dLat = sizeM / M, dLon = sizeM / (M * Math.cos(lat * Math.PI / 180));
+    return { type: 'Feature', properties: { height: h, minHeight: 0, color: color, roofColor: color, wallColor: color },
       geometry: { type: 'Polygon', coordinates: [[[lon - dLon, lat - dLat], [lon + dLon, lat - dLat], [lon + dLon, lat + dLat], [lon - dLon, lat + dLat], [lon - dLon, lat - dLat]]] } };
+  }
+  function walk3dFeatures() {
+    var pts = shown(), feats = [], step = Math.max(1, Math.ceil(pts.length / 4000));   // cap density for the 3D engine
+    for (var i = 0; i < pts.length; i += step) { var p = pts[i]; feats.push(square(p.lon, p.lat, 2.2, 2, rsrpColor(p.rsrp))); }
+    return { type: 'FeatureCollection', features: feats };
+  }
+  function rebuildWalk3d() {
+    if (!map3d) return;
+    if (walk3dLayer && walk3dLayer.destroy) walk3dLayer.destroy();
+    walk3dLayer = map3d.addGeoJSON(walk3dFeatures());
   }
   function build3d() {
     if (built3d) return; built3d = true;
@@ -98,34 +128,46 @@
     map3d.addMapTiles('https://a.basemap.cartocdn.com/light_all/{z}/{x}/{y}.png');
     map3d.addGeoJSONTiles('https://{s}.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json');
     var feats = [];
-    BS.forEach(function (s) { var isForte = s.site_id === 'BS7_forte_hall';
-      feats.push(square(s.lon, s.lat, isForte ? 9 : 6, s.building_height_m || 15, isForte ? '#c0392b' : (s.status === 'live' ? '#e67e22' : '#95a5a6'))); });
+    BS.forEach(function (s) { var isForte = s.site_id === 'BS7_forte_hall'; feats.push(square(s.lon, s.lat, isForte ? 9 : 6, s.building_height_m || 15, isForte ? '#c0392b' : (s.status === 'live' ? '#e67e22' : '#95a5a6'))); });
     feats.push(square(FCC.lon, FCC.lat, 10, 33, '#2c7fb8'));
-    // whole walk as low RSRP-coloured tiles (downsampled for the 3D engine)
-    for (var i = 0; i < WALK.length; i += 2) { var p = WALK[i]; feats.push(square(p.lon, p.lat, 2.2, 2, rsrpColor(p.rsrp))); }
     map3d.addGeoJSON({ type: 'FeatureCollection', features: feats });
+    rebuildWalk3d();
     window._OSM = map3d;
   }
 
-  // ---------- view toggle + model focus ----------
+  // ---------- view toggle + model focus + sidebar filter ----------
+  function is3d() { return document.getElementById('map3d').style.display !== 'none'; }
+  function applyFilter() { renderWalk2d(); if (is3d()) rebuildWalk3d(); }
   function show(which) {
-    var is3d = which === '3d';
-    document.getElementById('map2d').style.display = is3d ? 'none' : 'block';
-    document.getElementById('map3d').style.display = is3d ? 'block' : 'none';
-    document.getElementById('btn2d').classList.toggle('active', !is3d);
-    document.getElementById('btn3d').classList.toggle('active', is3d);
-    if (is3d) build3d(); else setTimeout(function () { map2d.invalidateSize(); }, 60);
+    var d3 = which === '3d';
+    document.getElementById('map2d').style.display = d3 ? 'none' : 'block';
+    document.getElementById('map3d').style.display = d3 ? 'block' : 'none';
+    document.getElementById('btn2d').classList.toggle('active', !d3);
+    document.getElementById('btn3d').classList.toggle('active', d3);
+    if (d3) { build3d(); rebuildWalk3d(); } else setTimeout(function () { map2d.invalidateSize(); }, 60);
   }
   document.getElementById('btn2d').addEventListener('click', function () { show('2d'); });
   document.getElementById('btn3d').addEventListener('click', function () { show('3d'); });
   document.getElementById('modelSel').addEventListener('change', function (e) {
     var indoor = e.target.value === 'indoor';
-    var z = indoor ? 18 : 16, c = [FCC.lat, FCC.lon];
-    if (document.getElementById('map2d').style.display !== 'none') map2d.setView(c, z);
+    if (!is3d()) map2d.setView([FCC.lat, FCC.lon], indoor ? 18 : 16);
     else if (map3d) map3d.setPosition({ latitude: FCC.lat, longitude: FCC.lon }).setZoom(indoor ? 18 : 16.3);
   });
 
-  window.__outdoorView = { walkN: WALK.length, bsN: BS.length, fcc: FCC };
+  // Parent (dashboard sidebar) → filter the outdoor dots.
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.source !== 'outdoorFilter') return;
+    filter = { operator: d.operator || '', network: d.network || '', band: d.band || '', pci: d.pci || '', channel: d.channel || '' };
+    var active = ['operator', 'network', 'band', 'pci', 'channel'].filter(function (k) { return on(filter[k]); })
+      .map(function (k) { return k + '=' + filter[k]; });
+    document.getElementById('filterNote').firstChild.textContent = (active.length ? active.join(' · ') : 'Whole 7/24 walk') + ' · ';
+    applyFilter();
+  });
+
+  // expose the facets so the parent can populate the sidebar options for outdoor mode
+  window.__outdoorView = { n: PTS.length, bsN: BS.length, fcc: FCC, facets: (W.facets || {}), setFilter: function (f) { filter = f; applyFilter(); } };
+  try { window.parent && window.parent.postMessage({ source: 'outdoorReady', facets: (W.facets || {}) }, '*'); } catch (e) {}
   </script>
 </body>
 </html>

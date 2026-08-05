@@ -317,6 +317,44 @@
   /* ---- Screen 3: workspace -------------------------------------------- */
   function enterWorkspace() { showScreen('screenWorkspace'); applyModeToWorkspace(); }
 
+  // Outdoor mode: drive the outdoor iframe's dot filter from the Coverage sidebar. Repopulate the
+  // sidebar selects from the outdoor walk's facets and intercept their changes in the CAPTURE phase
+  // (stopImmediatePropagation) so dashboard.js's indoor network→band→pci cascade doesn't clobber
+  // the outdoor options. Carrier ↔ operator (derived from PCI in the bake).
+  let _outdoorSidebar = null;
+  function wireOutdoorSidebar(frame) {
+    const SEL = { carrier: 'operators', network: 'networks', band: 'bands', pci: 'pcis', channel: 'channels' };
+    const ids = Object.keys(SEL);
+    const readAndPost = () => {
+      const v = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
+      try { frame.contentWindow.postMessage({ source: 'outdoorFilter', operator: v('carrier'), network: v('network'), band: v('band'), pci: v('pci'), channel: v('channel') }, '*'); } catch (e) {}
+    };
+    const populate = (facets) => {
+      ids.forEach((id) => {
+        const el = document.getElementById(id); if (!el) return;
+        const vals = facets[SEL[id]] || [];
+        el.innerHTML = '<option value="">All</option>' + vals.map((x) => '<option value="' + x + '">' + x + '</option>').join('');
+      });
+      readAndPost();
+    };
+    unwireOutdoorSidebar();
+    const onChange = (e) => { readAndPost(); e.stopImmediatePropagation(); };
+    ids.forEach((id) => { const el = document.getElementById(id); if (el) el.addEventListener('change', onChange, true); });
+    _outdoorSidebar = { onChange, ids, onMsg: null };
+    const tryNow = () => { try { const ov = frame.contentWindow.__outdoorView; if (ov && ov.facets) { populate(ov.facets); return true; } } catch (e) {} return false; };
+    if (!tryNow()) {
+      const onMsg = (e) => { if (e.data && e.data.source === 'outdoorReady') populate(e.data.facets); };
+      window.addEventListener('message', onMsg);
+      _outdoorSidebar.onMsg = onMsg;
+    }
+  }
+  function unwireOutdoorSidebar() {
+    if (!_outdoorSidebar) return;
+    _outdoorSidebar.ids.forEach((id) => { const el = document.getElementById(id); if (el) el.removeEventListener('change', _outdoorSidebar.onChange, true); });
+    if (_outdoorSidebar.onMsg) window.removeEventListener('message', _outdoorSidebar.onMsg);
+    _outdoorSidebar = null;
+  }
+
   function applyModeToWorkspace() {
     const dim = window.appMode.dim;
     const badge = document.getElementById('modeBadgeText');
@@ -354,6 +392,9 @@
       const syncDim = () => { try { f.contentWindow.document.getElementById(dim === '3d' ? 'btn3d' : 'btn2d').click(); } catch (e) {} };
       if (f.contentWindow && f.contentWindow.document.readyState === 'complete') syncDim();
       else f.addEventListener('load', syncDim, { once: true });
+      wireOutdoorSidebar(f);
+    } else {
+      unwireOutdoorSidebar();
     }
 
     // Feed an imported model + CSV into the 3D viewer, best-effort.
