@@ -1,0 +1,130 @@
+{
+  "_meta": {
+    "purpose": "Hand-authored registry of the outdoor donor cell sites observed from the FCC HQ 7th-floor indoor walk (7/7) and the ground-level outdoor walk (7/24). Joined against the measured scan data by build_catalog.py to produce base_stations.csv (the transmitter definition for PR #26/#27 and the cross-validation ground truth).",
+    "note_gcp_naming": "In this repo 'GCP' already means the floor-plan ground control points (Data/floorplan_meta.js). These antenna control points are deliberately named base_station_catalog to avoid collision.",
+    "carrier_mcc_mnc": {"Verizon": "311/480", "T-Mobile": "310/260", "AT&T": "310/410, 310/280, 311/180", "Dish": "312/530"},
+    "azimuth_convention": "compass degrees, 0=N, 90=E; direction the panel main lobe points (propagation direction FROM the antenna).",
+    "receiver_reference": {"building": "FCC HQ", "floor": 7, "approx_agl_m": 21.0, "note": "walk-test receiver plane; used as the O2I height reference. The scan has no usable altitude column."}
+  },
+  "sites": [
+    {
+      "site_id": "BS7_forte_hall",
+      "name": "Forte Hall",
+      "address": "Gonzaga College HS campus, I St NW, Washington, DC 20002",
+      "lat": 38.901550064268065,
+      "lon": -77.01142028984886,
+      "status": "live",
+      "role": "anchor",
+      "location_confidence": "high",
+      "height": {
+        "manual_m": 20.0,
+        "prefer_manual": true,
+        "confidence": "medium",
+        "note": "Rooftop panels on the ~6-7 storey brick building. OSM at this coordinate returns the adjacent glass 'Forte Hall' athletic building (education, height 3 m), which is NOT the antenna mount — so the manual estimate is preferred for the anchor. ~6.5 storeys x 3 m ~= 20 m AGL."
+      },
+      "carriers": [
+        {
+          "carrier": "Verizon",
+          "pcis": [396, 397, 398],
+          "bands": [13, 2, 256, 26, 4, 5, 65, 66, 77, 78],
+          "bands_note": "Band 13 (751 MHz, PCI 396/397/398) is the primary validation case. '256' is unusual (no standard LTE/NR band 256) — recorded faithfully, likely a scanner artifact, to be confirmed.",
+          "antenna_type": "panel",
+          "antennas": [
+            {"antenna_id": 1, "pci": 397, "antenna_type": "panel", "azimuth_deg": null, "azimuth_source": "fitted", "azimuth_confidence": "high", "inferred_arrival_bearing_deg": 261, "inferred_rho": 0.69, "note": "Direction inference (infer_direction.py): clean single-lobe arrival ~261 deg (WSW), all four metrics + every band agree, near the site geometry (237 deg). Building-facing sector illuminating the FCC floor from the SW."},
+            {"antenna_id": 2, "pci": 398, "antenna_type": "panel", "azimuth_deg": null, "azimuth_source": "fitted", "azimuth_confidence": "medium", "inferred_arrival_bearing_deg": 267, "inferred_rho": 0.57, "note": "Direction inference: SW/W arrival ~267 deg (broad plateau spanning 237 deg), consistent across NR bands. Also building-facing. Inferred from NR bands (LTE B13 has only 2 points)."},
+            {"antenna_id": 3, "pci": 396, "antenna_type": "panel", "azimuth_deg": null, "azimuth_source": "fitted", "azimuth_confidence": "low", "inferred_arrival_bearing_deg": 285, "inferred_rho": 0.44, "note": "Direction inference: NO clean single-direction fit. Aggregate arrival ~285 deg (rho 0.44); bands disagree (LTE B13 best-fit ~90 deg E rho 0.52, NR ~270-285 deg W); site geometry 237 deg gives rho -0.27. Multipath/reflection-dominated (or LTE-396 != NR-396). CONTRADICTS the sticky-note guess that 396 faces the building -- the data shows 397 & 398 are the building-facing sectors. 3D reflections (PR #27) needed to model 396."}
+          ]
+        }
+      ],
+      "notes": "Highest-certainty site (known rooftop, known carrier, panel sectors). Distance ~415.9 m, arrival bearing ~237 deg to the floor plan (modes_3d.forte_hall_geometry). Direction inference (PR #26 extension, infer_direction.py): PCI 397 (rho 0.69) & 398 (rho 0.57) illuminate the FCC floor from the SW, matching the geometry; PCI 396 does NOT (rho 0.44, bands inconsistent, site 237 deg -> rho -0.27) -- correcting the sticky-note hypothesis that 396 was the building-facing panel."
+    },
+    {
+      "site_id": "BS2_900_nj_ave",
+      "name": "Second Base Station",
+      "address": "900 New Jersey Ave NW, Washington, DC 20002",
+      "lat": 38.90197,
+      "lon": -77.01423,
+      "status": "live",
+      "role": "donor",
+      "location_confidence": "medium",
+      "height": {"manual_m": null, "prefer_manual": false, "confidence": "osm", "note": "OSM shows placeholder height 3 (osm-r1060741) — unreliable; rely on live Overpass fetch, else fallback."},
+      "carriers": [
+        {"carrier": "Verizon", "pcis": [291, 82], "bands": [2, 5, 13, 66], "antenna_type": "unknown", "pcis_note": "user gave '291, 291, 82' — deduped to 291, 82."},
+        {"carrier": "T-Mobile", "pcis": [120, 179, 142, 42, 165, 5, 244, 316, 20, 231, 233, 453, 201, 232, 463, 2, 168, 150], "bands": [41, 4, 66, 2, 12, 71], "antenna_type": "unknown", "pcis_note": "deduped (316 appeared twice)."}
+      ],
+      "notes": "Multi-carrier donor. Location approximate; shape-only validation."
+    },
+    {
+      "site_id": "BS4_55_m_st",
+      "name": "Fourth Base Station",
+      "address": "55 M St NW, Washington, DC 20001",
+      "lat": 38.90587,
+      "lon": -77.01110,
+      "status": "live",
+      "role": "donor",
+      "location_confidence": "medium",
+      "height": {"manual_m": null, "prefer_manual": false, "confidence": "osm", "note": "OSM shows placeholder height 3 (osm-w67094459) — unreliable; rely on live Overpass fetch, else fallback."},
+      "carriers": [
+        {"carrier": "T-Mobile", "pcis": [17, 489, 172, 272, 429, 382, 194, 300, 56, 214], "bands": [41, 66], "antenna_type": "unknown"}
+      ],
+      "notes": "Location approximate; shape-only validation."
+    },
+    {
+      "site_id": "BS5_1140_n_capitol",
+      "name": "Fifth Base Station",
+      "address": "1140 North Capitol St NW, Washington, DC 20002",
+      "lat": 38.90476,
+      "lon": -77.00920,
+      "status": "live",
+      "role": "donor",
+      "location_confidence": "medium",
+      "height": {"manual_m": 33.0, "prefer_manual": false, "confidence": "osm_survey", "note": "OSM osm-w67093724 residence, height 33 m / levels 11 (user survey). Manual fallback; live Overpass fetch confirms/overrides."},
+      "carriers": [
+        {"carrier": "AT&T", "pcis": [67, 185, 171, 172, 173, 293], "bands": [2, 12, 14, 30, 66], "antenna_type": "unknown"}
+      ],
+      "notes": "AT&T donor. Note: AT&T MCC/MNC often multi-valued in the scan, so carrier may decode as null in the measured data — join falls back to PCI."
+    },
+    {
+      "site_id": "BS6_1005_n_capitol",
+      "name": "Sixth Base Station",
+      "address": "1005 North Capitol St NE, Washington, DC 20002",
+      "lat": 38.90309,
+      "lon": -77.00848,
+      "status": "live",
+      "role": "donor",
+      "location_confidence": "medium",
+      "height": {"manual_m": 50.7, "prefer_manual": false, "confidence": "osm_survey", "note": "OSM osm-w535751723 residence, height 50.7 m / levels 14 (user survey). Manual fallback; live Overpass fetch confirms/overrides."},
+      "carriers": [
+        {"carrier": "T-Mobile", "pcis": [71, 169, 256, 199, 255, 54, 194, 193, 359, 140], "bands": [12, 71, 41, 2, 4, 66], "antenna_type": "unknown", "pcis_note": "deduped (199, 255 each appeared twice)."},
+        {"carrier": "AT&T", "pcis": [146, 411], "bands": [2, 30], "antenna_type": "unknown"}
+      ],
+      "notes": "Multi-carrier donor. Location approximate; shape-only validation."
+    },
+    {
+      "site_id": "BS1_901_n_capitol",
+      "name": "First Base Station",
+      "address": "901 North Capitol St, Washington, DC",
+      "lat": null,
+      "lon": null,
+      "status": "na_tv",
+      "role": "excluded",
+      "location_confidence": "none",
+      "height": {"manual_m": null, "prefer_manual": false, "confidence": "none", "note": "Not surveyed."},
+      "carriers": [],
+      "notes": "Appears to be a TV broadcast antenna, not a cellular donor. Coordinates not surveyed. Kept for completeness; excluded from validation."
+    },
+    {
+      "site_id": "BS3_400_ny_ave",
+      "name": "Third Base Station",
+      "address": "400 New York Ave NW, Washington, DC 20001",
+      "lat": 38.90458,
+      "lon": -77.01633,
+      "status": "na_bankrupt",
+      "role": "excluded",
+      "location_confidence": "medium",
+      "height": {"manual_m": 50.7, "prefer_manual": false, "confidence": "osm_survey", "note": "OSM 'Meridian at Mount Vernon Triangle - Phase 2' residence, height 50.7 m / levels 14 (user survey). Informational (site excluded)."},
+      "carriers": [],
+      "notes": "Appears to belong to Starry Spectrum LLC (bankrupt experimental fixed-wireless). Not a live cellular donor. Kept for completeness; excluded from validation."
+    }
+  ]
+}

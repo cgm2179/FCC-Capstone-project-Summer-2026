@@ -30,5 +30,136 @@
     "mask_3d": "/Users/cameronmickle/Documents/Indoor_Walk_Test_7-7/Physics Engine/3D Map Physics/SIM V1 3D/inside_mask.npy",
     "floorplan_meta": "/Users/cameronmickle/Documents/Indoor_Walk_Test_7-7/Physics Engine/2D/STEP_1/floorplan_meta.json"
   },
-  "note": "Scale ANCHORED on m_per_px/cell_size_m (both grids were registered to the same floor plan); footprint IoU is a quality check, not the fit. Outline-vs-outline IoU 0.8929 against a 0.891 ceiling set by fill mismatch. Compose lon/lat -> px with floorplan_meta affine_px_to_lonlat inverse, then px -> voxel with px_to_vox_scale."
+  "note": "Scale ANCHORED on m_per_px/cell_size_m (both grids were registered to the same floor plan); footprint IoU is a quality check, not the fit. Outline-vs-outline IoU 0.8929 against a 0.891 ceiling set by fill mismatch. Compose lon/lat -> px with floorplan_meta affine_px_to_lonlat inverse, then px -> voxel with px_to_vox_scale.",
+  "affine_px_to_vox": [
+    [
+      -0.22642144156815236,
+      0.0,
+      274.15823636180704
+    ],
+    [
+      0.0,
+      0.22642144156815236,
+      -4.0
+    ]
+  ],
+  "registration_v2": {
+    "method": "anchored-scale (no rotation/transpose), 4-flip with natural extent-aligning offset (non-degenerate), flip disambiguated by footprint recall + the dense 2-D-field oracle",
+    "anchored_scale": 0.226421,
+    "chosen_flips": [
+      -1,
+      1
+    ],
+    "offset": [
+      14,
+      -4
+    ],
+    "footprint_recall": 0.831,
+    "oracle_pci": 397,
+    "dense_oracle_rho": 0.432,
+    "measured_rho_pci397": 0.298,
+    "candidates": [
+      {
+        "flips": [
+          1,
+          1
+        ],
+        "offset": [
+          -6,
+          14
+        ],
+        "affine": [
+          [
+            0.22642144156815236,
+            0.0,
+            -6.0
+          ],
+          [
+            0.0,
+            0.22642144156815236,
+            14.0
+          ]
+        ],
+        "recall": 0.723,
+        "dense_oracle_rho": 0.409,
+        "measured_rho": -0.027
+      },
+      {
+        "flips": [
+          1,
+          -1
+        ],
+        "offset": [
+          0,
+          -12
+        ],
+        "affine": [
+          [
+            0.22642144156815236,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            -0.22642144156815236,
+            104.3806209660303
+          ]
+        ],
+        "recall": 0.788,
+        "dense_oracle_rho": -0.318,
+        "measured_rho": -0.246
+      },
+      {
+        "flips": [
+          -1,
+          1
+        ],
+        "offset": [
+          14,
+          -4
+        ],
+        "affine": [
+          [
+            -0.22642144156815236,
+            0.0,
+            274.15823636180704
+          ],
+          [
+            0.0,
+            0.22642144156815236,
+            -4.0
+          ]
+        ],
+        "recall": 0.831,
+        "dense_oracle_rho": 0.432,
+        "measured_rho": 0.298
+      },
+      {
+        "flips": [
+          -1,
+          -1
+        ],
+        "offset": [
+          -2,
+          -6
+        ],
+        "affine": [
+          [
+            -0.22642144156815236,
+            0.0,
+            258.15823636180704
+          ],
+          [
+            0.0,
+            -0.22642144156815236,
+            110.3806209660303
+          ]
+        ],
+        "recall": 0.825,
+        "dense_oracle_rho": -0.283,
+        "measured_rho": -0.118
+      }
+    ],
+    "note": "px(1150x515 records frame) -> voxel: vx=a*px_x+c (axis0=X, floor-plan width; a<0 means voxel +X runs opposite px_x = west), vz=e*px_y+f (axis1=Z, height). Supersedes px_to_vox_scale (scale-only) which scrambled validation (rho 0.048)."
+  }
 }

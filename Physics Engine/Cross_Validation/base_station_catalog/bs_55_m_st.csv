@@ -1,0 +1,11 @@
+site_id,name,address,lat,lon,building_height_m,antenna_agl_m,elev_source,elev_confidence,carrier,network,band,channel,freq_mhz,pci,antenna_id,antenna_type,azimuth_deg,azimuth_source,azimuth_confidence,cellidentity,enb_gnb_id,sector_id,n_points,rsrp_min,rsrp_max,rsrp_mean,rsrp_std,rsrq_mean,sinr_mean,rssi_mean,distance_m,bearing_deg,status,carrier_match,notes
+BS4_55_m_st,Fourth Base Station,"55 M St NW, Washington, DC 20001",38.90587,-77.0111,11.0,11.0,fallback:11.0m,fallback,T-Mobile,,,,,17,,unknown,,,,,,,0,,,,,,,,409.0,308.4,live,none,
+BS4_55_m_st,Fourth Base Station,"55 M St NW, Washington, DC 20001",38.90587,-77.0111,11.0,11.0,fallback:11.0m,fallback,T-Mobile,,,,,489,,unknown,,,,,,,0,,,,,,,,409.0,308.4,live,none,
+BS4_55_m_st,Fourth Base Station,"55 M St NW, Washington, DC 20001",38.90587,-77.0111,11.0,11.0,fallback:11.0m,fallback,T-Mobile,,,,,172,,unknown,,,,,,,0,,,,,,,,409.0,308.4,live,none,
+BS4_55_m_st,Fourth Base Station,"55 M St NW, Washington, DC 20001",38.90587,-77.0111,11.0,11.0,fallback:11.0m,fallback,T-Mobile,nr_fr1,41,502110,2510.55,272,,unknown,,,,5420441913,,,10,-123.49,-116.0,-119.5,2.78,-13.99,2.75,-89.41,409.0,308.4,live,pci_only,
+BS4_55_m_st,Fourth Base Station,"55 M St NW, Washington, DC 20001",38.90587,-77.0111,11.0,11.0,fallback:11.0m,fallback,T-Mobile,,,,,429,,unknown,,,,,,,0,,,,,,,,409.0,308.4,live,none,
+BS4_55_m_st,Fourth Base Station,"55 M St NW, Washington, DC 20001",38.90587,-77.0111,11.0,11.0,fallback:11.0m,fallback,T-Mobile,,,,,382,,unknown,,,,,,,0,,,,,,,,409.0,308.4,live,none,
+BS4_55_m_st,Fourth Base Station,"55 M St NW, Washington, DC 20001",38.90587,-77.0111,11.0,11.0,fallback:11.0m,fallback,T-Mobile,lte,66,66786,2145.0,194,,unknown,,,,33510402,130900,2,47,-124.72,-100.97,-115.91,6.15,-32.43,-14.29,-67.9,409.0,308.4,live,exact,
+BS4_55_m_st,Fourth Base Station,"55 M St NW, Washington, DC 20001",38.90587,-77.0111,11.0,11.0,fallback:11.0m,fallback,T-Mobile,,,,,300,,unknown,,,,,,,0,,,,,,,,409.0,308.4,live,none,
+BS4_55_m_st,Fourth Base Station,"55 M St NW, Washington, DC 20001",38.90587,-77.0111,11.0,11.0,fallback:11.0m,fallback,T-Mobile,,,,,56,,unknown,,,,,,,0,,,,,,,,409.0,308.4,live,none,
+BS4_55_m_st,Fourth Base Station,"55 M St NW, Washington, DC 20001",38.90587,-77.0111,11.0,11.0,fallback:11.0m,fallback,T-Mobile,,,,,214,,unknown,,,,,,,0,,,,,,,,409.0,308.4,live,none,

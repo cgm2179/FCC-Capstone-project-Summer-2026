@@ -1,0 +1,98 @@
+{
+ "grid_shape": [
+  470,
+  28,
+  365
+ ],
+ "cell_size_m": 3.0,
+ "m_per_unit": 1.0,
+ "origin_units": [
+  -674.7708,
+  0.0,
+  -495.3193
+ ],
+ "ceiling_height_m": 79.766,
+ "materials": [
+  {
+   "id": 0,
+   "name": "air",
+   "loss_db": 0.0,
+   "loss_per_m_db": 0.0
+  },
+  {
+   "id": 1,
+   "name": "drywall_partition",
+   "loss_db": 4.0,
+   "loss_per_m_db": 0.0
+  },
+  {
+   "id": 2,
+   "name": "concrete_masonry",
+   "loss_db": 15.0,
+   "loss_per_m_db": 0.0
+  },
+  {
+   "id": 3,
+   "name": "core_service_area",
+   "loss_db": 20.0,
+   "loss_per_m_db": 0.0
+  },
+  {
+   "id": 4,
+   "name": "furniture_clutter",
+   "loss_db": 0.0,
+   "loss_per_m_db": 0.3
+  },
+  {
+   "id": 5,
+   "name": "exterior_glass",
+   "loss_db": 3.0,
+   "loss_per_m_db": 0.0
+  }
+ ],
+ "freqs_mhz": [
+  619.0,
+  627.0,
+  751.0,
+  1935.0,
+  2442.0,
+  2510.0,
+  2600.0,
+  3500.0,
+  3710.0,
+  5500.0,
+  6125.0
+ ],
+ "physics": {
+  "model": "crossinglut_fresnel_airy_3d_eikonal_v2",
+  "n_exp": 2.0,
+  "d0_m": 1.0,
+  "fspl_const_db": -27.56,
+  "ray_step_cells": 0.5,
+  "use_satobs": true,
+  "fallback_obstruction_db": {
+   "obstruction_linear_db": 40.0,
+   "obstruction_sat_extra_db": 50.0
+  }
+ },
+ "geo": {
+  "epsg": 3857,
+  "merc_anchor": [
+   8572395.0,
+   4707865.5
+  ],
+  "merc_scale": 0.778243,
+  "merc_lat": 38.9,
+  "origin_lonlat": [
+   -76.9993457,
+   38.8991017
+  ],
+  "building_class": 3
+ },
+ "freq_loss_mult": {
+  "2442": 1.0,
+  "3500": 1.15,
+  "5500": 1.3,
+  "6125": 1.4
+ }
+}

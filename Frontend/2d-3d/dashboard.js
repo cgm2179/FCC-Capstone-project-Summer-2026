@@ -26,6 +26,22 @@
     const vmaxEl = document.getElementById('vmax');
     const sizeEl = document.getElementById('size');
     const statsEl = document.getElementById('stats');
+    // OSM under-layer controls (PR #25) live in the map-modes row, which the workspace
+    // router (re)builds after this script's top-level runs — so query them fresh at call
+    // time (load-time refs go stale) and listen via delegation on document (below).
+    const osmBasemapMode = () => { const el = document.getElementById('osmBasemap'); return el ? el.value : 'off'; };
+    const planOpacity = () => { const el = document.getElementById('floorOpacity'); return el ? Number(el.value) / 100 : 1; };
+    // 2D O2I cross-validation overlay (PR #26): selector value + lazy population.
+    const crossvalKey = () => { const el = document.getElementById('crossvalSelect'); return el ? el.value : ''; };
+    function populateCrossval() {
+      const sel = document.getElementById('crossvalSelect');
+      if (!sel || sel.dataset.filled === '1') return;
+      for (const k of (window.PL2D_CROSSVAL_KEYS || [])) {
+        const e = (window.PL2D_CROSSVAL || {})[k] || {};
+        sel.add(new Option(e.label || k, k));
+      }
+      sel.dataset.filled = '1';
+    }
     const tabMapBtn = document.getElementById('tabMapBtn');
     const tabHistogramBtn = document.getElementById('tabHistogramBtn');
     const tabTimeBtn = document.getElementById('tabTimeBtn');
@@ -57,6 +73,19 @@
 
     let currentTab = 'map';
     let playTimer = null;
+    let plotKind = null;   // 'cart' | 'mapbox' | 'leaflet' — Map Coverage surface, to purge on switch (PR #25)
+    let leafletMap = null, leafletDataLayer = null, leafletFloorOverlay = null, leafletLegend = null;
+
+    // Compact Viridis ramp for the Leaflet live-OSM markers (PR #25) — Plotly owns its own.
+    const VIRIDIS = ['#440154','#482878','#3e4a89','#31688e','#26828e','#1f9e89','#35b779','#6ece58','#b5de2b','#fde725'];
+    function _hexRgb(h) { const n = parseInt(h.slice(1), 16); return [(n>>16)&255, (n>>8)&255, n&255]; }
+    function viridis(t) {
+      t = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
+      const x = t * (VIRIDIS.length - 1), i = Math.floor(x), f = x - i;
+      if (i >= VIRIDIS.length - 1) return VIRIDIS[VIRIDIS.length - 1];
+      const a = _hexRgb(VIRIDIS[i]), b = _hexRgb(VIRIDIS[i + 1]);
+      return `rgb(${Math.round(a[0]+f*(b[0]-a[0]))},${Math.round(a[1]+f*(b[1]-a[1]))},${Math.round(a[2]+f*(b[2]-a[2]))})`;
+    }
 
     function uniqueSorted(values) {
       return [...new Set(values)].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
@@ -521,6 +550,18 @@
     // respond to the Time Elapsed Playback slider. The time-scoped view lives
     // entirely on the Time Elapsed Playback tab (see renderPlayback below).
     function render() {
+      populateCrossval();
+      const cvk = crossvalKey();
+      if (cvk && window.PL2D_CROSSVAL && window.PL2D_CROSSVAL[cvk]) { renderCrossval(cvk); return; }
+      const cs = document.getElementById('crossvalStats'); if (cs) cs.textContent = '';
+      if (osmBasemapMode() === 'live') { renderLeaflet(); return; }
+      // non-live: Plotly surface owns #plot; hide the Leaflet surface (unless in 3D CAD mode)
+      const in3D = !!(document.getElementById('mapMode3dBtn') &&
+                      document.getElementById('mapMode3dBtn').classList.contains('active'));
+      const lmDiv = document.getElementById('leafletMap');
+      if (lmDiv) lmDiv.style.display = 'none';
+      const plotDiv = document.getElementById('plot');
+      if (plotDiv && !in3D) plotDiv.style.display = '';
       const metric = metricEl.value;
       const data = filtered(metric);
       const cmin = Number(vminEl.value);
@@ -593,13 +634,273 @@
         },
         xaxis: {visible: false, range: [0, 1150] },
         yaxis: {visible: false, range: [515, 0], scaleanchor: 'x'},
-        images: [floorPlanImage],
+        images: basemapImages(),
         paper_bgcolor: '#ffffff',
         plot_bgcolor: '#ffffff'
       };
 
+      if (plotKind === 'mapbox') Plotly.purge(plotEl);   // cartesian<->mapbox needs a clean slate
+      plotKind = 'cart';
       Plotly.react(plotEl, traces, layout, {responsive: true, displaylogo: false});
       updateStats(data, metric);
+    }
+
+    // Layout images for Map Coverage: optional OSM basemap below the (opacity-faded)
+    // floor plan. INDOOR_BASEMAP is warped to the exact 1150x515 plan frame, so it
+    // drops straight in. Absent asset -> just the plan (unchanged behaviour).
+    function basemapImages() {
+      const fp = Object.assign({}, floorPlanImage, { opacity: planOpacity() });
+      if (osmBasemapMode() === 'static' && window.INDOOR_BASEMAP) {
+        return [{
+          source: window.INDOOR_BASEMAP.source,
+          xref: 'x', yref: 'y', x: 0, y: 0, sizex: 1150, sizey: 515,
+          xanchor: 'left', yanchor: 'top', sizing: 'stretch', layer: 'below'
+        }, fp];
+      }
+      return [fp];
+    }
+
+    // The 4 floor-plan corners in lon/lat (TL, TR, BR, BL) — a rotated quad, since the
+    // plan is -7.33 deg off north. Same math as georef.pxToLonlat, inlined (dashboard.js
+    // is a classic script and can't import the ES module).
+    function planCornersLonLat() {
+      const A = (window.FLOORPLAN_META || {}).affine_px_to_lonlat;
+      if (!A) return null;
+      const W = 1150, H = 515;
+      const f = (px, py) => [A[0][0] * px + A[0][1] * py + A[0][2],
+                             A[1][0] * px + A[1][1] * py + A[1][2]];
+      return [f(0, 0), f(W, 0), f(W, H), f(0, H)];
+    }
+
+    // Live OSM path: Plotly Mapbox (open-street-map, no token). Floor plan draped on the
+    // 4 lon/lat corners; RSRP from record lat/long; base-station pins + Forte Hall bearing
+    // line from window.BASE_STATIONS. Separate from render() because the pixel-space plot
+    // and the mapbox plot are different Plotly worlds.
+    function renderMapbox() {
+      const metric = metricEl.value;
+      const data = filtered(metric);
+      const cmin = Number(vminEl.value);
+      const cmax = Number(vmaxEl.value);
+      const size = Number(sizeEl.value);
+      const mode = coverageEl.value;
+      const corners = planCornersLonLat();
+      const lls = corners || data.map(r => [r.longitude, r.latitude]);
+      const center = {
+        lon: lls.reduce((a, c) => a + c[0], 0) / lls.length,
+        lat: lls.reduce((a, c) => a + c[1], 0) / lls.length
+      };
+      const op = planOpacity();
+
+      const traces = [];
+      if (mode === 'gradient') {
+        traces.push({
+          type: 'densitymapbox',
+          lon: data.map(r => r.longitude), lat: data.map(r => r.latitude),
+          z: metricValues(data, metric),
+          radius: Math.max(8, size * 2), colorscale: 'Viridis',
+          zmin: cmin, zmax: cmax, opacity: 0.75,
+          colorbar: { title: `${metric.toUpperCase()} (${units[metric] || ''})`, len: 0.8, thickness: 16 },
+          hovertemplate: `${metric.toUpperCase()}: %{z:.2f}<extra></extra>`
+        });
+      } else {
+        traces.push({
+          type: 'scattermapbox', mode: 'markers',
+          lon: data.map(r => r.longitude), lat: data.map(r => r.latitude),
+          marker: {
+            size: Math.max(6, Math.floor(size / 2)), color: metricValues(data, metric),
+            colorscale: 'Viridis', cmin, cmax, opacity: 0.9,
+            colorbar: { title: `${metric.toUpperCase()} (${units[metric] || ''})`, len: 0.8, thickness: 16 }
+          },
+          hovertemplate: `${metric.toUpperCase()}: %{marker.color:.2f}<extra></extra>`
+        });
+      }
+
+      const bs = (window.BASE_STATIONS || []).filter(s => s.lat != null);
+      if (bs.length) {
+        traces.push({
+          type: 'scattermapbox', mode: 'markers+text',
+          lon: bs.map(s => s.lon), lat: bs.map(s => s.lat),
+          text: bs.map(s => s.name || s.site_id), textposition: 'top right',
+          marker: { size: 13, color: bs.map(s => s.status === 'live' ? '#c0392b' : '#7f8c8d') },
+          hovertext: bs.map(s => `${s.name}<br>${(s.sectors || []).length} sectors · ${s.distance_m} m · arrival ${s.bearing_deg}°`),
+          hoverinfo: 'text', showlegend: false
+        });
+        const fh = bs.find(s => s.site_id === 'BS7_forte_hall');
+        if (fh) {
+          traces.push({
+            type: 'scattermapbox', mode: 'lines',
+            lon: [fh.lon, center.lon], lat: [fh.lat, center.lat],
+            line: { width: 2, color: '#c0392b' }, opacity: 0.6,
+            hoverinfo: 'skip', showlegend: false
+          });
+        }
+      }
+
+      const layout = {
+        margin: { l: 0, r: 0, t: 40, b: 0 },
+        title: {
+          text: `${(networkEl.value === 'all' ? 'All Networks' : networkEl.value)} · ${(bandEl.value === 'all' ? 'All Bands' : ('Band ' + bandEl.value))} · ${(pciEl.value === 'all' ? 'All PCI' : ('PCI ' + pciEl.value))} · ${metric.toUpperCase()} · OSM live`,
+          x: 0.02
+        },
+        mapbox: {
+          style: 'open-street-map', center, zoom: 16.4,
+          layers: corners ? [{
+            sourcetype: 'image', source: floorPlanImage.source,
+            coordinates: corners, below: 'traces', opacity: op
+          }] : []
+        },
+        paper_bgcolor: '#ffffff'
+      };
+
+      if (plotKind === 'cart') Plotly.purge(plotEl);
+      plotKind = 'mapbox';
+      Plotly.react(plotEl, traces, layout, { responsive: true, displaylogo: false });
+      updateStats(data, metric);
+    }
+
+    // Live OSM via Leaflet with muted gray CartoDB Positron tiles (PR #25) — the RF data
+    // reads more clearly on gray than on the colourful OSM raster. Floor plan draped as a
+    // rotated image overlay; RSRP as Viridis circle markers; base-station pins + Forte Hall
+    // bearing line. Falls back to the Plotly-mapbox path if Leaflet didn't load.
+    function renderLeaflet() {
+      if (typeof L === 'undefined') { renderMapbox(); return; }
+      const in3D = !!(document.getElementById('mapMode3dBtn') &&
+                      document.getElementById('mapMode3dBtn').classList.contains('active'));
+      const lmDiv = document.getElementById('leafletMap');
+      const plotDiv = document.getElementById('plot');
+      if (in3D) { if (lmDiv) lmDiv.style.display = 'none'; return; }   // 3D CAD view owns the surface
+      if (plotDiv) plotDiv.style.display = 'none';
+      if (lmDiv) lmDiv.style.display = 'block';
+      if (plotKind === 'cart' || plotKind === 'mapbox') Plotly.purge(plotEl);
+      plotKind = 'leaflet';
+
+      const metric = metricEl.value;
+      const data = filtered(metric);
+      const cmin = Number(vminEl.value), cmax = Number(vmaxEl.value);
+      const size = Number(sizeEl.value);
+      const op = planOpacity();
+      const corners = planCornersLonLat();     // [TL,TR,BR,BL] as [lon,lat]
+      const cLat = corners ? (corners[0][1] + corners[2][1]) / 2 : (data[0] && data[0].latitude) || 38.9036;
+      const cLon = corners ? (corners[0][0] + corners[2][0]) / 2 : (data[0] && data[0].longitude) || -77.0074;
+
+      if (!leafletMap) {
+        leafletMap = L.map('leafletMap', { preferCanvas: true }).setView([cLat, cLon], 17);
+        L.tileLayer('https://{s}.basemap.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+          subdomains: 'abcd', maxZoom: 20,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        }).addTo(leafletMap);
+        leafletDataLayer = L.layerGroup().addTo(leafletMap);
+      }
+
+      // floor-plan drape (rotated overlay if the plugin is present; else skip — data still shows)
+      if (leafletFloorOverlay) { leafletMap.removeLayer(leafletFloorOverlay); leafletFloorOverlay = null; }
+      if (corners && floorPlanImage && floorPlanImage.source && L.imageOverlay && L.imageOverlay.rotated) {
+        leafletFloorOverlay = L.imageOverlay.rotated(
+          floorPlanImage.source,
+          L.latLng(corners[0][1], corners[0][0]),   // top-left
+          L.latLng(corners[1][1], corners[1][0]),   // top-right
+          L.latLng(corners[3][1], corners[3][0]),   // bottom-left
+          { opacity: op, interactive: false }
+        ).addTo(leafletMap);
+      }
+
+      // RF points
+      leafletDataLayer.clearLayers();
+      const span = (cmax - cmin) || 1;
+      const vals = metricValues(data, metric);
+      const rad = Math.max(3, Math.floor(size / 3));
+      for (let i = 0; i < data.length; i++) {
+        const r = data[i], v = vals[i];
+        if (!Number.isFinite(r.latitude) || !Number.isFinite(r.longitude)) continue;
+        L.circleMarker([r.latitude, r.longitude], {
+          radius: rad, fillColor: viridis((v - cmin) / span),
+          color: '#111', weight: 0.3, fillOpacity: 0.9
+        }).bindPopup(`${metric.toUpperCase()}: ${Number.isFinite(v) ? v.toFixed(2) : '—'} ${units[metric] || ''}`
+          + `<br>PCI ${r.pci ?? '—'} · ${r.network || ''} B${r.band ?? '—'}`)
+          .addTo(leafletDataLayer);
+      }
+
+      // base-station pins + Forte Hall bearing line
+      const bs = (window.BASE_STATIONS || []).filter(s => s.lat != null);
+      for (const s of bs) {
+        L.circleMarker([s.lat, s.lon], {
+          radius: 7, fillColor: s.status === 'live' ? '#c0392b' : '#7f8c8d',
+          color: '#fff', weight: 1.5, fillOpacity: 1
+        }).bindTooltip(`${s.name} · ${(s.sectors || []).length} sectors · ${s.distance_m} m · arr ${s.bearing_deg}°`,
+          { direction: 'top' }).addTo(leafletDataLayer);
+      }
+      const fh = bs.find(s => s.site_id === 'BS7_forte_hall');
+      if (fh) {
+        L.polyline([[fh.lat, fh.lon], [cLat, cLon]],
+          { color: '#c0392b', weight: 2, opacity: 0.6, dashArray: '6 4' }).addTo(leafletDataLayer);
+      }
+
+      if (corners) {
+        leafletMap.fitBounds(L.latLngBounds(corners.map(c => [c[1], c[0]])).pad(0.6));
+      }
+
+      // legend
+      if (leafletLegend) leafletMap.removeControl(leafletLegend);
+      leafletLegend = L.control({ position: 'bottomright' });
+      leafletLegend.onAdd = () => {
+        const d = L.DomUtil.create('div');
+        d.style.cssText = 'background:#fff;padding:6px 8px;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,.3);font:12px sans-serif;width:140px;';
+        d.innerHTML = `${metric.toUpperCase()} (${units[metric] || ''})`
+          + `<div style="height:10px;margin:4px 0;background:linear-gradient(90deg,${VIRIDIS.join(',')});"></div>`
+          + `<div style="display:flex;justify-content:space-between;"><span>${cmin}</span><span>${cmax}</span></div>`;
+        return d;
+      };
+      leafletLegend.addTo(leafletMap);
+
+      leafletMap.invalidateSize();
+      updateStats(data, metric);
+    }
+
+    // PR #26: overlay the 2D O2I predicted RSRP heatmap (viridis, from export_web.py) under
+    // the measured points coloured by residual (measured − predicted, level-calibrated).
+    function renderCrossval(key) {
+      const e = window.PL2D_CROSSVAL[key];
+      const lmDiv = document.getElementById('leafletMap'); if (lmDiv) lmDiv.style.display = 'none';
+      const plotDiv = document.getElementById('plot'); if (plotDiv) plotDiv.style.display = '';
+      if (plotKind === 'mapbox' || plotKind === 'leaflet') Plotly.purge(plotEl);
+      plotKind = 'cart';
+      const pts = e.points || [];
+      const absr = pts.map(p => Math.abs(p.resid)).sort((a, b) => a - b);
+      const lim = Math.max(6, absr.length ? absr[Math.floor(absr.length * 0.95)] : 6);
+      const traces = [{
+        type: 'scattergl', mode: 'markers',
+        x: pts.map(p => p.px), y: pts.map(p => p.py),
+        marker: {
+          size: 10, color: pts.map(p => p.resid), colorscale: 'RdBu', reversescale: true,
+          cmin: -lim, cmax: lim, cmid: 0, line: { color: '#222', width: 0.5 },
+          colorbar: { title: 'measured − predicted (dB)', len: 0.8, thickness: 16 }
+        },
+        text: pts.map(p => `measured ${p.meas} · predicted ${p.pred_cal} · resid ${p.resid} dB`),
+        hovertemplate: '%{text}<extra></extra>', showlegend: false
+      }];
+      const pred = {
+        source: e.rsrp_png, xref: 'x', yref: 'y', x: 0, y: 0, sizex: 1150, sizey: 515,
+        xanchor: 'left', yanchor: 'top', sizing: 'stretch', layer: 'below', opacity: 0.85
+      };
+      const fp = Object.assign({}, floorPlanImage, { opacity: 0.30 });
+      const sign = e.level_cal_db >= 0 ? '+' : '';
+      const layout = {
+        margin: { l: 12, r: 16, t: 54, b: 12 },
+        title: {
+          text: `Predicted 2D O2I vs measured — ${e.label}`
+            + `<br><sub>ρ ${e.spearman_rho} · RMSE(level-cal) ${e.rmse_after_cal_db} dB · `
+            + `level ${sign}${e.level_cal_db} dB · n ${e.n} · measured mean ${e.measured_mean} dBm · `
+            + `viridis = predicted RSRP, dots = residual</sub>`,
+          x: 0.02, font: { size: 13 }
+        },
+        xaxis: { visible: false, range: [0, 1150] },
+        yaxis: { visible: false, range: [515, 0], scaleanchor: 'x' },
+        images: [pred, fp],
+        paper_bgcolor: '#ffffff', plot_bgcolor: '#ffffff'
+      };
+      Plotly.react(plotEl, traces, layout, { responsive: true, displaylogo: false });
+      const stats = document.getElementById('crossvalStats');
+      if (stats) stats.textContent = `ρ ${e.spearman_rho} · RMSE ${e.rmse_after_cal_db} dB · n ${e.n}`;
     }
 
     // m:ss elapsed-duration label (e.g. "2:05"), independent of clock format.
@@ -919,6 +1220,30 @@
     tabTimeBtn.addEventListener('click', () => setActiveTab('time'));
     document.getElementById('tabSimBtn')
       .addEventListener('click', () => setActiveTab('sim'));
+
+    // OSM under-layer controls (PR #25) — Map Coverage only. Delegated on document so
+    // they work even though the map-modes row is (re)built after this script runs.
+    document.addEventListener('change', (e) => {
+      if (!e.target) return;
+      if ((e.target.id === 'osmBasemap' || e.target.id === 'crossvalSelect') && currentTab === 'map') refresh();
+    });
+    document.addEventListener('input', (e) => {
+      if (e.target && e.target.id === 'floorOpacity' && currentTab === 'map') refresh();
+    });
+    // Keep the Leaflet surface in sync with the 2D/3D map-mode toggle (also delegated).
+    document.addEventListener('click', (e) => {
+      if (!e.target) return;
+      if (e.target.id === 'mapMode3dBtn') {
+        const lm = document.getElementById('leafletMap'); if (lm) lm.style.display = 'none';
+      } else if (e.target.id === 'mapMode2dBtn' && currentTab === 'map') {
+        setTimeout(refresh, 0);   // let viewer3d.setMode restore #plot first, then re-apply
+      }
+    });
+    // This dashboard is indoor by default; hide the OSM control only for an explicitly outdoor workspace.
+    (function gateOsmCtl() {
+      const ctl = document.getElementById('osmBasemapCtl');
+      if (ctl && window.appMode && window.appMode.environment === 'outdoor') ctl.style.display = 'none';
+    })();
 
     clockFormatEl.addEventListener('change', () => {
       updateTimeLabel();

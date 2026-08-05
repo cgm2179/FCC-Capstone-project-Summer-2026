@@ -22,6 +22,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as CANNON from 'cannon-es';
 import { smoothSurfaceForClass } from './smooth_surface.js';   // A2: smooth surface from the voxels
 import { voxelizeTriangles, objectToTriangles } from './voxelize_browser.js';   // B: imported-model voxelizer
+import { makeMarchPL } from './solve_core.js';   // shared analytic kernel (also runs in sim_worker.js)
 
 const CATALOG   = window.SIM3D_ANTENNA_CATALOG;
 const INDOOR_ASSETS = window.SIM3D_ASSETS;
@@ -38,6 +39,19 @@ const WIFI_BANDS = [
   { v: 5180, label: '5 GHz · UNII-1 ch 36 (5180 MHz)' },
   { v: 5500, label: '5 GHz · UNII-2 ch 100 (5500 MHz)' },
   { v: 5745, label: '5 GHz · UNII-3 ch 149 (5745 MHz)' },
+];
+
+// Cellular band presets (the donor bands the walk / base-station catalog observed). value = MHz.
+// Used by the "Coverage type: Cellular" toggle so the city runs at the real carrier frequencies.
+const CELLULAR_BANDS = [
+  { v: 619, label: 'n71 · 617 MHz (T-Mobile 600)' },
+  { v: 751, label: 'B13 · 751 MHz (Verizon 700c — Forte Hall)' },
+  { v: 884.5, label: 'n5/n26 · 884 MHz (850)' },
+  { v: 1970, label: 'B2/B25 · 1970 MHz (PCS)' },
+  { v: 2145, label: 'B4/B66 · 2145 MHz (AWS)' },
+  { v: 2174.5, label: 'n65/n66 · 2175 MHz (AWS-ext)' },
+  { v: 2355, label: 'B30 · 2355 MHz (WCS)' },
+  { v: 3710, label: 'n77/n78 · 3710 MHz (C-band)' },
 ];
 
 // ---- DOM handles ----
@@ -76,7 +90,9 @@ const dispCad       = document.getElementById('disp3dCad');
 const dispVoxels    = document.getElementById('disp3dVoxels');
 const dispWash      = document.getElementById('disp3dWash');
 const modelFile     = document.getElementById('sim3dModelFile');    // Phase B: load a model to simulate
-const modelCell     = document.getElementById('sim3dModelCell');
+const sizeX         = document.getElementById('sim3dSizeX');         // sandbox real-world bounds (m)
+const sizeY         = document.getElementById('sim3dSizeY');
+const sizeZ         = document.getElementById('sim3dSizeZ');
 const modelRevert   = document.getElementById('sim3dModelRevert');
 const modelNote     = document.getElementById('sim3dModelNote');
 const metaEl        = document.getElementById('sim3dMeta');
@@ -128,8 +144,22 @@ function fillAntennaSelect(sel, swatchEl) {
 }
 fillAntennaSelect(txType, txSwatch);
 fillAntennaSelect(rxType, null);
-if (wfBand) WIFI_BANDS.forEach((b) => {
-  const o = document.createElement('option'); o.value = b.v; o.textContent = b.label; wfBand.appendChild(o);
+// Coverage type (WiFi | Cellular) swaps the band <select> between the two presets. marchPL and the
+// cached/surrogate readers are already frequency-driven, so this needs no physics change.
+const covType = document.getElementById('cov3dType');
+function populateBands(list) {
+  if (!wfBand) return;
+  const prev = wfBand.value;
+  wfBand.innerHTML = '';
+  list.forEach((b) => {
+    const o = document.createElement('option'); o.value = b.v; o.textContent = b.label; wfBand.appendChild(o);
+  });
+  if (list.some((b) => String(b.v) === prev)) wfBand.value = prev;   // keep the band if still offered
+}
+populateBands(WIFI_BANDS);
+if (covType) covType.addEventListener('change', () => {
+  populateBands(covType.value === 'cellular' ? CELLULAR_BANDS : WIFI_BANDS);
+  if (wfBand) wfBand.dispatchEvent(new Event('change'));            // re-solve the field at the new band
 });
 
 // ---- three.js + cannon-es scene (lazy) ----
@@ -337,10 +367,12 @@ function buildBuilding() {
   }
   // Voxels are the physics / volume grid — hide them visually unless the user opts in.
   applyGeometryVisibility();
-  // Default prediction-plane height once extent is known (WinProp-style wash).
+  // Default prediction-plane height once extent is known (WinProp-style wash). Outdoor drops to
+  // ~street level (a pedestrian coverage plane), not the mid-scene default the indoor floor wants.
   if (DISPLAY.plane && DISPLAY.sliceY == null) {
-    DISPLAY.sliceY = extent[1] * 0.45;
-    if (dispHeight) { dispHeight.value = '45'; dispHeight.disabled = false; }
+    const frac = ACTIVE_FIXED_SCENE === 'outdoor' ? 0.05 : 0.45;
+    DISPLAY.sliceY = extent[1] * frac;
+    if (dispHeight) { dispHeight.value = String(Math.round(frac * 100)); dispHeight.disabled = false; }
     if (dispPlaneBtn) {
       dispPlaneBtn.textContent = 'Plane';
       dispPlaneBtn.classList.add('active');
@@ -354,6 +386,7 @@ function buildBuilding() {
 function disposeBuilding() {
   disposeSurface();
   disposeCad();
+  disposeOsmGround();
   for (const m of wallMeshes) {
     scene.remove(m);
     if (m.geometry) m.geometry.dispose();
@@ -398,11 +431,14 @@ function buildSmoothSurface() {
     g.setIndex(new THREE.BufferAttribute(surf.indices, 1));
     g.computeVertexNormals();
     const st = CLASS_STYLE[cls] || DEFAULT_STYLE;
+    // Outdoor: keep the buildings translucent so the street-level coverage wash reads through them
+    // (an opaque city block hides the very field the user came to see).
+    const op = ACTIVE_FIXED_SCENE === 'outdoor' ? Math.min(st.opacity, 0.35) : st.opacity;
     const mat = new THREE.MeshStandardMaterial({
       color: palette[cls] || new THREE.Color(0x9fb0bf),
-      transparent: st.opacity < 1, opacity: st.opacity,
+      transparent: op < 1, opacity: op,
       roughness: st.roughness, metalness: st.metalness,
-      depthWrite: st.opacity > 0.6, side: THREE.DoubleSide,
+      depthWrite: op > 0.6, side: THREE.DoubleSide,
       clippingPlanes: GEOM_CLIP,
     });
     const mesh = new THREE.Mesh(g, mat);
@@ -579,6 +615,9 @@ function mountCadObject(object, ext) {
 }
 async function ensureCadMesh() {
   if (cadRoot || ACTIVE_FIXED_SCENE !== 'indoor' || RUNTIME_SCENE) return cadRoot;
+  // Import-driven indoor: when the user imported their own model, do NOT load the built-in 7th-floor
+  // CAD — their model (via maybeLoadRouterImport) is the scene. Removes the built-in for indoor mode.
+  if (window.appImport && window.appImport.modelFiles && window.appImport.modelFiles.length) return null;
   if (cadLoading) return cadLoading;
   setStatus('Loading CAD model…');
   cadLoading = (async () => {
@@ -658,6 +697,7 @@ function setFixedScene(kind) {
   COLLISION = collision;
   MANIFEST = (ACTIVE_ASSETS && ACTIVE_ASSETS.manifest_3d) || {};
   GRID3 = null; GDIMS = null; INSIDE3 = null;
+  DISPLAY.sliceY = null;                 // recompute the prediction-plane height for the new scene
   CELL_M = MANIFEST.cell_size_m || 0.3;
   RUNTIME_SCENE = null;
   window.SIM3D_VOLUME = null;
@@ -678,12 +718,68 @@ function setFixedScene(kind) {
     buildBuilding();
     buildMs = Math.round(performance.now() - t0);
     if (outdoor && DISPLAY.smooth) setGeometryMode();
+    if (outdoor) buildOsmGround();                 // drape the 2D OSM map under the 3D city
     refreshMeta();
     setStatus((outdoor ? 'Outdoor city tile' : 'Indoor 7th-floor scene') + ' loaded · ' + readyStatus());
   } else {
     resetFrameForActiveScene(false);
   }
   return true;
+}
+
+// ---- 2D OSM basemap draped on the ground of the outdoor scene --------------
+// A north-up OpenStreetMap raster for the tile's lon/lat bbox, stitched from slippy tiles in the
+// browser and laid flat at y≈0 UNDER the voxel buildings — the "2D map under the 3D city" context.
+// The tile is EPSG:3857-georeferenced (manifest bbox_lonlat); the voxel X axis runs WEST (see the
+// voxelizer), so the raster is oriented to line its streets up with the buildings.
+let osmGround = null;
+function disposeOsmGround() {
+  if (!osmGround) return;
+  scene.remove(osmGround);
+  osmGround.geometry.dispose();
+  if (osmGround.material.map) osmGround.material.map.dispose();
+  osmGround.material.dispose();
+  osmGround = null;
+}
+async function buildOsmGround() {
+  disposeOsmGround();
+  const bbox = MANIFEST.bbox_lonlat;
+  if (!bbox || !extent || MANIFEST.epsg !== 3857) return;          // needs the georeferenced tile
+  const [lonW, latS, lonE, latN] = bbox;
+  const Z = 17, TS = 256;
+  const toTile = (lon, lat) => { const n = 2 ** Z, lr = lat * Math.PI / 180;
+    return [(lon + 180) / 360 * n, (1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2 * n]; };
+  const [fxW, fyN] = toTile(lonW, latN), [fxE, fyS] = toTile(lonE, latS);
+  const x0 = Math.floor(fxW), x1 = Math.floor(fxE), y0 = Math.floor(fyN), y1 = Math.floor(fyS);
+  const cnv = document.createElement('canvas');
+  cnv.width = (x1 - x0 + 1) * TS; cnv.height = (y1 - y0 + 1) * TS;
+  const cx = cnv.getContext('2d');
+  const jobs = [];
+  for (let tx = x0; tx <= x1; tx++) for (let ty = y0; ty <= y1; ty++) {
+    jobs.push(new Promise((res) => { const im = new Image(); im.crossOrigin = 'anonymous';
+      im.onload = () => { cx.drawImage(im, (tx - x0) * TS, (ty - y0) * TS); res(); };
+      im.onerror = () => res();
+      im.src = `https://tile.openstreetmap.org/${Z}/${tx}/${ty}.png`; }));
+  }
+  await Promise.all(jobs);
+  if (ACTIVE_FIXED_SCENE !== 'outdoor') return;                    // scene changed while fetching
+  const sx0 = (fxW - x0) * TS, sy0 = (fyN - y0) * TS, sw = (fxE - fxW) * TS, sh = (fyS - fyN) * TS;
+  const crop = document.createElement('canvas');
+  crop.width = Math.max(1, Math.round(sw)); crop.height = Math.max(1, Math.round(sh));
+  crop.getContext('2d').drawImage(cnv, sx0, sy0, sw, sh, 0, 0, crop.width, crop.height);
+  const tex = new THREE.CanvasTexture(crop);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  // Orient: raster is north-up / east-right; the sim world has +X west, +Z north (see voxelizer).
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.center.set(0.5, 0.5); tex.repeat.set(-1, 1);                 // flip E–W so west maps to +X
+  const geo = new THREE.PlaneGeometry(extent[0], extent[2]);
+  const mat = new THREE.MeshBasicMaterial({ map: tex });
+  osmGround = new THREE.Mesh(geo, mat);
+  osmGround.rotation.x = -Math.PI / 2;                             // lie flat in the XZ plane
+  osmGround.position.set(extent[0] / 2, -0.3, extent[2] / 2);      // just under the buildings
+  osmGround.renderOrder = -1;
+  scene.add(osmGround);
+  setStatus('OSM basemap draped under the city (' + crop.width + '×' + crop.height + ' px).');
 }
 
 function activateOutdoorScene() {
@@ -700,14 +796,14 @@ function revertOutdoorScene() {
 // cached volumes / DL surrogate cannot apply (they are keyed to the fixed grid), so it runs on
 // the analytic tier — stated honestly in the status line. `vox` is a voxelize_browser output.
 let RUNTIME_SCENE = null;
-function setRuntimeScene(vox, name) {
+function setRuntimeScene(vox, name, token) {
   if (!ensureInit() || !vox) return false;
   GRID3 = vox.grid; GDIMS = vox.dims; CELL_M = vox.cell_m; INSIDE3 = vox.inside;
   extent = vox.extent.slice();
   center = new THREE.Vector3(extent[0] / 2, extent[1] / 2, extent[2] / 2);
   window.SIM3D_VOLUME = null;                    // cached volumes belong to the fixed scene
   surrogateVol = null;                           // scene-locked UNet contract belongs there too
-  RUNTIME_SCENE = { name: name || 'imported model', dims: vox.dims };
+  RUNTIME_SCENE = { name: name || 'imported model', dims: vox.dims, _token: token || ('rt:' + (++rtCounter)) };
   // hide the fixed voxel building; keep the imported CAD mesh if we mounted one
   disposeField(); disposeSurface();
   for (const m of wallMeshes) m.visible = false;
@@ -728,30 +824,125 @@ function setRuntimeScene(vox, name) {
     + ' solid · analytic tier (new scene — cached volumes / surrogate do not apply).');
   return true;
 }
+// ---- Imported-model helpers (Phase 2: sandbox bounds · IndexedDB voxel cache · mesh decimation) ----
+// Above this many triangles, skip the full visual mesh and fall back to the smooth voxel surface.
+// Set high so a decimated import (the preprocess/Draco GLB is typically ~1-3M tris) renders as the
+// REAL CAD — the built-in 7th floor is ~5M tris and the WebGPU renderer handles it fine; the smooth
+// surface is only a safety net for a pathologically large raw mesh.
+const HEAVY_TRIS = 8000000;
+
+// The sandbox is a real-world box the user sizes in metres (X · Y height · Z). Voxels stay ISOTROPIC,
+// so every world↔voxel conversion + marchPL are unchanged; voxelize_browser fits the model inside it.
+function readSandboxBounds() {
+  return [Number(sizeX && sizeX.value) || 80, Number(sizeY && sizeY.value) || 30, Number(sizeZ && sizeZ.value) || 80];
+}
+function boundsKey(b) { return Array.isArray(b) ? b.map((v) => +v || 0).join('x') : ('L' + (b || 80)); }
+
+// Voxelizing a model at a given sandbox size is deterministic → cache the grid in IndexedDB keyed by
+// file identity + bounds, so re-importing the SAME file skips objectToTriangles AND voxelize entirely.
+const VOX_DB = 'sim3d-voxel-cache', VOX_STORE = 'vox';
+function voxDbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(VOX_DB, 1);
+    r.onupgradeneeded = () => { const db = r.result; if (!db.objectStoreNames.contains(VOX_STORE)) db.createObjectStore(VOX_STORE); };
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function voxCacheGet(key) {
+  try {
+    const db = await voxDbOpen();
+    return await new Promise((res) => {
+      const q = db.transaction(VOX_STORE, 'readonly').objectStore(VOX_STORE).get(key);
+      q.onsuccess = () => res(q.result || null); q.onerror = () => res(null);
+    });
+  } catch (e) { return null; }
+}
+function voxCachePut(key, val) {
+  voxDbOpen().then((db) => { db.transaction(VOX_STORE, 'readwrite').objectStore(VOX_STORE).put(val, key); }).catch(() => {});
+}
+
+// Mount the visual + switch the sim to an imported voxel grid. Shared by the cache-hit path (no worker
+// round-trip) and the worker-voxelize reply. `workerHasGrid` = the worker already holds this grid (a
+// fresh voxelize) vs must be sent it (cache hit → ensureWorkerGrid ships GRID3 for the solve).
+function applyImportedScene(object, vox, name, token, heavy, cached, workerHasGrid) {
+  DISPLAY.cad = !heavy; if (dispCad) dispCad.checked = DISPLAY.cad;
+  if (!heavy && object) mountCadObject(object, vox.extent);   // heavy → the smooth voxel surface stands in
+  if (modelNote) modelNote.textContent = 'Simulating “' + (name || 'model') + '” · analytic tier'
+    + (cached ? ' · voxel grid from cache' : ' · voxelized in-browser')
+    + (heavy ? ' · smooth surface (mesh decimated)' : '') + '.';
+  workerGridToken = workerHasGrid ? token : null;
+  setRuntimeScene(vox, name, token);
+}
+
+// Base64 → Uint8Array (mirrors decodeGrid's atob loop).
+function b64ToU8(b64) {
+  const s = atob(b64), a = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
+  return a;
+}
+// Load a preprocessed model (a .vox.json from preprocess_cad.mjs): the material grid was voxelized
+// OFFLINE from the FULL-resolution CAD, so the physics is faithful to the intended geometry BY
+// CONSTRUCTION — the browser never voxelizes a decimated mesh. Display uses the grid-derived smooth
+// surface (the decimated .display.glb is cosmetic only and never feeds the solve).
+async function loadPreprocessedModel(file) {
+  let json;
+  try { json = JSON.parse(await file.text()); }
+  catch (e) { setStatus('Could not parse “' + file.name + '” as a preprocessed .vox.json.'); return; }
+  if (!json.grid_b64 || !json.dims || !json.cell_m || !json.extent) {
+    setStatus('“' + file.name + '” is not a preprocessed model (needs grid_b64 + dims + cell_m + extent).'); return;
+  }
+  const grid = b64ToU8(json.grid_b64);
+  const inside = json.inside_b64 ? b64ToU8(json.inside_b64) : new Uint8Array(grid.length);
+  const vox = { grid, dims: json.dims, cell_m: json.cell_m, inside, extent: json.extent, n_solid: json.n_solid || 0 };
+  applyImportedScene(null, vox, json.name || file.name, 'rt:' + (++rtCounter), true, false, false);   // heavy → smooth surface
+  if (modelNote) modelNote.textContent = 'Simulating “' + (json.name || file.name)
+    + '” · analytic tier · preprocessed grid — physics on the full-resolution CAD (' + json.dims.join('×') + ' voxels).';
+  if (modelRevert) modelRevert.style.display = '';
+}
+
 // Voxelize a loaded THREE model and switch the sim to it (deferred behind a status message).
 // The same object is kept as the visual CAD shell (fitted to the new voxel extent).
-function simulateModel(object, name, realSizeM) {
+function simulateModel(object, name, sizeOrBounds, cacheKey) {
   if (!ensureInit()) return;
   setStatus('Voxelizing “' + (name || 'model') + '” …');
-  setTimeout(() => {
+  // Array → sandbox-bounds mode (user X/Y/Z); number → legacy longest-axis metres (programmatic callers).
+  const opts = Array.isArray(sizeOrBounds)
+    ? { resolution: 160, bounds_m: sizeOrBounds, barrierClass: 2, pad: 1 }
+    : { resolution: 160, real_longest_m: sizeOrBounds || 80, barrierClass: 2, pad: 1 };
+  if (solveWorker) {
+    // Off-thread: extract triangles here (needs THREE) and transfer them to the worker to voxelize —
+    // this is the import stall for a large model. The Tx solve that follows (setRuntimeScene →
+    // runVizMode → runStaticField) then runs in the worker on the grid it keeps resident.
     const tris = objectToTriangles(THREE, object);
     if (!tris.length) { setStatus('That model has no triangles to voxelize.'); return; }
-    // Fit ~160 voxels on the longest axis (robust to the model's units); real_longest_m sets
-    // the physical scale so path loss / distances come out in real metres.
-    const vox = voxelizeTriangles(tris, { resolution: 160, real_longest_m: realSizeM || 80,
-      barrierClass: 2, pad: 1 });
+    const token = 'rt:' + (++rtCounter);
+    pendingVoxelize = { object, name, token, cacheKey, heavy: (tris.length / 9 | 0) > HEAVY_TRIS };
+    solveWorker.postMessage({ type: 'voxelize', id: token, tris, opts, phys: mainPhys() }, [tris.buffer]);
+    return;
+  }
+  setTimeout(() => {                              // fallback: no Worker support → voxelize inline
+    const tris = objectToTriangles(THREE, object);
+    if (!tris.length) { setStatus('That model has no triangles to voxelize.'); return; }
+    const vox = voxelizeTriangles(tris, opts);
     if (!vox) { setStatus('Voxelization produced an empty grid.'); return; }
-    DISPLAY.cad = true; if (dispCad) dispCad.checked = true;
-    mountCadObject(object, vox.extent);
-    setRuntimeScene(vox, name);
+    const heavy = (tris.length / 9 | 0) > HEAVY_TRIS;
+    if (cacheKey) voxCachePut(cacheKey, Object.assign({ heavy }, vox));
+    applyImportedScene(object, vox, name, 'rt:' + (++rtCounter), heavy, false, false);
   }, 0);
 }
 
 // Load a model file (.glb/.gltf with Draco, or .obj) and switch the sim to solving on it.
-async function loadModelFile(file, realSizeM) {
+async function loadModelFile(file, bounds) {
   if (!ensureInit() || !file) return;
   const name = file.name, ext = name.toLowerCase().split('.').pop();
-  setStatus('Loading “' + name + '” …');
+  if (ext === 'json') { await loadPreprocessedModel(file); return; }   // preprocessed .vox.json (faithful grid)
+  // A large .obj is parsed as text on the main thread (the memory-spike / crash path the Gemini note
+  // flagged). This loader already supports Draco .glb, which decodes off-thread and is ~10× smaller —
+  // so nudge toward it rather than silently chewing on a 300 MB wall of text.
+  const bigObj = ext === 'obj' && file.size > 60 * 1024 * 1024;
+  setStatus('Loading “' + name + '” …' + (bigObj
+    ? ' — ' + (file.size / 1048576 | 0) + ' MB .obj parses on the main thread; a Draco .glb loads far faster & lighter'
+    : ''));
   const url = URL.createObjectURL(file);
   try {
     let object;
@@ -770,9 +961,12 @@ async function loadModelFile(file, realSizeM) {
     } else {
       setStatus('Unsupported format “.' + ext + '” — use .glb, .gltf or .obj.'); return;
     }
-    simulateModel(object, name, realSizeM);
+    // IndexedDB cache: same file + same sandbox bounds → reuse the stored grid (skips voxelize entirely).
+    const cacheKey = 'vox:' + name + ':' + file.size + ':' + (file.lastModified || 0) + ':' + boundsKey(bounds);
+    const hit = await voxCacheGet(cacheKey);
+    if (hit && hit.grid) applyImportedScene(object, hit, name, 'rt:' + (++rtCounter), !!hit.heavy, true, false);
+    else simulateModel(object, name, bounds, cacheKey);
     if (modelRevert) modelRevert.style.display = '';
-    if (modelNote) modelNote.textContent = 'Simulating “' + name + '” (analytic tier — new scene, no cache).';
   } catch (e) {
     setStatus('Could not load “' + name + '”: ' + (e && e.message || e));
   } finally { URL.revokeObjectURL(url); }
@@ -789,7 +983,7 @@ function revertToFixedScene() {
 }
 if (modelFile) modelFile.addEventListener('change', (e) => {
   const f = e.target.files && e.target.files[0];
-  if (f) loadModelFile(f, Number(modelCell && modelCell.value) || 80);
+  if (f) loadModelFile(f, readSandboxBounds());
   e.target.value = '';                          // allow re-loading the same file
 });
 if (modelRevert) modelRevert.addEventListener('click', revertToFixedScene);
@@ -878,8 +1072,8 @@ const APM_DB     = MATS.map((m) => m.loss_per_m_db || 0);
 const FREQS      = MANIFEST.freqs_mhz || [2442, 3500, 5500, 6125];
 const FREQ_MULT  = MANIFEST.freq_loss_mult || {};
 
-// saturating wall-loss (flat-dB diffraction stand-in). satObs(x) from simulator_tab.js:31.
-function satObs(x) { return x <= SAT_T ? x : SAT_T + SAT_S * (1 - Math.exp(-(x - SAT_T) / SAT_S)); }
+// (the saturating wall-loss cap — satObs — now lives inside makeMarchPL in solve_core.js, so the
+//  analytic kernel is defined once and shared with the solve worker.)
 
 // per-band wall-loss multiplier by nearest manifest band — the WiFi presets in
 // #wf3dBand (2412/5180/…) don't match freq_loss_mult keys (2442/3500/5500/6125).
@@ -1040,7 +1234,9 @@ async function loadVolumeIndex() {
 }
 // Volumes written before M3 carry no `mode`; they were all the indoor floor.
 function volumesForMode(mode) {
-  return (volumeIndex || []).filter((e) => (e.mode || 'indoor') === mode);
+  const g = GDIMS;   // a volume solved on a different grid (e.g. the old demo tile) must NOT be
+  return (volumeIndex || []).filter((e) => (e.mode || 'indoor') === mode   // reused on this scene
+    && (!g || !e.grid_shape || (e.grid_shape[0] === g[0] && e.grid_shape[1] === g[1] && e.grid_shape[2] === g[2])));
 }
 function matchVolume(txVox, mode) {
   const pool = volumesForMode(mode || currentMode());
@@ -1151,6 +1347,14 @@ function nearestBandIndex(vol, fMHz) {
   let bi = 0, bd = Infinity;
   for (let i = 0; i < vol.bands.length; i++) { const d = Math.abs(vol.bands[i] - fMHz); if (d < bd) { bd = d; bi = i; } }
   return bi;
+}
+// A cached volume is only honest near the frequency it was solved for; using the 2.4 GHz city
+// volume for a 751 MHz cellular request would mislabel the field. Beyond ~25% off, prefer the
+// analytic tier, which recomputes at the requested frequency (so Cellular renders correctly).
+function volBandOk(vol, fMHz) {
+  if (!vol || !vol.bands || !vol.bands.length) return false;
+  const b = vol.bands[nearestBandIndex(vol, fMHz)];
+  return Math.max(b, fMHz) / Math.max(1, Math.min(b, fMHz)) <= 1.25;
 }
 // ---- Resolution order: cached volume → DL surrogate → analytic fallback ----
 // The analytic JS mirror is the guaranteed-correct floor, not a placeholder: the
@@ -1422,27 +1626,147 @@ function chanBandIndex(ch, fMHz) {
   return bi;
 }
 
-// PL(dB) from Tx voxel to sample voxel: Motley-Keenan spreading + per-crossing
-// wall loss (R3 runs count once) + Beer-Lambert furniture + satObs. Direct port
-// of pathlossPhysics's inner loop (simulator_tab.js:42-55). L/Ap = dB × band mult.
-function marchPL(tx, sx, sy, sz, L, Ap, f1) {
-  const NX = GDIMS[0], NY = GDIMS[1], NZ = GDIMS[2];
-  const dx = sx - tx[0], dy = sy - tx[1], dz = sz - tx[2];
-  const distC = Math.hypot(dx, dy, dz);
-  const dm = Math.max(distC * CELL_M, D0_M);
-  const K = Math.max(1, Math.ceil(distC / STEP_CELL));
-  let wall = 0, perM = 0, cur = -1;
-  for (let k = 0; k <= K; k++) {
-    const t = k / K;
-    const xi = clampi(Math.round(tx[0] + t * dx), NX);
-    const yi = clampi(Math.round(tx[1] + t * dy), NY);
-    const zi = clampi(Math.round(tx[2] + t * dz), NZ);
-    const c = GRID3[(xi * NY + yi) * NZ + zi];
-    if (c !== cur) { cur = c; if (L[c] > 0) wall += L[c]; }   // R3: new run counts once
-    perM += Ap[c];
+// PL(dB) from Tx voxel to sample voxel: Motley-Keenan spreading + per-crossing wall loss (R3 runs
+// count once) + Beer-Lambert furniture + satObs cap. The kernel is single-sourced in solve_core.js
+// (also run by sim_worker.js); `makeMarchPL`'s getter reads the LIVE grid/constants, so an imported
+// scene (new GRID3/CELL_M) is picked up with no rebuild. Signature is unchanged, so every existing
+// call site (probe, radiation lobes, interference, coverage fallback) works as before. The getter is
+// called once per marchPL call — cheap for those bounded callers; the heavy coverage sweep of this
+// same function runs in the worker (see runStaticField's analytic dispatch).
+const marchPL = makeMarchPL(() => ({
+  grid: GRID3, dims: GDIMS, cellM: CELL_M,
+  nExp: N_EXP, d0M: D0_M, stepCell: STEP_CELL, satT: SAT_T, satS: SAT_S,
+}));
+
+// ---- Off-main-thread solve (Web Worker) ----------------------------------------------------------
+// The analytic per-voxel marchPL sweep and imported-model voxelization used to run synchronously on
+// the UI thread — that is the whole "Page Unresponsive" freeze. Both now run in sim_worker.js. The
+// cached-volume and surrogate tiers stay on the main thread (bounded typed-array reads, no freeze).
+let solveWorker = null;
+try {
+  if (typeof Worker !== 'undefined')
+    solveWorker = new Worker(new URL('./sim_worker.js', import.meta.url), { type: 'module' });
+} catch (e) { console.warn('[sim3d] solve worker unavailable — solving on the main thread.', e); solveWorker = null; }
+
+let solveGen = 0;                 // bumped by EVERY runStaticField call; stale worker replies are dropped
+let pendingSolve = null;          // { gen, t0, freqMHz, autoTx, isWash } for the in-flight analytic solve
+let pendingVoxelize = null;       // { object, name, token } for the in-flight import
+let workerGridToken = null;       // which scene grid the worker currently holds (see gridToken())
+let rtCounter = 0;                // unique id per imported runtime scene
+
+function mainPhys() { return { nExp: N_EXP, d0M: D0_M, stepCell: STEP_CELL, satT: SAT_T, satS: SAT_S }; }
+// Identity of the grid the analytic solve needs: a per-import token for runtime scenes, else the
+// fixed indoor/outdoor scene (distinct, since their grids differ). ensureWorkerGrid ships the current
+// GRID3 to the worker whenever this differs from what it holds.
+function gridToken() { return RUNTIME_SCENE ? RUNTIME_SCENE._token : ('fixed:' + currentMode()); }
+function ensureWorkerGrid() {
+  if (!solveWorker) return;
+  const tok = gridToken();
+  if (workerGridToken === tok) return;      // runtime scenes are already resident from voxelize
+  if (!GRID3 || !GDIMS) return;
+  const copy = GRID3.slice();               // transfer a copy — the main thread keeps GRID3
+  solveWorker.postMessage({ type: 'setGrid', id: tok, grid: copy, dims: GDIMS.slice(),
+    cellM: CELL_M, phys: mainPhys() }, [copy.buffer]);
+  workerGridToken = tok;
+}
+
+// Post the analytic coverage solve to the worker. Returns immediately; handleSolveReply draws the
+// result when it arrives (if still the latest generation).
+function dispatchAnalyticSolve(o) {
+  ensureWorkerGrid();
+  const disp = { classes: DISPLAY.classes, scale: DISPLAY.scale, eirpDbm: DISPLAY.eirpDbm,
+    threshDbm: DISPLAY.threshDbm, rsrpLo: RSRP_LO, rsrpHi: RSRP_HI,
+    covGood: COV_GOOD, covMarg: COV_MARG, covDead: COV_DEAD };
+  pendingSolve = { gen: o.gen, t0: o.t0, freqMHz: o.freqMHz, autoTx: o.autoTx, isWash: DISPLAY.wash };
+  if (DISPLAY.wash) {
+    const yPlane = (DISPLAY.plane && DISPLAY.sliceY != null) ? DISPLAY.sliceY : (extent[1] * 0.45);
+    const res = Math.max(128, Math.min(384, Math.round(Math.max(extent[0], extent[2]) / Math.max(CELL_M, 0.05))));
+    const nx = res, nz = Math.max(64, Math.round(res * extent[2] / extent[0]));
+    solveWorker.postMessage({ type: 'solve', gen: o.gen, kind: 'wash', disp, phys: mainPhys(),
+      params: { txVox: o.txVox, L: o.L, Ap: o.Ap, f1: o.f1, nx, nz,
+        ex: extent[0], ez: extent[2], yPlane } });
+  } else {
+    solveWorker.postMessage({ type: 'solve', gen: o.gen, kind: 'cloud', disp, phys: mainPhys(),
+      params: { txVox: o.txVox, L: o.L, Ap: o.Ap, f1: o.f1,
+        bounds: { g: o.bounds.g, yLo: o.bounds.yLo, yHi: o.bounds.yHi, yInc: o.bounds.yInc,
+          ex: extent[0], ez: extent[2], sliced: o.bounds.sliced } } });
   }
-  wall += perM * (distC / K) * CELL_M;                        // furniture (dB/m × length)
-  return f1 + 10 * N_EXP * Math.log10(dm) + satObs(wall);
+  setStatus('Solving · ' + TIER.ANALYTIC + ' — Motley-Keenan multiwall @ ' + o.freqMHz + ' MHz …');
+}
+
+// Mesh builders shared by the worker reply (mirror the tails of buildCoverageWash / runStaticField;
+// kept here because they touch THREE + the scene).
+function washMeshFromPixels(pixels, nx, nz, yPlane) {
+  const cv = document.createElement('canvas'); cv.width = nx; cv.height = nz;
+  cv.getContext('2d').putImageData(new ImageData(pixels, nx, nz), 0, 0);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter; tex.flipY = false;
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.78,
+    depthWrite: false, side: THREE.DoubleSide, clippingPlanes: GEOM_CLIP });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(extent[0], extent[2]), mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(extent[0] / 2, yPlane + 0.03, extent[2] / 2);
+  mesh.renderOrder = 3; mesh.userData.isWash = true;
+  scene.add(mesh); return mesh;
+}
+function cloudMeshFromSamples(flat, count) {
+  const g = sampleBounds().g;
+  const cube = new THREE.BoxGeometry(g * 0.42, g * 0.42, g * 0.42);
+  const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, clippingPlanes: GEOM_CLIP });
+  const mesh = new THREE.InstancedMesh(cube, mat, count);
+  const dummy = new THREE.Object3D(), col = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    const o = i * 7;
+    dummy.position.set(flat[o], flat[o + 1], flat[o + 2]); dummy.scale.setScalar(0.5 + flat[o + 3] * 1.6); dummy.updateMatrix();
+    mesh.setMatrixAt(i, dummy.matrix);
+    col.setRGB(flat[o + 4], flat[o + 5], flat[o + 6]); mesh.setColorAt(i, col);
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  scene.add(mesh); return mesh;
+}
+
+function handleSolveReply(m) {
+  const ps = pendingSolve;
+  if (!ps || m.gen !== solveGen) return;                 // a newer solve (or scene) superseded this one
+  pendingSolve = null;
+  if (m.ok === false) { setStatus('Solve failed in worker: ' + (m.error || 'unknown')); return; }
+  disposeField();
+  const n = (m.kind === 'wash') ? m.kept : m.count;
+  fieldObj = (m.kind === 'wash')
+    ? washMeshFromPixels(m.pixels, m.nx, m.nz, m.yPlane)
+    : cloudMeshFromSamples(m.samples, m.count);
+  coverageLegend();
+  window.SIM3D_TIER = TIER.ANALYTIC;
+  const unit = (m.kind === 'wash') ? ' texels' : ' samples';
+  const where = (m.kind === 'wash') ? ' · smooth wash @ y=' + m.yPlane.toFixed(1) + ' m' : '';
+  setStatus('Static field · ' + TIER.ANALYTIC + ' — Motley-Keenan multiwall @ ' + ps.freqMHz + ' MHz'
+    + where + ' · ' + n.toLocaleString() + unit + ' · walls shadow the field.'
+    + (ps.autoTx ? ' · default rooftop Tx — Place on model to move it.' : ''));
+  lastSolveMs = Math.round(performance.now() - ps.t0);
+  refreshMeta();
+}
+
+function handleVoxelizeReply(m) {
+  const pv = pendingVoxelize;
+  if (!pv || pv.token !== m.id) return;
+  pendingVoxelize = null;
+  if (!m.ok) { setStatus('Voxelization produced an empty grid.'); return; }
+  if (pv.cacheKey) voxCachePut(pv.cacheKey, Object.assign({ heavy: pv.heavy }, m.vox));   // store for reuse
+  // worker kept this grid resident from voxelize → workerHasGrid = true (ensureWorkerGrid skips re-send).
+  applyImportedScene(pv.object, m.vox, pv.name, pv.token, pv.heavy, false, true);
+}
+
+if (solveWorker) {
+  solveWorker.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === 'solve') handleSolveReply(m);
+    else if (m.type === 'voxelize') handleVoxelizeReply(m);
+    // 'setGrid' acks and 'error' are advisory — nothing to draw.
+    else if (m.type === 'error') console.warn('[sim3d] worker error:', m.error);
+  };
+  solveWorker.onerror = (e) => console.warn('[sim3d] worker onerror:', e.message || e);
 }
 
 // dB colour legend under the viewport (viridis weak→strong, dB end-labels).
@@ -1764,34 +2088,62 @@ if (dispThresh) {
   dispThresh.addEventListener('change', reRunViz);
 }
 
+// When nothing is placed on the CITY / an imported model, radiate from a sensible default
+// rooftop (tallest roof near the centre = a macro-cell site) instead of the scene centre —
+// which sits INSIDE the buildings there, so every ray is blocked and the coverage renders
+// empty. Derived from the material grid, since the browser has no valid_tx mask for these scenes.
+function defaultRooftopTx() {
+  const GRID = decodeGrid();
+  if (!GRID || !GDIMS) return null;
+  const NX = GDIMS[0], NY = GDIMS[1], NZ = GDIMS[2];
+  const cx = NX >> 1, cz = NZ >> 1, R = Math.max(6, Math.round(40 / CELL_M));
+  let best = null, bestScore = -Infinity;
+  for (let x = Math.max(0, cx - R); x < Math.min(NX, cx + R); x++)
+    for (let z = Math.max(0, cz - R); z < Math.min(NZ, cz + R); z++) {
+      let top = -1;
+      for (let y = NY - 1; y >= 1; y--) { if (GRID[(x * NY + y) * NZ + z] > 0) { top = y; break; } }
+      if (top < 0) continue;
+      const score = top - 0.15 * Math.hypot(x - cx, z - cz);
+      if (score > bestScore) { bestScore = score; best = [x, Math.min(NY - 1, top + 1), z]; }
+    }
+  return best;
+}
+
 function runStaticField() {
   if (!ensureInit()) return;
   const _t0 = performance.now();
+  const myGen = ++solveGen;      // any worker solve still in flight from an earlier gen is now stale
   const placedTx = firstTx();
-  const src = placedTx ? placedTx.body.position : center;
+  // Geometry-aware field: march Tx→sample through the material grid (analytic Motley-Keenan).
+  const GRID = decodeGrid();
+  // Auto-place a rooftop source for the city / imported scenes when the user hasn't yet — the
+  // scene centre is inside a building there, so marchPL returns all-loss and renders nothing.
+  let autoTx = null;
+  if (!placedTx && GRID && (currentMode() === 'outdoor' || RUNTIME_SCENE)) autoTx = defaultRooftopTx();
+  const src = placedTx ? placedTx.body.position
+    : autoTx ? { x: (autoTx[0] + 0.5) * CELL_M, y: (autoTx[1] + 0.5) * CELL_M, z: (autoTx[2] + 0.5) * CELL_M }
+             : center;
   const freqMHz = Number(wfBand && wfBand.value) || 2437;
   disposeField();
   disposeLobes(); disposeVectors(); disposeInterference(); disposeSweep(); // field replaces others
 
-  // Geometry-aware field: march Tx→sample through the material grid (analytic
-  // Motley-Keenan). Falls back to free space if the grid asset is unavailable.
-  const GRID = decodeGrid();
   const mult = bandMult(freqMHz);
   const L = LOSS_DB.map((v) => v * mult), Ap = APM_DB.map((v) => v * mult);
   const f1 = 20 * Math.log10(freqMHz) + FSPL_CONST;         // fspl at 1 m
-  // Derive a voxel from the placed Tx, or from the scene centre when nothing is placed yet.
-  // matchVolume(null) already falls back to the mode's first cached solve; using the centre
-  // keeps outdoor/indoor demo Tx within VOL_TOL of the committed volumes (e.g. outdoor
-  // centre ≈ [64,16,64] vs cached tx_67-20-66).
-  const txVox = GRID ? [clampi(Math.floor(src.x / CELL_M), GDIMS[0]),
+  // Derive a voxel from the placed Tx (or the auto rooftop / scene centre when nothing is placed).
+  // matchVolume(null) already falls back to the mode's first cached solve; the centre keeps demo
+  // Tx within VOL_TOL of the committed volumes (e.g. outdoor centre ≈ [64,16,64] vs cached tx).
+  const txVox = autoTx || (GRID ? [clampi(Math.floor(src.x / CELL_M), GDIMS[0]),
                         clampi(Math.floor(src.y / CELL_M), GDIMS[1]),
-                        clampi(Math.floor(src.z / CELL_M), GDIMS[2])] : null;
+                        clampi(Math.floor(src.z / CELL_M), GDIMS[2])] : null);
+  window.__sim3dAutoTx = autoTx;   // surfaced in the status line below
 
   // Prefer a precomputed full-physics PL volume when one matches the placed Tx;
   // otherwise render analytic now and upgrade in the background if one loads.
   const curVol = window.SIM3D_VOLUME || null;
   const vol = (txVox ? volMatches(curVol, txVox)
-    : (curVol && (curVol.entry.mode || 'indoor') === currentMode())) ? curVol : null;
+    : (curVol && (curVol.entry.mode || 'indoor') === currentMode()))
+    && volBandOk(curVol, freqMHz) ? curVol : null;
   const sur = (!vol && surrogateMatches(surrogateVol, txVox, freqMHz)) ? surrogateVol : null;
   const bandIdx = vol ? nearestBandIndex(vol, freqMHz) : 0;
   // Tier 1 miss: try to upgrade in the background (cache first, then surrogate), and render
@@ -1805,6 +2157,16 @@ function runStaticField() {
   }
 
   const { sliced, g, yLo, yHi, yInc } = sampleBounds();     // full volume, or one prediction plane
+
+  // Analytic tier → the Web Worker (this per-voxel marchPL sweep is the UI freeze). The cached-volume
+  // and surrogate tiers stay on the synchronous path below (bounded typed-array reads, no freeze). If
+  // no Worker is available we fall through and solve inline — unchanged behavior. disposeField() above
+  // already cleared the old field; handleSolveReply draws the result if it is still the latest gen.
+  if (!vol && !sur && GRID && txVox && solveWorker) {
+    dispatchAnalyticSolve({ txVox, L, Ap, f1, freqMHz, autoTx, gen: myGen, t0: _t0,
+      bounds: { sliced, g, yLo, yHi, yInc } });
+    return;
+  }
 
   // Sample PL at a world point — shared by the wash canvas and the cube cloud.
   function samplePlAt(x, y, z) {
@@ -1841,6 +2203,7 @@ function runStaticField() {
       + (vol ? ' · curved eikonal shadows + in-wall lag.'
         : sur ? ' · ONNX Runtime inference.'
               : GRID ? ' · walls shadow the field.' : '.')
+      + (autoTx ? ' · default rooftop Tx — Place on model to move it.' : '')
       + fell);
     window.SIM3D_TIER = tier;
     lastSolveMs = Math.round(performance.now() - _t0);
@@ -2768,6 +3131,22 @@ function onResize() {
   camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h);
 }
 
+// Import-driven scene: if the user imported a model on the router (Import/Preprocess screens →
+// window.appImport.modelFiles), simulate THAT instead of the built-in scene. Prefer a .glb/.gltf
+// (Draco, decoded off-thread); a raw .obj still works but is heavier. Loaded once per session.
+let routerImportLoaded = false;
+function maybeLoadRouterImport() {
+  if (routerImportLoaded || RUNTIME_SCENE) return false;
+  const files = window.appImport && window.appImport.modelFiles;
+  if (!files || !files.length) return false;
+  const arr = Array.from(files);
+  const f = arr.find((x) => /\.(glb|gltf)$/i.test(x.name)) || arr.find((x) => /\.obj$/i.test(x.name));
+  if (!f) return false;
+  routerImportLoaded = true;
+  loadModelFile(f, 80);          // real_longest_m ≈ 80 m (proportional; re-load via Sandbox bounds to resize)
+  return true;
+}
+
 // Init when the user opens the Simulation tab in 3D mode (the viewport must be
 // visible so the canvas gets a real size).
 const simBtn = document.getElementById('tabSimBtn');
@@ -2775,7 +3154,10 @@ if (simBtn) simBtn.addEventListener('click', () => {
   requestAnimationFrame(() => {
     syncModeSelectWithApp();
     applyMode();
-    if (window.appMode && window.appMode.dim === '3d' && viewport && viewport.offsetParent !== null) { ensureInit(); onResize(); }
+    if (window.appMode && window.appMode.dim === '3d' && viewport && viewport.offsetParent !== null) {
+      ensureInit(); onResize();
+      maybeLoadRouterImport();   // use the user's imported model, not the built-in 7th floor
+    }
   });
 });
 

@@ -48,6 +48,11 @@ Sandbox_Version_3D_Simulation_1.obj/
 claude-colab-main/
 colab-mcp-main/
 
+# Unity WebGL port — a SEPARATE nested git repo with its own origin
+# (github.com/cgm2179/indoor-outdoor-walk-test-with-Unity-Engine). Kept out of this
+# repo entirely so the two histories never mix.
+Unity_RF_Simulator/
+
 # Local development virtualenv (created by the environment update script)
 .venv/
 
@@ -60,3 +65,16 @@ __pycache__/
 
 # scene_v1_backup/ — pre-M0.4 grid, kept locally for rollback (not versioned)
 Physics Engine/3D Map Physics/SIM V1 3D/scene_v1_backup/
+
+# Indoor OSM basemap (PR #25): a large, per-machine generated raster. Regenerate with
+# `python3 scripts/prepare_indoor_basemap.py`. The live (Leaflet) path needs no file.
+Data/basemap_image.js
+
+# PR #26 — regenerable 2D O2I prediction artifacts. Rebuild with
+# pathloss_2d/predict_o2i.py then pathloss_2d/export_web.py.
+Physics Engine/Cross_Validation/pathloss_2d/out/
+Data/pl2d_crossval.js
+Physics Engine/Cross_Validation/validation/reports/*.png
+
+# PR #27 — regenerable 3D O2I volumes (rebuild with pathloss_3d/predict_o2i_3d.py)
+Physics Engine/Cross_Validation/pathloss_3d/out/

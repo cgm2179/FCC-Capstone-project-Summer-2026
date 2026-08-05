@@ -128,6 +128,7 @@
   "freqs_mhz": [
     619.0,
     627.0,
+    751.0,
     1935.0,
     2442.0,
     2510.0,
@@ -170,13 +171,14 @@
     "cellular_mhz": [
       619.0,
       627.0,
+      751.0,
       1935.0,
       2510.0,
       2600.0,
       3500.0,
       3710.0
     ],
-    "note": "cellular set derived from the PCTEL G-flex walk (T-Mobile MCC310/MNC260): n71 619/627, B2/n2 1935, n41 2510/2600, n78 3500/3710. n78 is the only band overlapping the sim's original WiFi list, so it is the one validatable band."
+    "note": "cellular set derived from the PCTEL G-flex walk (T-Mobile MCC310/MNC260): n71 619/627, B2/n2 1935, n41 2510/2600, n78 3500/3710. Verizon LTE Band 13 = 751 MHz (MCC311/MNC480, PCI 396/397/398) added for the O2I cross-validation (PR #26/#27). n78 overlaps the sim's original WiFi list."
   },
   "mode": "indoor",
   "modes": {

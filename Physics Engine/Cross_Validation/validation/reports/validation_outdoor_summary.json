@@ -1,0 +1,340 @@
+{
+  "n_cells": 28,
+  "cells": [
+    {
+      "site_id": "BS6_1005_n_capitol",
+      "pci": 193,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 101,
+      "spearman_rho": 0.697,
+      "rmse_after_level_cal_db": 21.96,
+      "level_calibration_db": -1.17,
+      "measured_mean": -85.22
+    },
+    {
+      "site_id": "BS6_1005_n_capitol",
+      "pci": 411,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 228,
+      "spearman_rho": 0.693,
+      "rmse_after_level_cal_db": 19.62,
+      "level_calibration_db": -1.95,
+      "measured_mean": -77.49
+    },
+    {
+      "site_id": "BS6_1005_n_capitol",
+      "pci": 255,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 49,
+      "spearman_rho": 0.692,
+      "rmse_after_level_cal_db": 23.34,
+      "level_calibration_db": -0.73,
+      "measured_mean": -87.08
+    },
+    {
+      "site_id": "BS6_1005_n_capitol",
+      "pci": 359,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 43,
+      "spearman_rho": 0.618,
+      "rmse_after_level_cal_db": 29.03,
+      "level_calibration_db": 20.28,
+      "measured_mean": -76.44
+    },
+    {
+      "site_id": "BS6_1005_n_capitol",
+      "pci": 71,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 28,
+      "spearman_rho": 0.57,
+      "rmse_after_level_cal_db": 27.02,
+      "level_calibration_db": 1.18,
+      "measured_mean": -81.75
+    },
+    {
+      "site_id": "BS5_1140_n_capitol",
+      "pci": 293,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 369,
+      "spearman_rho": 0.546,
+      "rmse_after_level_cal_db": 23.37,
+      "level_calibration_db": 9.74,
+      "measured_mean": -79.78
+    },
+    {
+      "site_id": "BS7_forte_hall",
+      "pci": 398,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 388,
+      "spearman_rho": 0.511,
+      "rmse_after_level_cal_db": 25.19,
+      "level_calibration_db": 2.3,
+      "measured_mean": -85.64
+    },
+    {
+      "site_id": "BS4_55_m_st",
+      "pci": 429,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 52,
+      "spearman_rho": 0.489,
+      "rmse_after_level_cal_db": 23.81,
+      "level_calibration_db": 15.38,
+      "measured_mean": -75.52
+    },
+    {
+      "site_id": "BS6_1005_n_capitol",
+      "pci": 194,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 81,
+      "spearman_rho": 0.469,
+      "rmse_after_level_cal_db": 28.17,
+      "level_calibration_db": 2.31,
+      "measured_mean": -80.32
+    },
+    {
+      "site_id": "BS4_55_m_st",
+      "pci": 56,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 82,
+      "spearman_rho": 0.463,
+      "rmse_after_level_cal_db": 14.17,
+      "level_calibration_db": 47.23,
+      "measured_mean": -77.49
+    },
+    {
+      "site_id": "BS6_1005_n_capitol",
+      "pci": 54,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 102,
+      "spearman_rho": 0.436,
+      "rmse_after_level_cal_db": 26.84,
+      "level_calibration_db": 2.12,
+      "measured_mean": -86.05
+    },
+    {
+      "site_id": "BS5_1140_n_capitol",
+      "pci": 185,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 271,
+      "spearman_rho": 0.434,
+      "rmse_after_level_cal_db": 27.07,
+      "level_calibration_db": 3.85,
+      "measured_mean": -76.07
+    },
+    {
+      "site_id": "BS7_forte_hall",
+      "pci": 396,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 555,
+      "spearman_rho": 0.428,
+      "rmse_after_level_cal_db": 27.0,
+      "level_calibration_db": 13.92,
+      "measured_mean": -84.13
+    },
+    {
+      "site_id": "BS6_1005_n_capitol",
+      "pci": 199,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 43,
+      "spearman_rho": 0.416,
+      "rmse_after_level_cal_db": 24.57,
+      "level_calibration_db": 12.11,
+      "measured_mean": -73.3
+    },
+    {
+      "site_id": "BS2_900_nj_ave",
+      "pci": 291,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 450,
+      "spearman_rho": 0.395,
+      "rmse_after_level_cal_db": 17.26,
+      "level_calibration_db": 39.6,
+      "measured_mean": -85.32
+    },
+    {
+      "site_id": "BS4_55_m_st",
+      "pci": 17,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 222,
+      "spearman_rho": 0.349,
+      "rmse_after_level_cal_db": 21.59,
+      "level_calibration_db": 12.13,
+      "measured_mean": -82.15
+    },
+    {
+      "site_id": "BS5_1140_n_capitol",
+      "pci": 171,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 34,
+      "spearman_rho": 0.341,
+      "rmse_after_level_cal_db": 23.73,
+      "level_calibration_db": 33.07,
+      "measured_mean": -89.62
+    },
+    {
+      "site_id": "BS4_55_m_st",
+      "pci": 172,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 21,
+      "spearman_rho": 0.321,
+      "rmse_after_level_cal_db": 19.66,
+      "level_calibration_db": -9.37,
+      "measured_mean": -87.4
+    },
+    {
+      "site_id": "BS5_1140_n_capitol",
+      "pci": 172,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 21,
+      "spearman_rho": 0.288,
+      "rmse_after_level_cal_db": 24.94,
+      "level_calibration_db": -13.33,
+      "measured_mean": -87.4
+    },
+    {
+      "site_id": "BS7_forte_hall",
+      "pci": 397,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 312,
+      "spearman_rho": 0.235,
+      "rmse_after_level_cal_db": 28.71,
+      "level_calibration_db": 1.77,
+      "measured_mean": -86.87
+    },
+    {
+      "site_id": "BS6_1005_n_capitol",
+      "pci": 256,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 46,
+      "spearman_rho": 0.226,
+      "rmse_after_level_cal_db": 27.82,
+      "level_calibration_db": 10.3,
+      "measured_mean": -80.71
+    },
+    {
+      "site_id": "BS2_900_nj_ave",
+      "pci": 82,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 262,
+      "spearman_rho": 0.205,
+      "rmse_after_level_cal_db": 17.37,
+      "level_calibration_db": 33.61,
+      "measured_mean": -91.59
+    },
+    {
+      "site_id": "BS5_1140_n_capitol",
+      "pci": 67,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 283,
+      "spearman_rho": 0.199,
+      "rmse_after_level_cal_db": 32.14,
+      "level_calibration_db": 3.12,
+      "measured_mean": -76.78
+    },
+    {
+      "site_id": "BS4_55_m_st",
+      "pci": 194,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 81,
+      "spearman_rho": 0.142,
+      "rmse_after_level_cal_db": 27.74,
+      "level_calibration_db": 11.45,
+      "measured_mean": -80.32
+    },
+    {
+      "site_id": "BS5_1140_n_capitol",
+      "pci": 173,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 39,
+      "spearman_rho": -0.056,
+      "rmse_after_level_cal_db": 20.08,
+      "level_calibration_db": 30.65,
+      "measured_mean": -88.62
+    },
+    {
+      "site_id": "BS4_55_m_st",
+      "pci": 382,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 65,
+      "spearman_rho": -0.07,
+      "rmse_after_level_cal_db": 20.42,
+      "level_calibration_db": 9.62,
+      "measured_mean": -73.61
+    },
+    {
+      "site_id": "BS4_55_m_st",
+      "pci": 272,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 28,
+      "spearman_rho": -0.085,
+      "rmse_after_level_cal_db": 24.61,
+      "level_calibration_db": 14.64,
+      "measured_mean": -83.06
+    },
+    {
+      "site_id": "BS6_1005_n_capitol",
+      "pci": 140,
+      "freq_mhz": 751.0,
+      "mechanisms": "path_loss",
+      "n": 4,
+      "spearman_rho": null,
+      "rmse_after_level_cal_db": 36.1,
+      "level_calibration_db": -18.81,
+      "measured_mean": -102.01
+    }
+  ],
+  "per_base_station": {
+    "BS6_1005_n_capitol": {
+      "cells": 9,
+      "rho_median": 0.57,
+      "rho_best": 0.697
+    },
+    "BS5_1140_n_capitol": {
+      "cells": 6,
+      "rho_median": 0.315,
+      "rho_best": 0.546
+    },
+    "BS7_forte_hall": {
+      "cells": 3,
+      "rho_median": 0.428,
+      "rho_best": 0.511
+    },
+    "BS4_55_m_st": {
+      "cells": 7,
+      "rho_median": 0.321,
+      "rho_best": 0.489
+    },
+    "BS2_900_nj_ave": {
+      "cells": 2,
+      "rho_median": 0.3,
+      "rho_best": 0.395
+    }
+  }
+}

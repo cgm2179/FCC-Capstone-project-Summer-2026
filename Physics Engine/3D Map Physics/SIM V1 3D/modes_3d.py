@@ -82,14 +82,19 @@ def _enu(lon, lat, lon0, lat0):
     return float(x), float(y)
 
 
-def forte_hall_geometry(meta_path: Path | None = None) -> dict:
-    """Range and arrival bearing from the building to the known transmitter.
+RX_FLOOR_AGL_M = 21.0   # FCC HQ 7th-floor receiver plane (~7 storeys); see sites_registry
+
+
+def base_station_geometry(lon: float, lat: float, meta_path: Path | None = None,
+                          *, elev_m: float | None = None) -> dict:
+    """Range + arrival bearing from the floor-plan centre to ANY base station (lon, lat).
 
     Derived from the floor plan's own QGIS-fitted georeference, so it moves if the
-    registration is refit and never silently disagrees with the 2D pipeline.
-
-    Returns distance_m, arrival_bearing_deg (compass direction the wave comes FROM,
-    the convention `facade_sources_3d` takes) and the propagation direction.
+    registration is refit and never silently disagrees with the 2D pipeline. Returns
+    distance_m, arrival_bearing_deg (compass direction the wave comes FROM — the
+    convention `facade_sources_3d` takes), and the propagation direction. When `elev_m`
+    (antenna height AGL) is given, also returns the vertical elevation angle vs the
+    receiver floor (RX_FLOOR_AGL_M) — near 0 for Forte Hall (~20 m) at 415 m.
     """
     p = Path(meta_path or FLOORPLAN_META)
     if not p.exists():
@@ -106,12 +111,12 @@ def forte_hall_geometry(meta_path: Path | None = None) -> dict:
     bx = A[0, 0] * cx + A[0, 1] * cy + A[0, 2]
     by = A[1, 0] * cx + A[1, 1] * cy + A[1, 2]
 
-    tx_e, tx_n = _enu(*FORTE_HALL_LONLAT, lon0, lat0)
+    tx_e, tx_n = _enu(lon, lat, lon0, lat0)
     dE, dN = tx_e - bx, tx_n - by
     dist = float(np.hypot(dE, dN))
     arrival = float(np.degrees(np.arctan2(dE, dN)) % 360.0)
-    return {
-        "tx_lonlat": list(FORTE_HALL_LONLAT),
+    out = {
+        "tx_lonlat": [float(lon), float(lat)],
         "origin_lonlat": [lon0, lat0],
         "building_centre_local_m": [round(bx, 2), round(by, 2)],
         "tx_local_m": [round(tx_e, 1), round(tx_n, 1)],
@@ -122,6 +127,56 @@ def forte_hall_geometry(meta_path: Path | None = None) -> dict:
                       "from affine_px_to_local_m at the raster centre",
         "source": str(p),
     }
+    if elev_m is not None:
+        out["elev_m"] = float(elev_m)
+        out["elevation_angle_deg"] = round(
+            float(np.degrees(np.arctan2(elev_m - RX_FLOOR_AGL_M, max(dist, 1e-6)))), 2)
+    return out
+
+
+def forte_hall_geometry(meta_path: Path | None = None) -> dict:
+    """The known Forte Hall macro cell — a thin wrapper over base_station_geometry."""
+    return base_station_geometry(*FORTE_HALL_LONLAT, meta_path=meta_path)
+
+
+def city_base_station_vox(manifest, lon, lat, elev_m, *, scene=None, search_radius_m=30.0):
+    """Voxel Tx for a donor base station in a georeferenced OUTDOOR city scene.
+
+    The outdoor sibling of `base_station_geometry`: horizontal position from the scene's
+    `voxelize_city.lonlat_to_vox` (EPSG:3857 anchor), vertical from the antenna height AGL.
+    The lat/lon pins (Apple Maps) can sit a few metres off the main tower, so snap horizontally
+    to the TALLEST building column within `search_radius_m` (the real rooftop near the pin) and
+    place the antenna one voxel above that roof (rooftop mount, in air). Returns (ix, iy, iz)."""
+    import voxelize_city as VC
+    vx, vz = VC.lonlat_to_vox(manifest, lon, lat)
+    NX, NY, NZ = manifest["grid_shape"]
+    cell = float(manifest["cell_size_m"])
+    ix = int(np.clip(round(vx), 0, NX - 1)); iz = int(np.clip(round(vz), 0, NZ - 1))
+    iy = int(np.clip(round(float(elev_m) / cell), 1, NY - 1))
+    if scene is not None:
+        M = scene.M
+        r = max(1, int(round(search_radius_m / cell)))
+        x0, x1 = max(0, ix - r), min(NX, ix + r + 1)
+        z0, z1 = max(0, iz - r), min(NZ, iz + r + 1)
+        sub = M[x0:x1, :, z0:z1] > 0                                  # (wx, NY, wz)
+        ys = np.arange(NY)[None, :, None]
+        top = np.where(sub, ys, -1).max(axis=1)                       # (wx, wz) roof height per column
+        has = top >= 0
+        if has.any():
+            # Snap to the building column whose ROOF HEIGHT best matches the known antenna height
+            # (with a light nearer-is-better tiebreak). The Apple-Maps pin can land on a low edge
+            # structure or next to a taller neighbour, so height-match beats both "nearest" and
+            # "tallest": Forte -> its ~20 m tower, not a 3 m ledge or a 57 m neighbour.
+            gx, gz = np.meshgrid(np.arange(x0, x1), np.arange(z0, z1), indexing="ij")
+            dist = np.sqrt((gx - ix) ** 2 + (gz - iz) ** 2) * cell
+            score = np.where(has, np.abs(top * cell - float(elev_m)) + 0.05 * dist, 1e18)
+            jx, jz = np.unravel_index(int(np.argmin(score)), score.shape)
+            ix, iz = x0 + int(jx), z0 + int(jz)
+            iy = int(top[jx, jz]) + 1                                  # just above the roof (air)
+        iy = min(iy, NY - 1)
+        while iy < NY - 1 and M[ix, iy, iz] > 0:                       # guarantee an air voxel
+            iy += 1
+    return (ix, iy, iz)
 
 
 def fspl_db(distance_m: float, f_mhz: float) -> float:
@@ -311,6 +366,131 @@ def bs_field_3d(scene, bearing_deg, *, bands=None, o2i_db=O2I_DB["low_loss"],
                       "wavefront, so coherent summing would be a sampling artifact"})
     fg.combine_as = contracts.INCOHERENT
     return fg
+
+
+# ------------------------------------------------------ explicit directional O2I march (Commit 2)
+# A single PARALLEL wavefront marched along the arrival direction — the 3-D lift of the 2-D
+# `o2i_indoor_loss`, and an EXPLICIT directional path loss (only the wall-march term varies in
+# space, so it alone sets ρ; the outdoor spreading + O2I penetration are a calibrated level).
+#
+# NOTE ON WHERE THIS IS USED: the INDOOR O2I cross-validation does NOT march the Sandbox voxel
+# scene — a full bearing sweep showed that grid caps ρ at ≈0.22 for any direction (crude/generic
+# geometry), while the fine floor-plan grid reaches 0.64. So the indoor O2I predictor
+# (Cross_Validation/pathloss_3d/predict_o2i_3d.py) marches the ACCURATE floor-plan grid in the px
+# frame instead. These voxel-scene marchers remain the right tool for the OUTDOOR city voxel scene
+# (Commit 4), where there is no finer 2-D grid to fall back to.
+REG3D_PATH = HERE / "registration_3d.json"
+
+
+def arrival_dir_vox(bearing_deg, elevation_angle_deg=0.0, *, meta_path=None, reg_path=None):
+    """Unit arrival direction (toward the donor) in VOXEL axes (X,Y_up,Z).
+
+    Derived through the SAME georeference chain the rest of the pipeline uses, NOT the
+    `facade_sources_3d` "+X=east" convention (which the registration shows is mirrored —
+    voxel +X actually runs west). compass bearing → ENU → floor-plan px (inverse
+    `affine_px_to_local_m`) → voxel (the diagonal `affine_px_to_vox` sign/scale). The
+    vertical component comes from the elevation angle (≈0 for Forte Hall)."""
+    meta = json.loads(Path(meta_path or FLOORPLAN_META).read_text())
+    Linv = np.linalg.inv(np.asarray(meta["affine_px_to_local_m"], float)[:, :2])
+    br = np.radians(float(bearing_deg))
+    dpx = Linv @ np.array([np.sin(br), np.cos(br)])          # px-space dir toward the donor
+    reg = json.loads(Path(reg_path or REG3D_PATH).read_text())
+    aff = reg.get("affine_px_to_vox")
+    if aff is None:                                          # legacy scale-only fallback
+        aX = eZ = reg["px_to_vox_scale"]["x"]
+    else:
+        aX, eZ = aff[0][0], aff[1][1]                        # diagonal: px_x→X, px_y→Z
+    ux, uz = aX * dpx[0], eZ * dpx[1]
+    h = float(np.hypot(ux, uz)) or 1.0
+    ux, uz = ux / h, uz / h
+    phi = np.radians(float(elevation_angle_deg))
+    u = np.array([np.cos(phi) * ux, np.sin(phi), np.cos(phi) * uz], np.float64)
+    n = float(np.linalg.norm(u)) or 1.0
+    return (u / n).astype(np.float32)
+
+
+def material_loss_arrays(manifest, n=256):
+    """(loss_db, loss_per_m) indexed by material class id, from the manifest materials table.
+
+    The engine's `crossing_loss` uses the CrossingLUT (Fresnel/Airy); this explicit march
+    uses the FLAT per-crossing `loss_db` + per-metre `loss_per_m_db` table — exactly the
+    Motley-Keenan model the validated 2-D pipeline uses."""
+    loss_db = np.zeros(n, np.float32)
+    loss_per_m = np.zeros(n, np.float32)
+    for m in manifest.get("materials", []):
+        i = int(m["id"])
+        loss_db[i] = float(m.get("loss_db", 0.0))
+        loss_per_m[i] = float(m.get("loss_per_m_db", 0.0))
+    return loss_db, loss_per_m
+
+
+def o2i_wall_loss_3d(scene, u_from, *, loss_db, loss_per_m, step_cells=0.5,
+                     wall_sat_db=60.0, mask=None, chunk=8000):
+    """Indoor obstruction loss (dB) for a plane wave arriving along `u_from` (voxel axes).
+
+    3-D lift of the 2-D `o2i_indoor_loss`: from every (masked) voxel, march ONE parallel ray
+    toward the donor, count contiguous wall-material runs once (Motley-Keenan) + per-metre
+    bulk clutter, saturate at `wall_sat_db`. Voxels outside `mask` are +inf (masked later)."""
+    M = scene.M
+    NX, NY, NZ = M.shape
+    cell = float(scene.cell)
+    u = np.asarray(u_from, np.float32); u = u / (np.linalg.norm(u) or 1.0)
+    K = int(np.ceil(float(np.linalg.norm([NX, NY, NZ])) / step_cells)) + 2
+    s = np.arange(K, dtype=np.float32) * step_cells
+    seg_m = step_cells * cell
+    wall_ids = [c for c in range(len(loss_db)) if loss_db[c] > 0]
+    bulk_ids = [c for c in range(len(loss_per_m)) if loss_per_m[c] > 0]
+
+    ins = scene.inside if mask is None else mask
+    ins = np.ones(M.shape, bool) if ins is None else np.asarray(ins, bool)
+    V = np.argwhere(ins).astype(np.float32)                  # (Nvox,3) voxels we solve
+    out = np.full(V.shape[0], np.inf, np.float32)
+    for c0 in range(0, V.shape[0], chunk):
+        vv = V[c0:c0 + chunk]
+        sx = vv[:, 0:1] + s[None, :] * u[0]
+        sy = vv[:, 1:2] + s[None, :] * u[1]
+        sz = vv[:, 2:3] + s[None, :] * u[2]
+        valid = (sx >= 0) & (sx < NX) & (sy >= 0) & (sy < NY) & (sz >= 0) & (sz < NZ)
+        xi = np.clip(sx.round(), 0, NX - 1).astype(np.int32)
+        yi = np.clip(sy.round(), 0, NY - 1).astype(np.int32)
+        zi = np.clip(sz.round(), 0, NZ - 1).astype(np.int32)
+        mats = np.where(valid, M[xi, yi, zi], -1)            # -1 = off-grid sentinel (int8-safe)
+        extra = np.zeros(mats.shape[0], np.float32)
+        for c in wall_ids:
+            hit = mats == c
+            runs = hit[:, 0].astype(np.int32) + (hit[:, 1:] & ~hit[:, :-1]).sum(1, dtype=np.int32)
+            extra += loss_db[c] * runs
+        for c in bulk_ids:
+            extra += loss_per_m[c] * (mats == c).sum(1) * seg_m
+        out[c0:c0 + chunk] = wall_sat_db * -np.expm1(-extra / wall_sat_db)
+    full = np.zeros(M.shape, np.float32)     # unsolved voxels: 0 wall loss (free space, finite)
+    full[ins] = out
+    return full
+
+
+def o2i_pl_3d(scene, manifest, bearing_deg, freq_mhz, *, elevation_angle_deg=0.0,
+              level_db=0.0, ple_n=None, d0_m=None, distance_m=None,
+              step_cells=0.5, wall_sat_db=60.0, mask=None):
+    """Explicit directional O2I path loss PL(NX,NY,NZ) in dB.
+
+        PL(v) = outdoor_leg + O2I_penetration + indoor_walls(v)
+
+    `indoor_walls(v)` (the only spatially-varying term → the ρ driver) is the parallel-ray
+    Motley-Keenan march. The outdoor spreading + penetration collapse into the single
+    additive `level_db` the caller passes (the calibration fits it), so ρ is set by the
+    march alone. When `level_db` is 0 and `distance_m` is given, a plain log-distance outdoor
+    leg is added for a physically-sensible absolute level."""
+    u = arrival_dir_vox(bearing_deg, elevation_angle_deg)
+    loss_db, loss_per_m = material_loss_arrays(manifest)
+    walls = o2i_wall_loss_3d(scene, u, loss_db=loss_db, loss_per_m=loss_per_m,
+                             step_cells=step_cells, wall_sat_db=wall_sat_db, mask=mask)
+    lvl = float(level_db)
+    if lvl == 0.0 and distance_m is not None:
+        n_exp = float(scene.n_exp if ple_n is None else ple_n)
+        d0 = float(scene.d0 if d0_m is None else d0_m)
+        bi = scene.band_index(freq_mhz)
+        lvl = float(scene.fspl1[bi] + 10.0 * n_exp * np.log10(max(distance_m, d0)))
+    return (walls + lvl).astype(np.float32), u
 
 
 # --------------------------------------------------------------------------- registry
