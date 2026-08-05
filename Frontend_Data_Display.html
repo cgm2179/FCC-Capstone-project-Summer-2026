@@ -326,8 +326,8 @@
           <span class="map-osm-ctl" id="osmBasemapCtl" style="margin-left:auto; display:inline-flex; gap:14px; align-items:center;">
             <label>OSM basemap
               <select id="osmBasemap" title="Show a real-world map beneath the floor plan. 'static' uses the embedded raster from prepare_indoor_basemap.py; 'live' streams OpenStreetMap tiles (needs internet).">
-                <option value="off" selected>off</option>
-                <option value="static">static</option>
+                <option value="off">off</option>
+                <option value="static" selected>static</option>
                 <option value="live">live tiles</option>
               </select>
             </label>
@@ -360,6 +360,8 @@
             <button type="button" id="view3dReset" title="Recenter and reframe the camera">Reset view</button>
             <button type="button" id="view3dWire" title="Toggle wireframe">Wireframe</button>
             <button type="button" id="view3dUp" title="Rotate 90° — use if the model imports lying on its side (Z-up vs Y-up)">Flip up-axis</button>
+            <label class="rf-ctl" title="Translucent building shell above/below the floor — a sense of elevation (the 7th floor sandwiched inside its building)"><input type="checkbox" id="view3dShell" checked> Building</label>
+            <label class="rf-ctl" title="Show the OSM map on the ground beneath the building"><input type="checkbox" id="view3dOsmGround" checked> OSM ground</label>
             <button type="button" id="rfContourBtn" title="Overlay the RF coverage (current metric + filters) as a contour on the floor">RF contour: off</button>
             <span class="spacer"></span>
             <label class="rf-ctl">Model <select id="modelSelect" title="Switch between available floor models"></select></label>

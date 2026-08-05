@@ -31,6 +31,13 @@
       canvas.addEventListener('pointerdown', function () { canvas.focus(); });   // WebGL camera drag needs focus
       var instance = null, queue = [];
 
+      // Keep the Unity framebuffer matched to the canvas as the dashboard's viewport column resizes
+      // (widen the browser → the 1fr grid column grows → re-notify Unity so it re-reads the canvas size).
+      if (window.ResizeObserver) {
+        var ro = new ResizeObserver(function () { try { window.dispatchEvent(new Event('resize')); } catch (e) {} });
+        ro.observe(canvas);
+      }
+
       // Unity → page: the .jslib calls window.__unitySim.*; forward those to the PARENT frame.
       window.__unitySim = {
         onStatus: function (s) { post('status', { text: String(s) }); },
@@ -58,6 +65,7 @@
         companyName: 'DefaultCompany',
         productName: 'RF Simulator (WebGL)',
         productVersion: '1.0',
+        matchWebGLToCanvasSize: true,   // resize the framebuffer to the canvas (responsive to the dashboard column)
       };
 
       var s = document.createElement('script');

@@ -211,7 +211,12 @@
     // Engine toggle, above the viewport.
     var toggle = el('button', { type: 'button', id: 'unitySimToggle', 'class': 'sim-btn ghost' }, 'margin:0 0 8px 0;');
     toggle.textContent = '3D engine: Three.js  →  switch to Unity (C#)';
-    wrap.parentNode.insertBefore(toggle, wrap);
+    // Insert the toggle ABOVE the .sim3d-layout grid, NOT into it. wrap.parentNode is the
+    // `grid: 264px 1fr` layout; inserting the button there made it a grid cell that claimed the
+    // 1fr column and pushed the viewport to the next row's 264px column — squeezing both the Unity
+    // host and the three.js viewport to 264px. Placing it before the grid keeps the viewport full-width.
+    var simLayout = wrap.parentNode;                       // .sim3d-layout
+    (simLayout.parentNode || simLayout).insertBefore(toggle, simLayout);
     toggle.addEventListener('click', function () {
       state.active = !state.active;
       if (state.active) {
