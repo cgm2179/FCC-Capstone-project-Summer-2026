@@ -762,5 +762,10 @@
        waveform, static field + animated wavefront). Lazy-inits when the
        Simulation tab is opened in 3D mode. -->
   <script type="module" src="Frontend/simulator/simulation3d.js?v=cad-wash-5"></script>
+
+  <!-- Additive: "3D engine: Three.js ⇄ Unity (C#)" toggle for the Simulation tab. Overlays the Unity
+       WebGL C# engine (from the nested Unity_RF_Simulator/ repo) in an isolated iframe when switched on;
+       the three.js sim above is untouched and remains the default. See Frontend/simulator/unity_bridge.js. -->
+  <script src="Frontend/simulator/unity_bridge.js" defer></script>
 </body>
 </html>
