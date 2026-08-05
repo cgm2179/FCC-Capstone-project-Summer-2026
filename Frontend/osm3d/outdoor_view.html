@@ -177,6 +177,7 @@
   document.getElementById('btnUnity').addEventListener('click', function () { show('unity'); });
   document.getElementById('modelSel').addEventListener('change', function (e) {
     var indoor = e.target.value === 'indoor';
+    if (unityActive()) { unitySwitchScene(indoor ? 'indoor' : 'outdoor'); return; }   // Unity: swap NoMa ⇄ FCC 7th floor
     if (!is3d()) map2d.setView([FCC.lat, FCC.lon], indoor ? 18 : 16);
     else if (map3d) map3d.setPosition({ latitude: FCC.lat, longitude: FCC.lon }).setZoom(indoor ? 18 : 16.3);
   });
@@ -315,9 +316,27 @@
   // ---------- Unity C# engine (nested iframe) — the Map Coverage Outdoor-3D option ----------
   // Renders the NoMa 3D model + walk points + OSM ground (Phase 4) and runs the C# path loss with
   // the live predicts-vs-measured score. Driven over postMessage (this view is its parent frame).
-  var unityFrame = null, unityReady = false;
+  // Unity scene target follows the Model selector: "NoMa city" → outdoor NoMa scene; "Indoor building
+  // (FCC 7th floor)" → the Coverage scene with georeferenced base stations (Step 3). The build BOOTS the
+  // Coverage (indoor) scene, so switching to outdoor takes one SetScene; switching to indoor from boot
+  // needs none. Phase machine avoids the re-send-on-every-ready reload loop.
+  var unityFrame = null, unityReady = false, unityPhase = 'boot', unityLoaded = null, unityPendingTarget = null;
   function unitySend(method, value) { if (unityFrame && unityFrame.contentWindow) { try { unityFrame.contentWindow.postMessage({ source: 'unitySim:cmd', method: method, value: String(value) }, '*'); } catch (e) {} } }
   function unityActive() { return document.getElementById('unityHost').style.display !== 'none'; }
+  function unityTargetScene() { return document.getElementById('modelSel').value === 'indoor' ? 'indoor' : 'outdoor'; }
+  function unityConfigure(scene) {
+    unityPhase = 'ready'; unityLoaded = scene;
+    document.getElementById('unityStatus').textContent = scene === 'indoor'
+      ? 'Unity ready — FCC 7th floor + C# path loss' : 'Unity ready — NoMa 3D + C# path loss';
+    unitySend('SetDimension', '3d');
+    setTimeout(unitySyncSector, 300);
+  }
+  function unitySwitchScene(target) {
+    if (!unityReady || unityLoaded === target || unityPhase === 'switching') return;   // boot handles the pre-ready case
+    unityPendingTarget = target; unityPhase = 'switching';
+    document.getElementById('unityStatus').textContent = 'Unity — loading ' + (target === 'indoor' ? 'FCC 7th floor' : 'NoMa 3D') + '…';
+    unitySend('SetScene', target);   // 'indoor' maps to the Coverage scene in Bridge.SetScene
+  }
   function unitySyncSector() {
     if (!unityReady) return;
     var pci = filter.pci;
@@ -341,7 +360,20 @@
     var st = document.getElementById('unityStatus');
     if (d.kind === 'status') st.textContent = d.text;
     else if (d.kind === 'progress') st.textContent = 'loading Unity… ' + Math.round((d.value || 0) * 100) + '%';
-    else if (d.kind === 'ready') { unityReady = true; st.textContent = 'Unity ready — NoMa 3D + C# path loss'; unitySend('SetScene', 'outdoor'); unitySend('SetDimension', '3d'); setTimeout(unitySyncSector, 900); }
+    else if (d.kind === 'ready') {
+      // Bridge.Start fires 'ready' on EVERY scene load. Re-sending SetScene on each ready would reload the
+      // scene forever (the black-canvas bug). So SetScene is sent at most once per switch and stray readys
+      // in the 'ready' phase are ignored.
+      unityReady = true;
+      if (unityPhase === 'boot') {
+        var target = unityTargetScene();
+        unityPendingTarget = target;
+        if (target === 'outdoor') { unityPhase = 'switching'; st.textContent = 'Unity ready — loading NoMa 3D…'; unitySend('SetScene', 'outdoor'); }
+        else unityConfigure('indoor');                         // build already booted the Coverage (indoor) scene
+      } else if (unityPhase === 'switching') {
+        unityConfigure(unityPendingTarget || unityTargetScene());
+      }                                                        // phase 'ready' → ignore (no reload)
+    }
     else if (d.kind === 'error') st.textContent = 'Unity failed: ' + d.text;
   });
 
