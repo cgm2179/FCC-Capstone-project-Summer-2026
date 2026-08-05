@@ -34,7 +34,9 @@
   var EMBED_URL = 'unity/unity_embed.html';
   // sector catalog, from the vendored Unity build's StreamingAssets.
   var CATALOG_URL = 'unity/Build/WebGL/StreamingAssets/base_stations.json';
-  var BANDS_MHZ = [619, 1935, 2442, 3500, 5500, 6125];
+  // Indoor Tx is Wi-Fi only (Step 4): 2.4 / 5 / 6 GHz. (The band selector is shown for the indoor floor;
+  // outdoor gets its frequency from the cellular sector picker instead.)
+  var BANDS_MHZ = [2442, 5500, 6125];
 
   var state = { frame: null, active: false, ready: false, statusEl: null };
 
@@ -79,7 +81,7 @@
     var title = el('strong'); title.textContent = 'Unity RF engine (C#)';
     var bandSel = el('select', { id: 'unitySimBand', title: 'Solve frequency (MHz)' });
     BANDS_MHZ.forEach(function (m) {
-      var o = el('option'); o.value = m; o.textContent = m + ' MHz'; if (m === 3500) o.selected = true; bandSel.appendChild(o);
+      var o = el('option'); o.value = m; o.textContent = m + ' MHz'; if (m === 5500) o.selected = true; bandSel.appendChild(o);
     });
     var sliceLabel = el('label', null, 'display:flex; gap:6px; align-items:center;'); sliceLabel.textContent = 'Cut height';
     var slice = el('input', { id: 'unitySimSlice', type: 'range', min: '0', max: '16', value: '6' });
@@ -147,10 +149,36 @@
     var walkChk = el('input', { id: 'unitySimWalk', type: 'checkbox' }); walkChk.checked = true;
     walkLabel.appendChild(walkChk); walkLabel.appendChild(document.createTextNode('Walk dots'));
 
+    // Step 2 — OSM ground: reveal it + live-align it to the extruded buildings. The buildings come from an
+    // OBJ and the ground from OSM raster tiles, so their registration can differ; nudge X/Z (metres) and
+    // rotation (deg) until the streets line up under the footprints, then those values get baked as defaults.
+    var mapLabel = el('label', { id: 'unitySimMapWrap' }, 'display:none; gap:5px; align-items:center;');
+    var mapChk = el('input', { id: 'unitySimMap', type: 'checkbox' }); mapChk.checked = true;
+    mapLabel.appendChild(mapChk); mapLabel.appendChild(document.createTextNode('OSM map'));
+    var alignLabel = el('label', { id: 'unitySimAlignWrap' }, 'display:none; gap:4px; align-items:center;');
+    alignLabel.appendChild(document.createTextNode('Align X'));
+    var alignX = el('input', { id: 'unitySimAlignX', type: 'number', step: '1', value: '0', title: 'Shift OSM ground east/west (m)' }, 'width:50px;');
+    alignLabel.appendChild(alignX); alignLabel.appendChild(document.createTextNode('Z'));
+    var alignZ = el('input', { id: 'unitySimAlignZ', type: 'number', step: '1', value: '0', title: 'Shift OSM ground north/south (m)' }, 'width:50px;');
+    alignLabel.appendChild(alignZ); alignLabel.appendChild(document.createTextNode('Rot'));
+    var alignR = el('input', { id: 'unitySimAlignR', type: 'number', step: '0.5', value: '0', title: 'Rotate OSM ground about the tile centre (deg)' }, 'width:46px;');
+    alignLabel.appendChild(alignR);
+
+    // Step 3/4 — indoor (FCC 7th floor) controls: which base station illuminates the floor + the floor's
+    // geo heading (rotate until the base-station posts point the right way). Shown only in indoor mode.
+    var floorLabel = el('label', { id: 'unitySimFloorWrap' }, 'display:none; gap:4px; align-items:center;');
+    floorLabel.appendChild(document.createTextNode('Donor'));
+    var floorBsSel = el('select', { id: 'unitySimFloorBs', title: 'Cellular donor base station (context) — the in-floor Wi-Fi AP band drives the coverage' });
+    SITES.forEach(function (s) { var o = el('option'); o.value = s[0]; o.textContent = s[1]; floorBsSel.appendChild(o); });
+    floorLabel.appendChild(floorBsSel);
+    floorLabel.appendChild(document.createTextNode('Floor°'));
+    var floorHeading = el('input', { id: 'unitySimFloorHeading', type: 'number', step: '5', value: '0', title: 'Rotate the floor geo frame (deg) until the base-station posts point correctly' }, 'width:48px;');
+    floorLabel.appendChild(floorHeading);
+
     var status = el('span', { id: 'unitySimStatus' }, 'margin-left:auto; opacity:.9;'); status.textContent = 'idle';
     state.statusEl = status;
     [title, sceneLabel, dimLabel, bandSel, sliceLabel, bsLabel, carrier.label, cellBand.label, pci.label,
-     geom.label, trajLabel, heatLabel, rxLabel, walkLabel, volLabel, opLabel, schemeLabel, status]
+     geom.label, trajLabel, heatLabel, rxLabel, walkLabel, mapLabel, alignLabel, floorLabel, volLabel, opLabel, schemeLabel, status]
       .forEach(function (n) { bar.appendChild(n); });
     host.appendChild(bar);
     wrap.appendChild(host);
@@ -193,13 +221,19 @@
     heat.addEventListener('change', function () { send('ShowHeatmap', heat.checked ? '1' : '0'); });
     rxChk.addEventListener('change', function () { send('SetRxMoveMode', rxChk.checked ? '1' : '0'); });
     walkChk.addEventListener('change', function () { send('ShowWalk', walkChk.checked ? '1' : '0'); });
+    mapChk.addEventListener('change', function () { send('SetBasemapVisible', mapChk.checked ? '1' : '0'); });
+    function sendAlign() { send('SetBasemapNudge', (alignX.value || 0) + '|' + (alignZ.value || 0) + '|' + (alignR.value || 0)); }
+    [alignX, alignZ, alignR].forEach(function (n) { n.addEventListener('input', sendAlign); });
+    floorBsSel.addEventListener('change', function () { send('SelectBaseStation', floorBsSel.value); });
+    floorHeading.addEventListener('input', function () { send('SetFloorHeading', floorHeading.value); });
 
     function setOutdoorUI(outdoor) {
       dimLabel.style.display = 'flex';           // 2D/3D toggle applies to the indoor floor AND the outdoor view
       bsLabel.style.display = outdoor ? 'flex' : 'none';
-      [carrier.label, cellBand.label, pci.label, geom.label, heatLabel, rxLabel, walkLabel].forEach(function (n) { n.style.display = outdoor ? 'flex' : 'none'; });
+      [carrier.label, cellBand.label, pci.label, geom.label, heatLabel, rxLabel, walkLabel, mapLabel, alignLabel].forEach(function (n) { n.style.display = outdoor ? 'flex' : 'none'; });
       trajLabel.style.display = outdoor ? 'flex' : 'none';
-      bandSel.style.display = outdoor ? 'none' : '';           // outdoor freq comes from the sector picker
+      floorLabel.style.display = outdoor ? 'none' : 'flex';    // indoor: base-station donor + floor heading (Step 3)
+      bandSel.style.display = outdoor ? 'none' : '';           // outdoor freq comes from the sector picker; indoor = Wi-Fi bands
       sliceLabel.style.display = 'flex';                        // elevation slice: indoor cut-height AND outdoor
     }
     sceneSel.addEventListener('change', function () {

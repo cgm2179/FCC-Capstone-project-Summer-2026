@@ -17,12 +17,12 @@
  "sites": [
   {
    "site_id": "BS7_forte_hall",
-   "name": "Forte Hall",
+   "name": "Forte Hall (Gonzaga HS)",
    "status": "live",
-   "lon": -77.01142028984886,
-   "lat": 38.901550064268065,
-   "vox_x": 348.69,
-   "vox_z": 90.85,
+   "lon": -77.01134,
+   "lat": 38.90159,
+   "vox_x": 346.37,
+   "vox_z": 92.33,
    "building_height_m": 20.0,
    "height_voxels": 6.67,
    "color": "#c0392b",
@@ -311,7 +311,7 @@
    "distance_m": 618.1,
    "bearing_deg": 253.1,
    "in_bounds": true,
-   "n_sectors": 1,
+   "n_sectors": 20,
    "sectors": [
     {
      "carrier": "Verizon",
@@ -321,8 +321,217 @@
      "freq_mhz": 751.0,
      "azimuth_deg": 0.0,
      "has_az": false,
-     "rsrp_mean": -109.93,
-     "n_points": 1
+     "rsrp_mean": -74.5,
+     "n_points": 38
+    },
+    {
+     "carrier": "Verizon",
+     "network": "nr_fr1",
+     "band": 5,
+     "pci": 82,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -77.0,
+     "n_points": 48
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "nr_fr1",
+     "band": 66,
+     "pci": 120,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -72.5,
+     "n_points": 10
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 66,
+     "pci": 179,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -79.0,
+     "n_points": 29
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 12,
+     "pci": 142,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -68.9,
+     "n_points": 3
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 66,
+     "pci": 42,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -89.9,
+     "n_points": 10
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 41,
+     "pci": 165,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": null,
+     "n_points": 0
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 41,
+     "pci": 5,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": null,
+     "n_points": 0
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 41,
+     "pci": 244,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": null,
+     "n_points": 0
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 41,
+     "pci": 316,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": null,
+     "n_points": 0
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 12,
+     "pci": 20,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -68.1,
+     "n_points": 45
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 2,
+     "pci": 231,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -76.2,
+     "n_points": 37
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "nr_fr1",
+     "band": 41,
+     "pci": 233,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -83.5,
+     "n_points": 3
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 12,
+     "pci": 453,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -74.5,
+     "n_points": 14
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 2,
+     "pci": 201,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -91.5,
+     "n_points": 24
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 2,
+     "pci": 232,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -80.5,
+     "n_points": 14
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 12,
+     "pci": 463,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -70.9,
+     "n_points": 4
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 41,
+     "pci": 2,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": null,
+     "n_points": 0
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 12,
+     "pci": 168,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -72.1,
+     "n_points": 21
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "nr_fr1",
+     "band": 41,
+     "pci": 150,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -88.7,
+     "n_points": 16
     }
    ]
   },
@@ -340,8 +549,41 @@
    "distance_m": 409.0,
    "bearing_deg": 308.4,
    "in_bounds": true,
-   "n_sectors": 2,
+   "n_sectors": 10,
    "sectors": [
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 66,
+     "pci": 17,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -82.6,
+     "n_points": 22
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 41,
+     "pci": 489,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -122.4,
+     "n_points": 2
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 41,
+     "pci": 172,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -90.4,
+     "n_points": 30
+    },
     {
      "carrier": "T-Mobile",
      "network": "nr_fr1",
@@ -350,8 +592,30 @@
      "freq_mhz": 2510.55,
      "azimuth_deg": 0.0,
      "has_az": false,
-     "rsrp_mean": -119.5,
-     "n_points": 10
+     "rsrp_mean": -82.0,
+     "n_points": 50
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 41,
+     "pci": 429,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -75.6,
+     "n_points": 38
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 41,
+     "pci": 382,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -68.1,
+     "n_points": 25
     },
     {
      "carrier": "T-Mobile",
@@ -361,8 +625,41 @@
      "freq_mhz": 2145.0,
      "azimuth_deg": 0.0,
      "has_az": false,
-     "rsrp_mean": -115.91,
-     "n_points": 47
+     "rsrp_mean": -82.5,
+     "n_points": 33
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 41,
+     "pci": 300,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": null,
+     "n_points": 0
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 66,
+     "pci": 56,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -76.8,
+     "n_points": 7
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 41,
+     "pci": 214,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": null,
+     "n_points": 0
     }
    ]
   },
@@ -380,8 +677,19 @@
    "distance_m": 203.6,
    "bearing_deg": 309.9,
    "in_bounds": true,
-   "n_sectors": 4,
+   "n_sectors": 6,
    "sectors": [
+    {
+     "carrier": "AT&T",
+     "network": "lte",
+     "band": 12,
+     "pci": 67,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -68.5,
+     "n_points": 20
+    },
     {
      "carrier": "AT&T",
      "network": "lte",
@@ -390,8 +698,41 @@
      "freq_mhz": 763.0,
      "azimuth_deg": 0.0,
      "has_az": false,
-     "rsrp_mean": -107.33,
-     "n_points": 4
+     "rsrp_mean": -67.3,
+     "n_points": 16
+    },
+    {
+     "carrier": "AT&T",
+     "network": "lte",
+     "band": 12,
+     "pci": 171,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -74.4,
+     "n_points": 9
+    },
+    {
+     "carrier": "AT&T",
+     "network": "lte",
+     "band": 30,
+     "pci": 172,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -90.4,
+     "n_points": 30
+    },
+    {
+     "carrier": "AT&T",
+     "network": "nr_fr1",
+     "band": 2,
+     "pci": 173,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -68.3,
+     "n_points": 11
     },
     {
      "carrier": "AT&T",
@@ -401,30 +742,8 @@
      "freq_mhz": 739.0,
      "azimuth_deg": 0.0,
      "has_az": false,
-     "rsrp_mean": -104.78,
-     "n_points": 63
-    },
-    {
-     "carrier": "AT&T",
-     "network": "lte",
-     "band": 14,
-     "pci": 293,
-     "freq_mhz": 763.0,
-     "azimuth_deg": 0.0,
-     "has_az": false,
-     "rsrp_mean": -107.54,
-     "n_points": 66
-    },
-    {
-     "carrier": "AT&T",
-     "network": "lte",
-     "band": 30,
-     "pci": 293,
-     "freq_mhz": 2355.0,
-     "azimuth_deg": 0.0,
-     "has_az": false,
-     "rsrp_mean": -122.48,
-     "n_points": 3
+     "rsrp_mean": -75.9,
+     "n_points": 55
     }
    ]
   },
@@ -442,8 +761,30 @@
    "distance_m": 108.9,
    "bearing_deg": 239.6,
    "in_bounds": true,
-   "n_sectors": 8,
+   "n_sectors": 12,
    "sectors": [
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 2,
+     "pci": 71,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -81.5,
+     "n_points": 30
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 12,
+     "pci": 169,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": null,
+     "n_points": 0
+    },
     {
      "carrier": "T-Mobile",
      "network": "lte",
@@ -452,8 +793,19 @@
      "freq_mhz": 1970.0,
      "azimuth_deg": 0.0,
      "has_az": false,
-     "rsrp_mean": -112.05,
-     "n_points": 16
+     "rsrp_mean": -81.1,
+     "n_points": 27
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 12,
+     "pci": 199,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -72.0,
+     "n_points": 42
     },
     {
      "carrier": "T-Mobile",
@@ -463,52 +815,41 @@
      "freq_mhz": 1970.0,
      "azimuth_deg": 0.0,
      "has_az": false,
-     "rsrp_mean": -107.98,
+     "rsrp_mean": -79.9,
+     "n_points": 38
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 66,
+     "pci": 54,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -86.2,
+     "n_points": 43
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 4,
+     "pci": 194,
+     "freq_mhz": 2145.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -82.3,
+     "n_points": 34
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 4,
+     "pci": 193,
+     "freq_mhz": 2145.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -81.0,
      "n_points": 40
-    },
-    {
-     "carrier": "T-Mobile",
-     "network": "lte",
-     "band": 4,
-     "pci": 194,
-     "freq_mhz": 2145.0,
-     "azimuth_deg": 0.0,
-     "has_az": false,
-     "rsrp_mean": -118.0,
-     "n_points": 47
-    },
-    {
-     "carrier": "T-Mobile",
-     "network": "lte",
-     "band": 66,
-     "pci": 194,
-     "freq_mhz": 2145.0,
-     "azimuth_deg": 0.0,
-     "has_az": false,
-     "rsrp_mean": -115.91,
-     "n_points": 47
-    },
-    {
-     "carrier": "T-Mobile",
-     "network": "lte",
-     "band": 4,
-     "pci": 193,
-     "freq_mhz": 2145.0,
-     "azimuth_deg": 0.0,
-     "has_az": false,
-     "rsrp_mean": -110.46,
-     "n_points": 32
-    },
-    {
-     "carrier": "T-Mobile",
-     "network": "lte",
-     "band": 66,
-     "pci": 193,
-     "freq_mhz": 2145.0,
-     "azimuth_deg": 0.0,
-     "has_az": false,
-     "rsrp_mean": -109.41,
-     "n_points": 36
     },
     {
      "carrier": "T-Mobile",
@@ -518,19 +859,41 @@
      "freq_mhz": 731.5,
      "azimuth_deg": 0.0,
      "has_az": false,
-     "rsrp_mean": -92.12,
-     "n_points": 74
+     "rsrp_mean": -76.9,
+     "n_points": 46
+    },
+    {
+     "carrier": "T-Mobile",
+     "network": "lte",
+     "band": 2,
+     "pci": 140,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -72.1,
+     "n_points": 1
     },
     {
      "carrier": "AT&T",
      "network": "lte",
-     "band": 30,
-     "pci": 411,
-     "freq_mhz": 2355.0,
+     "band": 2,
+     "pci": 146,
+     "freq_mhz": 0.0,
      "azimuth_deg": 0.0,
      "has_az": false,
-     "rsrp_mean": -127.34,
-     "n_points": 28
+     "rsrp_mean": null,
+     "n_points": 0
+    },
+    {
+     "carrier": "AT&T",
+     "network": "lte",
+     "band": 2,
+     "pci": 411,
+     "freq_mhz": 0.0,
+     "azimuth_deg": 0.0,
+     "has_az": false,
+     "rsrp_mean": -83.5,
+     "n_points": 32
     }
    ]
   },

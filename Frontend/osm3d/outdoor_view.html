@@ -8,9 +8,11 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link href="https://cdn.osmbuildings.org/4.1.1/OSMBuildings.css" rel="stylesheet">
   <script src="https://cdn.osmbuildings.org/4.1.1/OSMBuildings.js"></script>
-  <!-- base-station catalog (window.BASE_STATIONS) + the baked 7/24 outdoor walk (window.OUTDOOR_WALK) -->
+  <!-- base-station catalog (window.BASE_STATIONS) + the baked, tagged 7/24 outdoor walk +
+       the 2D city-clutter raster for the outdoor path-loss sim (window.NOMA_CLUTTER) -->
   <script src="../../Data/base_stations.js"></script>
   <script src="../../Data/outdoor_walk.js"></script>
+  <script src="../../Data/noma_clutter.js"></script>
   <style>
     html, body { margin: 0; height: 100%; width: 100%; font-family: system-ui, sans-serif; background: #eef1f0; }
     #map2d, #map3d { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -27,21 +29,36 @@
                     background: linear-gradient(90deg, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000); }
     #legend .lr { display: flex; justify-content: space-between; width: 180px; }
     #legend .fcc { color: #2c7fb8; font-weight: 600; }
+    #filterNote { position: absolute; top: 10px; right: 10px; z-index: 500; background: rgba(10,18,36,.82); color: #dfe6f2;
+                  border-radius: 8px; padding: 6px 10px; font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.2); max-width: 260px; }
   </style>
 </head>
 <body>
   <div id="map2d"></div>
   <div id="map3d"></div>
+  <!-- Unity C# engine host (NoMa 3D model + OSM ground + 3D path loss); loaded on demand -->
+  <div id="unityHost" style="position:absolute; inset:0; display:none; background:#0f1728;"></div>
+  <div id="unityStatus" style="position:absolute; bottom:14px; right:12px; z-index:600; display:none; background:rgba(10,18,36,.85); color:#dfe6f2; border-radius:8px; padding:6px 10px; font-size:12px;"></div>
   <div id="bar">
     <span>View</span>
     <button id="btn2d" class="active" type="button">2D map</button>
     <button id="btn3d" type="button">3D city</button>
+    <button id="btnUnity" type="button" title="Unity C# engine: the NoMa 3D model + walk points + OSM ground, with a Simulate 3D Path Loss (C# physics) and the live predicts-vs-reality score">Unity 3D (C#)</button>
     <span style="margin-left:6px;">Model</span>
     <select id="modelSel" title="NoMa city (default) or focus the indoor FCC building">
       <option value="noma" selected>NoMa city + OSM</option>
       <option value="indoor">Indoor building (FCC 7th floor)</option>
     </select>
+    <button id="btnSim" type="button" title="2D path-loss over the rasterized city clutter, from a Tx (default FCC HQ; the selected PCI's base station when one is picked). Shows a predicts-vs-reality confidence score.">◈ Simulate 2D PL</button>
+    <button id="btnSimOff" type="button" style="display:none;" title="Hide the coverage overlay">Clear</button>
+    <span style="margin-left:6px;">Colors</span>
+    <select id="colorSel" title="Colour scale for the walk dots and the sim coverage">
+      <option value="rainbow" selected>Rainbow</option>
+      <option value="viridis">Viridis</option>
+    </select>
   </div>
+  <div id="simScore" style="position:absolute; top:56px; right:10px; z-index:500; display:none; background:rgba(10,18,36,.9); color:#dfe6f2; border-radius:8px; padding:9px 12px; font-size:12px; box-shadow:0 2px 10px rgba(0,0,0,.25); max-width:280px; line-height:1.5;"></div>
+  <div id="filterNote">Whole 7/24 walk · <span id="shownN">0</span> pts</div>
   <div id="legend">
     <div><span class="fcc">◉ FCC</span> (walk centre) · ▲ base stations</div>
     <div>7/24 walk — RSRP</div>
@@ -51,81 +68,329 @@
 
   <script>
   'use strict';
-  var WALK = (window.OUTDOOR_WALK && window.OUTDOOR_WALK.points) || [];
-  var FCC = (window.OUTDOOR_WALK && window.OUTDOOR_WALK.fcc) || { lon: -77.00740, lat: 38.90359 };
-  var FORTE = { lon: -77.011420, lat: 38.901550 };
+  var W = window.OUTDOOR_WALK || { pts: [], ops: [], nets: [], bands: [], chs: [], fcc: { lon: -77.00740, lat: 38.90359 } };
+  var FCC = W.fcc, FORTE = { lon: -77.011420, lat: 38.901550 };
   var BS = (window.BASE_STATIONS || []).filter(function (s) { return s.lat != null; });
+  // reconstruct tagged points from the packed rows: [lon,lat,rsrp,pci,opIdx,netIdx,bandIdx,chIdx]
+  var PTS = (W.pts || []).map(function (r) {
+    return { lon: r[0], lat: r[1], rsrp: r[2], pci: r[3], op: W.ops[r[4]], net: W.nets[r[5]], band: W.bands[r[6]], ch: W.chs[r[7]] };
+  });
+  // active sidebar filter — '' / 'all' means no constraint on that dimension
+  var filter = { operator: '', network: '', band: '', pci: '', channel: '' };
+  function on(v) { return v && v !== 'all' && v !== 'All'; }
+  function matches(p) {
+    if (on(filter.operator) && p.op !== filter.operator) return false;
+    if (on(filter.network) && p.net !== filter.network) return false;
+    if (on(filter.band) && String(p.band) !== String(filter.band)) return false;
+    if (on(filter.pci) && String(p.pci) !== String(filter.pci)) return false;
+    if (on(filter.channel) && String(p.ch) !== String(filter.channel)) return false;
+    return true;
+  }
+  function shown() { return PTS.filter(matches); }
 
-  // RSRP → jet-ish colour (−120 weak blue … −60 strong red)
+  var colorScheme = 'rainbow';   // 'rainbow' | 'viridis' — applies to walk dots AND the sim coverage
+  var RAMP = {
+    rainbow: [[0, 0, 255], [0, 255, 255], [0, 255, 0], [255, 255, 0], [255, 0, 0]],
+    viridis: [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]],
+  };
   function rsrpColor(v) {
     var t = Math.max(0, Math.min(1, (v + 120) / 60));
-    var stops = [[0, 0, 255], [0, 255, 255], [0, 255, 0], [255, 255, 0], [255, 0, 0]];
-    var x = t * (stops.length - 1), i = Math.floor(x), f = x - i;
-    var a = stops[i], b = stops[Math.min(i + 1, stops.length - 1)];
+    var st = RAMP[colorScheme] || RAMP.rainbow;
+    var x = t * (st.length - 1), i = Math.floor(x), f = x - i, a = st[i], b = st[Math.min(i + 1, st.length - 1)];
     return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * f) + ',' + Math.round(a[1] + (b[1] - a[1]) * f) + ',' + Math.round(a[2] + (b[2] - a[2]) * f) + ')';
   }
 
-  // ---------- 2D: Leaflet OSM map, FCC centred, whole walk as dots + base stations ----------
+  // ---------- 2D Leaflet ----------
   var map2d = L.map('map2d', { zoomControl: true, preferCanvas: true }).setView([FCC.lat, FCC.lon], 16);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap · © CARTO', maxZoom: 20, subdomains: 'abcd'
-  }).addTo(map2d);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '© OpenStreetMap · © CARTO', maxZoom: 20, subdomains: 'abcd' }).addTo(map2d);
   var walkLayer = L.layerGroup().addTo(map2d);
-  WALK.forEach(function (p) {
-    L.circleMarker([p.lat, p.lon], { radius: 3, stroke: false, fillColor: rsrpColor(p.rsrp), fillOpacity: 0.85 })
-      .bindTooltip('RSRP ' + p.rsrp + ' dBm', { direction: 'top' }).addTo(walkLayer);
-  });
+  function renderWalk2d() {
+    walkLayer.clearLayers();
+    var pts = shown(), n = 0;
+    pts.forEach(function (p) {
+      L.circleMarker([p.lat, p.lon], { radius: 3, stroke: false, fillColor: rsrpColor(p.rsrp), fillOpacity: 0.85 })
+        .bindTooltip(p.op + ' · ' + p.net.toUpperCase() + ' B' + p.band + ' · PCI ' + p.pci + ' · RSRP ' + p.rsrp + ' dBm', { direction: 'top' })
+        .addTo(walkLayer);
+      n++;
+    });
+    document.getElementById('shownN').textContent = n;
+  }
   BS.forEach(function (s) {
-    var isForte = s.site_id === 'BS7_forte_hall';
-    L.marker([s.lat, s.lon]).addTo(map2d)
-      .bindPopup('<b>' + s.name + '</b><br>' + (isForte ? 'Verizon donor · PCI 396/397/398' : (s.status || '')) + '<br>' + (s.building_height_m || '?') + ' m');
+    L.marker([s.lat, s.lon]).addTo(map2d).bindPopup('<b>' + s.name + '</b><br>' + (s.building_height_m || '?') + ' m');
   });
   L.circleMarker([FCC.lat, FCC.lon], { radius: 9, color: '#fff', weight: 2, fillColor: '#2c7fb8', fillOpacity: 1 })
-    .bindTooltip('FCC — 7th-floor walk centre', { permanent: false, direction: 'right' }).addTo(map2d);
+    .bindTooltip('FCC — 7th-floor walk centre', { direction: 'right' }).addTo(map2d);
+  renderWalk2d();
 
-  // ---------- 3D: OSM Buildings, same content as extruded features ----------
-  var map3d = null, built3d = false;
-  var M_PER_DEG_LAT = 111320;
-  function square(lon, lat, sizeM, height, color) {
-    var dLat = sizeM / M_PER_DEG_LAT, dLon = sizeM / (M_PER_DEG_LAT * Math.cos(lat * Math.PI / 180));
-    return { type: 'Feature', properties: { height: height, minHeight: 0, color: color, roofColor: color, wallColor: color },
+  // ---------- 3D OSM Buildings ----------
+  var map3d = null, built3d = false, walk3dLayer = null;
+  var M = 111320;
+  function square(lon, lat, sizeM, h, color) {
+    var dLat = sizeM / M, dLon = sizeM / (M * Math.cos(lat * Math.PI / 180));
+    return { type: 'Feature', properties: { height: h, minHeight: 0, color: color, roofColor: color, wallColor: color },
       geometry: { type: 'Polygon', coordinates: [[[lon - dLon, lat - dLat], [lon + dLon, lat - dLat], [lon + dLon, lat + dLat], [lon - dLon, lat + dLat], [lon - dLon, lat - dLat]]] } };
+  }
+  function walk3dFeatures() {
+    var pts = shown(), feats = [], step = Math.max(1, Math.ceil(pts.length / 4000));   // cap density for the 3D engine
+    for (var i = 0; i < pts.length; i += step) { var p = pts[i]; feats.push(square(p.lon, p.lat, 2.2, 2, rsrpColor(p.rsrp))); }
+    return { type: 'FeatureCollection', features: feats };
+  }
+  function rebuildWalk3d() {
+    if (!map3d) return;
+    if (walk3dLayer && walk3dLayer.destroy) walk3dLayer.destroy();
+    walk3dLayer = map3d.addGeoJSON(walk3dFeatures());
   }
   function build3d() {
     if (built3d) return; built3d = true;
-    map3d = new OSMBuildings({ container: 'map3d', position: { latitude: FCC.lat, longitude: FCC.lon }, zoom: 16.3, minZoom: 14.5, maxZoom: 20, tilt: 40, rotation: 0,
+    map3d = new OSMBuildings({ container: 'map3d', position: { latitude: FCC.lat, longitude: FCC.lon }, zoom: 16.3, minZoom: 14.5, maxZoom: 20, tilt: 27, rotation: 0,
       attribution: '© OpenStreetMap · © OSM Buildings · © CARTO' });
-    map3d.addMapTiles('https://a.basemap.cartocdn.com/light_all/{z}/{x}/{y}.png');
+    // OSM standard tiles for the ground (the old basemap.cartocdn.com URL renders black).
+    map3d.addMapTiles('https://tile.openstreetmap.org/{z}/{x}/{y}.png');
     map3d.addGeoJSONTiles('https://{s}.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json');
     var feats = [];
-    BS.forEach(function (s) { var isForte = s.site_id === 'BS7_forte_hall';
-      feats.push(square(s.lon, s.lat, isForte ? 9 : 6, s.building_height_m || 15, isForte ? '#c0392b' : (s.status === 'live' ? '#e67e22' : '#95a5a6'))); });
+    BS.forEach(function (s) { var isForte = s.site_id === 'BS7_forte_hall'; feats.push(square(s.lon, s.lat, isForte ? 9 : 6, s.building_height_m || 15, isForte ? '#c0392b' : (s.status === 'live' ? '#e67e22' : '#95a5a6'))); });
     feats.push(square(FCC.lon, FCC.lat, 10, 33, '#2c7fb8'));
-    // whole walk as low RSRP-coloured tiles (downsampled for the 3D engine)
-    for (var i = 0; i < WALK.length; i += 2) { var p = WALK[i]; feats.push(square(p.lon, p.lat, 2.2, 2, rsrpColor(p.rsrp))); }
     map3d.addGeoJSON({ type: 'FeatureCollection', features: feats });
+    rebuildWalk3d();
     window._OSM = map3d;
   }
 
-  // ---------- view toggle + model focus ----------
+  // ---------- view toggle + model focus + sidebar filter ----------
+  function is3d() { return getComputedStyle(document.getElementById('map3d')).display !== 'none'; }
+  function applyFilter() { renderWalk2d(); if (is3d()) rebuildWalk3d(); if (window.__unitySync) window.__unitySync(); }
   function show(which) {
-    var is3d = which === '3d';
-    document.getElementById('map2d').style.display = is3d ? 'none' : 'block';
-    document.getElementById('map3d').style.display = is3d ? 'block' : 'none';
-    document.getElementById('btn2d').classList.toggle('active', !is3d);
-    document.getElementById('btn3d').classList.toggle('active', is3d);
-    if (is3d) build3d(); else setTimeout(function () { map2d.invalidateSize(); }, 60);
+    var isU = which === 'unity', d3 = which === '3d';
+    document.getElementById('map2d').style.display = (which === '2d') ? 'block' : 'none';
+    document.getElementById('map3d').style.display = d3 ? 'block' : 'none';
+    document.getElementById('unityHost').style.display = isU ? 'block' : 'none';
+    document.getElementById('unityStatus').style.display = isU ? 'block' : 'none';
+    document.getElementById('btn2d').classList.toggle('active', which === '2d');
+    document.getElementById('btn3d').classList.toggle('active', d3);
+    document.getElementById('btnUnity').classList.toggle('active', isU);
+    if (isU) loadUnity();
+    else if (d3) { build3d(); rebuildWalk3d(); }
+    else setTimeout(function () { map2d.invalidateSize(); }, 60);
+    if (window.simReRender && !isU) window.simReRender();
   }
   document.getElementById('btn2d').addEventListener('click', function () { show('2d'); });
   document.getElementById('btn3d').addEventListener('click', function () { show('3d'); });
+  document.getElementById('btnUnity').addEventListener('click', function () { show('unity'); });
   document.getElementById('modelSel').addEventListener('change', function (e) {
     var indoor = e.target.value === 'indoor';
-    var z = indoor ? 18 : 16, c = [FCC.lat, FCC.lon];
-    if (document.getElementById('map2d').style.display !== 'none') map2d.setView(c, z);
+    if (unityActive()) { unitySwitchScene(indoor ? 'indoor' : 'outdoor'); return; }   // Unity: swap NoMa ⇄ FCC 7th floor
+    if (!is3d()) map2d.setView([FCC.lat, FCC.lon], indoor ? 18 : 16);
     else if (map3d) map3d.setPosition({ latitude: FCC.lat, longitude: FCC.lon }).setZoom(indoor ? 18 : 16.3);
   });
 
-  window.__outdoorView = { walkN: WALK.length, bsN: BS.length, fcc: FCC };
+  // Parent (dashboard sidebar) → filter the outdoor dots.
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.source !== 'outdoorFilter') return;
+    filter = { operator: d.operator || '', network: d.network || '', band: d.band || '', pci: d.pci || '', channel: d.channel || '' };
+    var active = ['operator', 'network', 'band', 'pci', 'channel'].filter(function (k) { return on(filter[k]); })
+      .map(function (k) { return k + '=' + filter[k]; });
+    document.getElementById('filterNote').firstChild.textContent = (active.length ? active.join(' · ') : 'Whole 7/24 walk') + ' · ';
+    applyFilter();
+  });
+
+  // expose the facets so the parent can populate the sidebar options for outdoor mode
+  window.__outdoorView = { n: PTS.length, bsN: BS.length, fcc: FCC, facets: (W.facets || {}), setFilter: function (f) { filter = f; applyFilter(); } };
+  try { window.parent && window.parent.postMessage({ source: 'outdoorReady', facets: (W.facets || {}) }, '*'); } catch (e) {}
+  </script>
+
+  <script>
+  'use strict';
+  // ---------- Outdoor 2D path-loss sim over the rasterized city clutter ----------
+  var CL = window.NOMA_CLUTTER, clut = null, CNX = 0, CNZ = 0, CELL = 3;
+  if (CL) {
+    CNX = CL.nx; CNZ = CL.nz; CELL = CL.cell_m;
+    var raw = atob(CL.grid_b64); clut = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) clut[i] = raw.charCodeAt(i);
+  }
+  function isBldg(x, z) { if (x < 0 || x >= CNX || z < 0 || z >= CNZ) return false; var i = x * CNZ + z; return (clut[i >> 3] >> (7 - (i & 7))) & 1; }
+  // grid <-> lon/lat (corners: x0z0=SE, x1z0=SW, x0z1=NE). x↑ ⇒ west, z↑ ⇒ north.
+  var lonE = CL ? CL.corners.x0z0[0] : 0, lonW = CL ? CL.corners.x1z0[0] : 0;
+  var latS = CL ? CL.corners.x0z0[1] : 0, latN = CL ? CL.corners.x0z1[1] : 0;
+  function toGrid(lon, lat) { return { x: (lonE - lon) / (lonE - lonW) * (CNX - 1), z: (lat - latS) / (latN - latS) * (CNZ - 1) }; }
+
+  // link + propagation params (absolute level only tints the map; the confidence is rank-based)
+  var EIRP = 62, PL0 = 55, D0 = 10, N_EXP = 3.2, WALL_DB = 8, WALL_CAP = 60;
+  var PLgrid = null;
+  function solve2D(txx, txz) {
+    PLgrid = new Float32Array(CNX * CNZ);
+    for (var x = 0; x < CNX; x++) for (var z = 0; z < CNZ; z++) {
+      var dx = x - txx, dz = z - txz, d = Math.max(D0, Math.hypot(dx, dz) * CELL);
+      var steps = Math.max(Math.abs(dx), Math.abs(dz)), cross = 0;
+      if (steps > 0) {
+        var sx = dx / steps, sz = dz / steps, cx = txx, cz = txz, was = false;
+        for (var k = 1; k <= steps; k++) { cx += sx; cz += sz; var b = isBldg(Math.round(cx), Math.round(cz)); if (b && !was) cross++; was = b; }
+      }
+      PLgrid[x * CNZ + z] = PL0 + 10 * N_EXP * Math.log10(d / D0) + Math.min(WALL_CAP, cross * WALL_DB);
+    }
+  }
+  function samplePL(lon, lat) { if (!PLgrid) return null; var g = toGrid(lon, lat), x = Math.round(g.x), z = Math.round(g.z); if (x < 0 || x >= CNX || z < 0 || z >= CNZ) return null; return PLgrid[x * CNZ + z]; }
+  function rsrpRGB(v) { var s = rsrpColor(v).match(/\d+/g); return [+s[0], +s[1], +s[2]]; }
+
+  var covLayer = null, txMarker = null;
+  function renderCoverage() {
+    if (!PLgrid) return;
+    var cv = document.createElement('canvas'); cv.width = CNX; cv.height = CNZ;
+    var ctx = cv.getContext('2d'), img = ctx.createImageData(CNX, CNZ);
+    for (var py = 0; py < CNZ; py++) for (var px = 0; px < CNX; px++) {
+      var x = CNX - 1 - px, z = CNZ - 1 - py;                 // canvas top-left = NW = grid(CNX-1,CNZ-1)
+      var c = rsrpRGB(EIRP - PLgrid[x * CNZ + z]), o = (py * CNX + px) * 4;
+      img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = isBldg(x, z) ? 60 : 150;
+    }
+    ctx.putImageData(img, 0, 0);
+    if (covLayer) map2d.removeLayer(covLayer);
+    covLayer = L.imageOverlay(cv.toDataURL(), [[latS, lonW], [latN, lonE]], { opacity: 0.6, interactive: false }).addTo(map2d);
+  }
+
+  // 2.5D coverage: drape the 2D-clutter path loss as coarse colored ground cells (open space only —
+  // OSM Buildings already draws the buildings). "3D physics" proper is the Unity engine (Phase 4).
+  var cov3dLayer = null;
+  function renderCoverage3d() {
+    if (!PLgrid || !map3d) return;
+    if (cov3dLayer && cov3dLayer.destroy) cov3dLayer.destroy();
+    var feats = [], step = 6;
+    for (var x = 0; x < CNX; x += step) for (var z = 0; z < CNZ; z += step) {
+      if (isBldg(x, z)) continue;
+      var lon = lonE - (x / (CNX - 1)) * (lonE - lonW), lat = latS + (z / (CNZ - 1)) * (latN - latS);
+      feats.push(square(lon, lat, CELL * step * 0.5, 1.0, rsrpColor(EIRP - PLgrid[x * CNZ + z])));
+    }
+    cov3dLayer = map3d.addGeoJSON({ type: 'FeatureCollection', features: feats });
+  }
+  function renderCoverageActive() { if (!PLgrid) return; if (typeof is3d === 'function' && is3d()) renderCoverage3d(); else renderCoverage(); }
+  window.simReRender = function () { if (PLgrid) renderCoverageActive(); };
+
+  function spearman(a, b) {
+    var n = a.length; if (n < 3) return NaN;
+    function ranks(arr) { var ix = arr.map(function (v, i) { return [v, i]; }).sort(function (p, q) { return p[0] - q[0]; }); var r = new Array(arr.length);
+      for (var i = 0; i < ix.length;) { var j = i; while (j + 1 < ix.length && ix[j + 1][0] === ix[i][0]) j++; var avg = (i + j) / 2 + 1; for (var k = i; k <= j; k++) r[ix[k][1]] = avg; i = j + 1; } return r; }
+    var ra = ranks(a), rb = ranks(b), ma = 0, mb = 0;
+    for (var i = 0; i < n; i++) { ma += ra[i]; mb += rb[i]; } ma /= n; mb /= n;
+    var num = 0, da = 0, db = 0;
+    for (var i = 0; i < n; i++) { var x = ra[i] - ma, y = rb[i] - mb; num += x * y; da += x * x; db += y * y; }
+    return (da && db) ? num / Math.sqrt(da * db) : NaN;
+  }
+  function baseStationForPci(pci) { for (var i = 0; i < BS.length; i++) { var s = BS[i]; if ((s.sectors || []).some(function (se) { return String(se.pci) === String(pci); })) return s; } return null; }
+  function quality(r) { if (isNaN(r)) return ['n/a', '#888']; if (r >= 0.8) return ['Excellent', '#8cff8c']; if (r >= 0.6) return ['Good', '#40d840']; if (r >= 0.4) return ['Fair', '#ffe23f']; if (r >= 0.2) return ['Weak', '#ff9a1a']; return ['Poor', '#ff5a5a']; }
+  function showScore(s) {
+    var el = document.getElementById('simScore');
+    if (!s) { el.style.display = 'none'; return; }
+    var q = quality(s.rho);
+    el.style.display = 'block';
+    el.innerHTML = '<b>2D path-loss confidence</b><br>Tx: ' + s.tx + '<br>' +
+      (s.pci ? ('PCI ' + s.pci + ' · n=' + s.n + ' walk pts<br>predicted vs measured RSRP<br>Spearman ρ = <b style="color:' + q[1] + '">' + (isNaN(s.rho) ? 'n/a' : s.rho.toFixed(2)) + '</b> · <span style="color:' + q[1] + '">' + q[0] + '</span>')
+                : 'Pick a PCI in the sidebar to score predicted vs measured.');
+  }
+
+  function runSim() {
+    if (!CL) { showScore({ tx: 'no clutter raster', pci: null }); return; }
+    var pci = filter.pci, site = on(pci) ? baseStationForPci(pci) : null;
+    var txLL = site ? { lon: site.lon, lat: site.lat } : { lon: FCC.lon, lat: FCC.lat };
+    var g = toGrid(txLL.lon, txLL.lat);
+    document.getElementById('btnSim').textContent = '◈ Solving…';
+    setTimeout(function () {
+      solve2D(Math.round(g.x), Math.round(g.z));
+      renderCoverageActive();
+      if (txMarker) map2d.removeLayer(txMarker);
+      txMarker = L.marker([txLL.lat, txLL.lon]).addTo(map2d).bindTooltip('Tx · ' + (site ? site.name : 'FCC HQ (default)'), { permanent: false, direction: 'top' });
+      var s = { tx: site ? site.name : 'FCC HQ (default)', pci: on(pci) ? pci : null, n: 0, rho: NaN };
+      if (on(pci)) {
+        var pred = [], meas = [];
+        PTS.forEach(function (p) { if (String(p.pci) === String(pci)) { var pl = samplePL(p.lon, p.lat); if (pl != null) { pred.push(EIRP - pl); meas.push(p.rsrp); } } });
+        s.n = pred.length; s.rho = spearman(pred, meas);
+      }
+      showScore(s);
+      document.getElementById('btnSim').textContent = '◈ Simulate 2D PL';
+      document.getElementById('btnSimOff').style.display = '';
+    }, 30);
+  }
+  function clearSim() {
+    if (covLayer) { map2d.removeLayer(covLayer); covLayer = null; }
+    if (cov3dLayer && cov3dLayer.destroy) { cov3dLayer.destroy(); cov3dLayer = null; }
+    if (txMarker) { map2d.removeLayer(txMarker); txMarker = null; }
+    PLgrid = null; showScore(null); document.getElementById('btnSimOff').style.display = 'none';
+  }
+  // ---------- Unity C# engine (nested iframe) — the Map Coverage Outdoor-3D option ----------
+  // Renders the NoMa 3D model + walk points + OSM ground (Phase 4) and runs the C# path loss with
+  // the live predicts-vs-measured score. Driven over postMessage (this view is its parent frame).
+  // Unity scene target follows the Model selector: "NoMa city" → outdoor NoMa scene; "Indoor building
+  // (FCC 7th floor)" → the Coverage scene with georeferenced base stations (Step 3). The build BOOTS the
+  // Coverage (indoor) scene, so switching to outdoor takes one SetScene; switching to indoor from boot
+  // needs none. Phase machine avoids the re-send-on-every-ready reload loop.
+  var unityFrame = null, unityReady = false, unityPhase = 'boot', unityLoaded = null, unityPendingTarget = null;
+  function unitySend(method, value) { if (unityFrame && unityFrame.contentWindow) { try { unityFrame.contentWindow.postMessage({ source: 'unitySim:cmd', method: method, value: String(value) }, '*'); } catch (e) {} } }
+  function unityActive() { return document.getElementById('unityHost').style.display !== 'none'; }
+  function unityTargetScene() { return document.getElementById('modelSel').value === 'indoor' ? 'indoor' : 'outdoor'; }
+  function unityConfigure(scene) {
+    unityPhase = 'ready'; unityLoaded = scene;
+    document.getElementById('unityStatus').textContent = scene === 'indoor'
+      ? 'Unity ready — FCC 7th floor + C# path loss' : 'Unity ready — NoMa 3D + C# path loss';
+    unitySend('SetDimension', '3d');
+    setTimeout(unitySyncSector, 300);
+  }
+  function unitySwitchScene(target) {
+    if (!unityReady || unityLoaded === target || unityPhase === 'switching') return;   // boot handles the pre-ready case
+    unityPendingTarget = target; unityPhase = 'switching';
+    document.getElementById('unityStatus').textContent = 'Unity — loading ' + (target === 'indoor' ? 'FCC 7th floor' : 'NoMa 3D') + '…';
+    unitySend('SetScene', target);   // 'indoor' maps to the Coverage scene in Bridge.SetScene
+  }
+  function unitySyncSector() {
+    if (!unityReady) return;
+    var pci = filter.pci;
+    if (!on(pci)) { unitySend('SelectBaseStation', 'BS7_forte_hall'); return; }
+    var site = baseStationForPci(pci); if (!site) return;
+    var sec = (site.sectors || []).filter(function (s) { return String(s.pci) === String(pci); })[0];
+    unitySend('SelectSector', site.site_id + '|' + pci + '|' + (sec ? (sec.freq_mhz || 0) : 0) + '|panel');
+  }
+  window.__unitySync = function () { if (unityActive()) unitySyncSector(); };
+  function loadUnity() {
+    if (unityFrame) return;
+    unityFrame = document.createElement('iframe');
+    unityFrame.src = '../../unity/unity_embed.html';
+    unityFrame.title = 'Unity RF engine'; unityFrame.setAttribute('allow', 'autoplay; fullscreen');
+    unityFrame.style.cssText = 'width:100%; height:100%; border:0; display:block;';
+    document.getElementById('unityHost').appendChild(unityFrame);
+    document.getElementById('unityStatus').textContent = 'loading Unity C# engine…';
+  }
+  window.addEventListener('message', function (e) {
+    var d = e.data; if (!d || d.source !== 'unitySim') return;
+    var st = document.getElementById('unityStatus');
+    if (d.kind === 'status') st.textContent = d.text;
+    else if (d.kind === 'progress') st.textContent = 'loading Unity… ' + Math.round((d.value || 0) * 100) + '%';
+    else if (d.kind === 'ready') {
+      // Bridge.Start fires 'ready' on EVERY scene load. Re-sending SetScene on each ready would reload the
+      // scene forever (the black-canvas bug). So SetScene is sent at most once per switch and stray readys
+      // in the 'ready' phase are ignored.
+      unityReady = true;
+      if (unityPhase === 'boot') {
+        var target = unityTargetScene();
+        unityPendingTarget = target;
+        if (target === 'outdoor') { unityPhase = 'switching'; st.textContent = 'Unity ready — loading NoMa 3D…'; unitySend('SetScene', 'outdoor'); }
+        else unityConfigure('indoor');                         // build already booted the Coverage (indoor) scene
+      } else if (unityPhase === 'switching') {
+        unityConfigure(unityPendingTarget || unityTargetScene());
+      }                                                        // phase 'ready' → ignore (no reload)
+    }
+    else if (d.kind === 'error') st.textContent = 'Unity failed: ' + d.text;
+  });
+
+  document.getElementById('btnSim').addEventListener('click', function () {
+    if (unityActive()) { document.getElementById('unityStatus').textContent = 'Simulating 3D path loss (C#)…'; unitySyncSector(); return; }
+    runSim();
+  });
+  document.getElementById('btnSimOff').addEventListener('click', clearSim);
+
+  // Rainbow / Viridis colour scale — applies to the walk dots AND the sim coverage (2D + 3D).
+  document.getElementById('colorSel').addEventListener('change', function (e) {
+    colorScheme = e.target.value;
+    renderWalk2d(); if (is3d()) rebuildWalk3d();
+    if (PLgrid) renderCoverageActive();
+    var lg = document.querySelector('#legend .ramp');
+    if (lg) lg.style.background = 'linear-gradient(90deg,' + (RAMP[colorScheme] || RAMP.rainbow).map(function (c) { return 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')'; }).join(',') + ')';
+  });
   </script>
 </body>
 </html>
