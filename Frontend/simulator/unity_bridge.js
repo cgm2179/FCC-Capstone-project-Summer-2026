@@ -143,11 +143,14 @@
     var rxLabel = el('label', { id: 'unitySimRxWrap' }, 'display:none; gap:5px; align-items:center;');
     var rxChk = el('input', { id: 'unitySimRx', type: 'checkbox' });
     rxLabel.appendChild(rxChk); rxLabel.appendChild(document.createTextNode('Move Rx'));
+    var walkLabel = el('label', { id: 'unitySimWalkWrap' }, 'display:none; gap:5px; align-items:center;');
+    var walkChk = el('input', { id: 'unitySimWalk', type: 'checkbox' }); walkChk.checked = true;
+    walkLabel.appendChild(walkChk); walkLabel.appendChild(document.createTextNode('Walk dots'));
 
     var status = el('span', { id: 'unitySimStatus' }, 'margin-left:auto; opacity:.9;'); status.textContent = 'idle';
     state.statusEl = status;
     [title, sceneLabel, dimLabel, bandSel, sliceLabel, bsLabel, carrier.label, cellBand.label, pci.label,
-     geom.label, trajLabel, heatLabel, rxLabel, volLabel, opLabel, schemeLabel, status]
+     geom.label, trajLabel, heatLabel, rxLabel, walkLabel, volLabel, opLabel, schemeLabel, status]
       .forEach(function (n) { bar.appendChild(n); });
     host.appendChild(bar);
     wrap.appendChild(host);
@@ -189,11 +192,12 @@
     geom.sel.addEventListener('change', sendSector);
     heat.addEventListener('change', function () { send('ShowHeatmap', heat.checked ? '1' : '0'); });
     rxChk.addEventListener('change', function () { send('SetRxMoveMode', rxChk.checked ? '1' : '0'); });
+    walkChk.addEventListener('change', function () { send('ShowWalk', walkChk.checked ? '1' : '0'); });
 
     function setOutdoorUI(outdoor) {
-      dimLabel.style.display = outdoor ? 'flex' : 'none';
+      dimLabel.style.display = 'flex';           // 2D/3D toggle applies to the indoor floor AND the outdoor view
       bsLabel.style.display = outdoor ? 'flex' : 'none';
-      [carrier.label, cellBand.label, pci.label, geom.label, heatLabel, rxLabel].forEach(function (n) { n.style.display = outdoor ? 'flex' : 'none'; });
+      [carrier.label, cellBand.label, pci.label, geom.label, heatLabel, rxLabel, walkLabel].forEach(function (n) { n.style.display = outdoor ? 'flex' : 'none'; });
       trajLabel.style.display = outdoor ? 'flex' : 'none';
       bandSel.style.display = outdoor ? 'none' : '';           // outdoor freq comes from the sector picker
       sliceLabel.style.display = 'flex';                        // elevation slice: indoor cut-height AND outdoor
@@ -224,6 +228,7 @@
         host.style.display = 'block';
         toggle.textContent = '3D engine: Unity (C#)  →  switch to Three.js';
         load();
+        setOutdoorUI(sceneSel.value === 'outdoor');   // reveal the 2D/3D toggle (+ outdoor controls) once active
       } else {
         host.style.display = 'none';
         three.style.visibility = '';
