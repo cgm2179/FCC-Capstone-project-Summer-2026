@@ -6,16 +6,15 @@
  * preprocess, or the imported-model flow — those keep working exactly as before; Unity is just an
  * alternative renderer you can flip to and back.
  *
- * The Unity engine itself lives in the SEPARATE Unity repo, checked out on disk at the (gitignored)
- * nested path Unity_RF_Simulator/  (repo: indoor-outdoor-walk-test-with-Unity-Engine). We reference its
- * already-built WebGL bundle at runtime via the embed host page below — we do NOT vendor the ~21 MB
- * build into this repo, and we do NOT pull in the fork's older copies of the dashboard/sim code.
+ * The Unity engine's built WebGL bundle is VENDORED into this repo at ./unity/ (the embed host page
+ * unity/unity_embed.html + the build under unity/Build/WebGL). It is a copy of the output from the
+ * separate Unity source repo (indoor-outdoor-walk-test-with-Unity-Engine); the C# source and Unity
+ * project are NOT vendored here — only the ~32 MB runtime build — so a plain `git clone` of THIS repo
+ * runs the Unity engine out of the box, with no second checkout. To refresh it, rebuild in the Unity
+ * repo and re-copy unity/Build/WebGL (+ unity/unity_embed.html).
  *
- * Requirements (both already true in this workspace):
- *   - the Unity repo is present at ./Unity_RF_Simulator/ with a built WebGL bundle, and
- *   - the dashboard is served over http from the main-repo root (so Unity_RF_Simulator/… is reachable).
- * A fresh clone of THIS repo alone won't have the Unity folder; the toggle then shows a "build not
- * found" status and the three.js engine is unaffected.
+ * Requirement: the dashboard must be served over http from the main-repo root (so unity/… is reachable);
+ * on file:// the toggle shows a "build not found" status and the three.js engine is unaffected.
  *
  * PR #5 (Unity repo) fix carried over: Unity runs in its OWN document (unity_embed.html) inside an
  * <iframe> — its own WebGL context — so it never contends with this page's three.js-WebGPU + onnxruntime
@@ -31,10 +30,10 @@
 (function () {
   'use strict';
 
-  // iframe host page, inside the nested Unity repo (relative to this dashboard, served from repo root).
-  var EMBED_URL = 'Unity_RF_Simulator/unity_embed.html';
-  // sector catalog, from the nested Unity build's StreamingAssets (main repo has an extra nesting level).
-  var CATALOG_URL = 'Unity_RF_Simulator/Unity_RF_Simulator/Build/WebGL/StreamingAssets/base_stations.json';
+  // iframe host page, vendored in this repo (served from the main-repo root).
+  var EMBED_URL = 'unity/unity_embed.html';
+  // sector catalog, from the vendored Unity build's StreamingAssets.
+  var CATALOG_URL = 'unity/Build/WebGL/StreamingAssets/base_stations.json';
   var BANDS_MHZ = [619, 1935, 2442, 3500, 5500, 6125];
 
   var state = { frame: null, active: false, ready: false, statusEl: null };

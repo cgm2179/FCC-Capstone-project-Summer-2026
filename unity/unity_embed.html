@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+  <title>RF Simulator — Unity engine (embedded)</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0f1728; overflow: hidden; }
+    #unity-canvas { width: 100%; height: 100%; display: block; background: #0f1728; }
+    #boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+            color: #9fb0cc; font: 13px system-ui, sans-serif; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <!--
+    Iframe-isolated Unity host (PR #5 fix). Runs the C# RF engine in its OWN document + WebGL context,
+    so it no longer contends with the parent page's three.js-WebGPU / onnxruntime for the GPU (which left
+    the shared-canvas embed showing only a clear colour). The parent (unity_bridge.js) drives it via
+    postMessage; Unity's DashboardBridge.jslib status calls are forwarded back to the parent the same way.
+  -->
+  <canvas id="unity-canvas" tabindex="0"></canvas>
+  <div id="boot">loading Unity RF engine…</div>
+
+  <script>
+    (function () {
+      'use strict';
+      // Unity build is vendored next to this page (unity/Build/WebGL), so it is served from the main repo.
+      var BASE = 'Build/WebGL';
+      var boot = document.getElementById('boot');
+      var canvas = document.getElementById('unity-canvas');
+      canvas.addEventListener('pointerdown', function () { canvas.focus(); });   // WebGL camera drag needs focus
+      var instance = null, queue = [];
+
+      // Unity → page: the .jslib calls window.__unitySim.*; forward those to the PARENT frame.
+      window.__unitySim = {
+        onStatus: function (s) { post('status', { text: String(s) }); },
+        onReady:  function () { post('ready', {}); },
+      };
+      function post(kind, extra) {
+        var msg = Object.assign({ source: 'unitySim', kind: kind }, extra || {});
+        try { window.parent && window.parent.postMessage(msg, '*'); } catch (e) {}
+      }
+
+      // Page → Unity: the parent posts {source:'unitySim:cmd', method, value}; relay to the Bridge object.
+      window.addEventListener('message', function (e) {
+        var d = e.data;
+        if (!d || d.source !== 'unitySim:cmd' || !d.method) return;
+        if (!instance) { queue.push(d); return; }
+        try { instance.SendMessage('Bridge', d.method, String(d.value)); }
+        catch (err) { console.warn('[unity_embed] SendMessage failed', err); }
+      });
+
+      var cfg = {
+        dataUrl: BASE + '/Build/WebGL.data',
+        frameworkUrl: BASE + '/Build/WebGL.framework.js',
+        codeUrl: BASE + '/Build/WebGL.wasm',
+        streamingAssetsUrl: BASE + '/StreamingAssets',
+        companyName: 'DefaultCompany',
+        productName: 'RF Simulator (WebGL)',
+        productVersion: '1.0',
+      };
+
+      var s = document.createElement('script');
+      s.src = BASE + '/Build/WebGL.loader.js';
+      s.onload = function () {
+        window.createUnityInstance(canvas, cfg, function (p) {
+          if (boot) boot.textContent = 'loading Unity RF engine… ' + Math.round(p * 100) + '%';
+          post('progress', { value: p });
+        }).then(function (inst) {
+          instance = inst;
+          window.unityInstance = inst;   // exposed so the parent/tests can drive Bridge directly
+          if (boot) boot.style.display = 'none';
+          // flush any commands that arrived before Unity finished loading
+          queue.forEach(function (d) {
+            try { inst.SendMessage('Bridge', d.method, String(d.value)); } catch (err) {}
+          });
+          queue = [];
+        }).catch(function (err) {
+          if (boot) boot.textContent = 'Unity failed to load: ' + err;
+          post('error', { text: String(err) });
+        });
+      };
+      s.onerror = function () {
+        if (boot) boot.textContent = 'Unity build not found — build it first (see Unity_RF_Simulator/README) and serve over http.';
+        post('error', { text: 'loader not found' });
+      };
+      document.body.appendChild(s);
+    })();
+  </script>
+</body>
+</html>
