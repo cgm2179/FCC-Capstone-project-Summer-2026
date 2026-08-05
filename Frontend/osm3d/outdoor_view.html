@@ -47,6 +47,11 @@
     </select>
     <button id="btnSim" type="button" title="2D path-loss over the rasterized city clutter, from a Tx (default FCC HQ; the selected PCI's base station when one is picked). Shows a predicts-vs-reality confidence score.">◈ Simulate 2D PL</button>
     <button id="btnSimOff" type="button" style="display:none;" title="Hide the coverage overlay">Clear</button>
+    <span style="margin-left:6px;">Colors</span>
+    <select id="colorSel" title="Colour scale for the walk dots and the sim coverage">
+      <option value="rainbow" selected>Rainbow</option>
+      <option value="viridis">Viridis</option>
+    </select>
   </div>
   <div id="simScore" style="position:absolute; top:56px; right:10px; z-index:500; display:none; background:rgba(10,18,36,.9); color:#dfe6f2; border-radius:8px; padding:9px 12px; font-size:12px; box-shadow:0 2px 10px rgba(0,0,0,.25); max-width:280px; line-height:1.5;"></div>
   <div id="filterNote">Whole 7/24 walk · <span id="shownN">0</span> pts</div>
@@ -79,9 +84,14 @@
   }
   function shown() { return PTS.filter(matches); }
 
+  var colorScheme = 'rainbow';   // 'rainbow' | 'viridis' — applies to walk dots AND the sim coverage
+  var RAMP = {
+    rainbow: [[0, 0, 255], [0, 255, 255], [0, 255, 0], [255, 255, 0], [255, 0, 0]],
+    viridis: [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]],
+  };
   function rsrpColor(v) {
     var t = Math.max(0, Math.min(1, (v + 120) / 60));
-    var st = [[0, 0, 255], [0, 255, 255], [0, 255, 0], [255, 255, 0], [255, 0, 0]];
+    var st = RAMP[colorScheme] || RAMP.rainbow;
     var x = t * (st.length - 1), i = Math.floor(x), f = x - i, a = st[i], b = st[Math.min(i + 1, st.length - 1)];
     return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * f) + ',' + Math.round(a[1] + (b[1] - a[1]) * f) + ',' + Math.round(a[2] + (b[2] - a[2]) * f) + ')';
   }
@@ -128,7 +138,7 @@
   }
   function build3d() {
     if (built3d) return; built3d = true;
-    map3d = new OSMBuildings({ container: 'map3d', position: { latitude: FCC.lat, longitude: FCC.lon }, zoom: 16.3, minZoom: 14.5, maxZoom: 20, tilt: 40, rotation: 0,
+    map3d = new OSMBuildings({ container: 'map3d', position: { latitude: FCC.lat, longitude: FCC.lon }, zoom: 16.3, minZoom: 14.5, maxZoom: 20, tilt: 27, rotation: 0,
       attribution: '© OpenStreetMap · © OSM Buildings · © CARTO' });
     map3d.addMapTiles('https://a.basemap.cartocdn.com/light_all/{z}/{x}/{y}.png');
     map3d.addGeoJSONTiles('https://{s}.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json');
@@ -141,7 +151,7 @@
   }
 
   // ---------- view toggle + model focus + sidebar filter ----------
-  function is3d() { return document.getElementById('map3d').style.display !== 'none'; }
+  function is3d() { return getComputedStyle(document.getElementById('map3d')).display !== 'none'; }
   function applyFilter() { renderWalk2d(); if (is3d()) rebuildWalk3d(); }
   function show(which) {
     var d3 = which === '3d';
@@ -150,6 +160,7 @@
     document.getElementById('btn2d').classList.toggle('active', !d3);
     document.getElementById('btn3d').classList.toggle('active', d3);
     if (d3) { build3d(); rebuildWalk3d(); } else setTimeout(function () { map2d.invalidateSize(); }, 60);
+    if (window.simReRender) window.simReRender();   // re-draw the sim coverage in the newly-active view
   }
   document.getElementById('btn2d').addEventListener('click', function () { show('2d'); });
   document.getElementById('btn3d').addEventListener('click', function () { show('3d'); });
@@ -223,6 +234,23 @@
     covLayer = L.imageOverlay(cv.toDataURL(), [[latS, lonW], [latN, lonE]], { opacity: 0.6, interactive: false }).addTo(map2d);
   }
 
+  // 2.5D coverage: drape the 2D-clutter path loss as coarse colored ground cells (open space only —
+  // OSM Buildings already draws the buildings). "3D physics" proper is the Unity engine (Phase 4).
+  var cov3dLayer = null;
+  function renderCoverage3d() {
+    if (!PLgrid || !map3d) return;
+    if (cov3dLayer && cov3dLayer.destroy) cov3dLayer.destroy();
+    var feats = [], step = 6;
+    for (var x = 0; x < CNX; x += step) for (var z = 0; z < CNZ; z += step) {
+      if (isBldg(x, z)) continue;
+      var lon = lonE - (x / (CNX - 1)) * (lonE - lonW), lat = latS + (z / (CNZ - 1)) * (latN - latS);
+      feats.push(square(lon, lat, CELL * step * 0.5, 1.0, rsrpColor(EIRP - PLgrid[x * CNZ + z])));
+    }
+    cov3dLayer = map3d.addGeoJSON({ type: 'FeatureCollection', features: feats });
+  }
+  function renderCoverageActive() { if (!PLgrid) return; if (typeof is3d === 'function' && is3d()) renderCoverage3d(); else renderCoverage(); }
+  window.simReRender = function () { if (PLgrid) renderCoverageActive(); };
+
   function spearman(a, b) {
     var n = a.length; if (n < 3) return NaN;
     function ranks(arr) { var ix = arr.map(function (v, i) { return [v, i]; }).sort(function (p, q) { return p[0] - q[0]; }); var r = new Array(arr.length);
@@ -253,7 +281,7 @@
     document.getElementById('btnSim').textContent = '◈ Solving…';
     setTimeout(function () {
       solve2D(Math.round(g.x), Math.round(g.z));
-      renderCoverage();
+      renderCoverageActive();
       if (txMarker) map2d.removeLayer(txMarker);
       txMarker = L.marker([txLL.lat, txLL.lon]).addTo(map2d).bindTooltip('Tx · ' + (site ? site.name : 'FCC HQ (default)'), { permanent: false, direction: 'top' });
       var s = { tx: site ? site.name : 'FCC HQ (default)', pci: on(pci) ? pci : null, n: 0, rho: NaN };
@@ -269,11 +297,21 @@
   }
   function clearSim() {
     if (covLayer) { map2d.removeLayer(covLayer); covLayer = null; }
+    if (cov3dLayer && cov3dLayer.destroy) { cov3dLayer.destroy(); cov3dLayer = null; }
     if (txMarker) { map2d.removeLayer(txMarker); txMarker = null; }
-    showScore(null); document.getElementById('btnSimOff').style.display = 'none';
+    PLgrid = null; showScore(null); document.getElementById('btnSimOff').style.display = 'none';
   }
   document.getElementById('btnSim').addEventListener('click', runSim);
   document.getElementById('btnSimOff').addEventListener('click', clearSim);
+
+  // Rainbow / Viridis colour scale — applies to the walk dots AND the sim coverage (2D + 3D).
+  document.getElementById('colorSel').addEventListener('change', function (e) {
+    colorScheme = e.target.value;
+    renderWalk2d(); if (is3d()) rebuildWalk3d();
+    if (PLgrid) renderCoverageActive();
+    var lg = document.querySelector('#legend .ramp');
+    if (lg) lg.style.background = 'linear-gradient(90deg,' + (RAMP[colorScheme] || RAMP.rainbow).map(function (c) { return 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')'; }).join(',') + ')';
+  });
   </script>
 </body>
 </html>
