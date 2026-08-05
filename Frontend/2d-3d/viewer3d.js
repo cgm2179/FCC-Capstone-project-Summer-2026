@@ -49,6 +49,10 @@
     let rfMesh = null;            // the textured contour plane (added to scene)
     let rfPoints = null;          // optional measurement-dot cloud
     let floorInfo = null;         // { minX,maxX,minZ,maxZ,topY,height } in world coords
+    // Indoor 3D "sandwiched inside a building" context: an OSM ground plane beneath the
+    // floor + a translucent storey shell above/below, so the 7th-floor model reads as one
+    // floor of a real building rather than floating in space. Toggleable; model stays central.
+    let contextGroup = null, showShell = true, showOsmGround = true;
 
     function setStatus(msg, isError) {
       statusEl.textContent = msg || '';
@@ -415,6 +419,7 @@
       currentModel = object;
       frameObject(object);
       updateFloorInfo(object);
+      addBuildingContext(object);
       if (rfActive) buildRFContour();
       if (label) nameEl.textContent = label;
     }
@@ -452,6 +457,72 @@
         floorInfo = { minX: full.min.x, maxX: full.max.x, minZ: full.min.z, maxZ: full.max.z,
                       topY: full.min.y + Math.max(2, height * 0.02), height };
       }
+    }
+
+    function clearBuildingContext() {
+      if (!contextGroup) return;
+      scene.remove(contextGroup);
+      contextGroup.traverse((o) => {
+        if (o.geometry) o.geometry.dispose();
+        const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+        mats.forEach((m) => { if (m.map) m.map.dispose(); m.dispose(); });
+      });
+      contextGroup = null;
+    }
+
+    // Give the 7th-floor model a sense of elevation: an OSM ground plane a few storeys
+    // below (street level) + a faint translucent building shell with storey lines above and
+    // below, so the floor reads as "sandwiched" inside a real building. Model stays central.
+    function addBuildingContext(model) {
+      clearBuildingContext();
+      if (!scene) return;
+      model.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(model);
+      if (!isFinite(box.min.y) || box.isEmpty()) return;
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const floorH = Math.max(size.y, 3);
+      const baseY = box.min.y;
+      const floorsBelow = 6, floorsAbove = 3;   // a 7th floor: ~6 storeys of building below, a few above
+      const g = new THREE.Group(); g.name = '__buildingContext';
+
+      if (showOsmGround && window.INDOOR_BASEMAP && window.INDOOR_BASEMAP.source) {
+        const tex = new THREE.TextureLoader().load(window.INDOOR_BASEMAP.source);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(size.x * 1.7, size.z * 1.7),
+          new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.9, depthWrite: false }));
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.set(center.x, baseY - floorH * floorsBelow - 0.5, center.z);
+        ground.name = '__osmGround';
+        g.add(ground);
+      }
+
+      if (showShell) {
+        const shellH = floorH * (floorsBelow + 1 + floorsAbove);
+        const shellY = baseY - floorH * floorsBelow + shellH * 0.5;
+        const dims = new THREE.Vector3(size.x * 1.06 + 1, shellH, size.z * 1.06 + 1);
+        const shell = new THREE.Mesh(
+          new THREE.BoxGeometry(dims.x, dims.y, dims.z),
+          new THREE.MeshStandardMaterial({ color: 0x9fb3c8, transparent: true, opacity: 0.05,
+            side: THREE.BackSide, depthWrite: false }));
+        shell.position.set(center.x, shellY, center.z);
+        g.add(shell);
+        const edges = new THREE.LineSegments(
+          new THREE.EdgesGeometry(new THREE.BoxGeometry(dims.x, dims.y, dims.z)),
+          new THREE.LineBasicMaterial({ color: 0x6b8299, transparent: true, opacity: 0.3 }));
+        edges.position.copy(shell.position); g.add(edges);
+        // faint storey slabs so the stack of floors reads
+        for (let f = -floorsBelow; f <= floorsAbove; f++) {
+          const slab = new THREE.GridHelper(Math.max(dims.x, dims.z), 1, 0x6b8299, 0x6b8299);
+          slab.material.transparent = true; slab.material.opacity = f === 0 ? 0.0 : 0.14;
+          slab.position.set(center.x, baseY + f * floorH, center.z);
+          g.add(slab);
+        }
+      }
+
+      scene.add(g);
+      contextGroup = g;
     }
 
     const MODEL_EXTS = ['dae', 'obj', 'glb', 'gltf', 'fbx', '3ds', 'stl', 'kmz'];
@@ -645,6 +716,10 @@
       if (initScene()) loadModelURL(modelSelect.value);
     });
     resetBtn.addEventListener('click', () => { if (currentModel) frameObject(currentModel); });
+    const shellCbx = document.getElementById('view3dShell');
+    const osmGroundCbx = document.getElementById('view3dOsmGround');
+    if (shellCbx) shellCbx.addEventListener('change', () => { showShell = shellCbx.checked; if (currentModel) addBuildingContext(currentModel); });
+    if (osmGroundCbx) osmGroundCbx.addEventListener('change', () => { showOsmGround = osmGroundCbx.checked; if (currentModel) addBuildingContext(currentModel); });
     wireBtn.addEventListener('click', () => {
       wireframe = !wireframe;
       wireBtn.classList.toggle('active', wireframe);

@@ -260,3 +260,11 @@ body {
   #plot { min-height: 620px; }
   .playback-grid { grid-template-columns: 1fr; }
 }
+
+/* Outdoor mode: the Map Coverage tab shows the NoMa OSM outdoor view (iframe) instead of the
+   indoor floor-plan map. !important overrides the inline display dashboard.js re-applies to #plot. */
+#mapTab.outdoor-mode #plot,
+#mapTab.outdoor-mode #plot3dWrap,
+#mapTab.outdoor-mode #leafletMap,
+#mapTab.outdoor-mode .map-modes { display: none !important; }
+#mapTab.outdoor-mode #outdoorMapHost { display: block !important; }
