@@ -36,10 +36,14 @@
 <body>
   <div id="map2d"></div>
   <div id="map3d"></div>
+  <!-- Unity C# engine host (NoMa 3D model + OSM ground + 3D path loss); loaded on demand -->
+  <div id="unityHost" style="position:absolute; inset:0; display:none; background:#0f1728;"></div>
+  <div id="unityStatus" style="position:absolute; bottom:14px; right:12px; z-index:600; display:none; background:rgba(10,18,36,.85); color:#dfe6f2; border-radius:8px; padding:6px 10px; font-size:12px;"></div>
   <div id="bar">
     <span>View</span>
     <button id="btn2d" class="active" type="button">2D map</button>
     <button id="btn3d" type="button">3D city</button>
+    <button id="btnUnity" type="button" title="Unity C# engine: the NoMa 3D model + walk points + OSM ground, with a Simulate 3D Path Loss (C# physics) and the live predicts-vs-reality score">Unity 3D (C#)</button>
     <span style="margin-left:6px;">Model</span>
     <select id="modelSel" title="NoMa city (default) or focus the indoor FCC building">
       <option value="noma" selected>NoMa city + OSM</option>
@@ -153,18 +157,24 @@
 
   // ---------- view toggle + model focus + sidebar filter ----------
   function is3d() { return getComputedStyle(document.getElementById('map3d')).display !== 'none'; }
-  function applyFilter() { renderWalk2d(); if (is3d()) rebuildWalk3d(); }
+  function applyFilter() { renderWalk2d(); if (is3d()) rebuildWalk3d(); if (window.__unitySync) window.__unitySync(); }
   function show(which) {
-    var d3 = which === '3d';
-    document.getElementById('map2d').style.display = d3 ? 'none' : 'block';
+    var isU = which === 'unity', d3 = which === '3d';
+    document.getElementById('map2d').style.display = (which === '2d') ? 'block' : 'none';
     document.getElementById('map3d').style.display = d3 ? 'block' : 'none';
-    document.getElementById('btn2d').classList.toggle('active', !d3);
+    document.getElementById('unityHost').style.display = isU ? 'block' : 'none';
+    document.getElementById('unityStatus').style.display = isU ? 'block' : 'none';
+    document.getElementById('btn2d').classList.toggle('active', which === '2d');
     document.getElementById('btn3d').classList.toggle('active', d3);
-    if (d3) { build3d(); rebuildWalk3d(); } else setTimeout(function () { map2d.invalidateSize(); }, 60);
-    if (window.simReRender) window.simReRender();   // re-draw the sim coverage in the newly-active view
+    document.getElementById('btnUnity').classList.toggle('active', isU);
+    if (isU) loadUnity();
+    else if (d3) { build3d(); rebuildWalk3d(); }
+    else setTimeout(function () { map2d.invalidateSize(); }, 60);
+    if (window.simReRender && !isU) window.simReRender();
   }
   document.getElementById('btn2d').addEventListener('click', function () { show('2d'); });
   document.getElementById('btn3d').addEventListener('click', function () { show('3d'); });
+  document.getElementById('btnUnity').addEventListener('click', function () { show('unity'); });
   document.getElementById('modelSel').addEventListener('change', function (e) {
     var indoor = e.target.value === 'indoor';
     if (!is3d()) map2d.setView([FCC.lat, FCC.lon], indoor ? 18 : 16);
@@ -302,7 +312,43 @@
     if (txMarker) { map2d.removeLayer(txMarker); txMarker = null; }
     PLgrid = null; showScore(null); document.getElementById('btnSimOff').style.display = 'none';
   }
-  document.getElementById('btnSim').addEventListener('click', runSim);
+  // ---------- Unity C# engine (nested iframe) — the Map Coverage Outdoor-3D option ----------
+  // Renders the NoMa 3D model + walk points + OSM ground (Phase 4) and runs the C# path loss with
+  // the live predicts-vs-measured score. Driven over postMessage (this view is its parent frame).
+  var unityFrame = null, unityReady = false;
+  function unitySend(method, value) { if (unityFrame && unityFrame.contentWindow) { try { unityFrame.contentWindow.postMessage({ source: 'unitySim:cmd', method: method, value: String(value) }, '*'); } catch (e) {} } }
+  function unityActive() { return document.getElementById('unityHost').style.display !== 'none'; }
+  function unitySyncSector() {
+    if (!unityReady) return;
+    var pci = filter.pci;
+    if (!on(pci)) { unitySend('SelectBaseStation', 'BS7_forte_hall'); return; }
+    var site = baseStationForPci(pci); if (!site) return;
+    var sec = (site.sectors || []).filter(function (s) { return String(s.pci) === String(pci); })[0];
+    unitySend('SelectSector', site.site_id + '|' + pci + '|' + (sec ? (sec.freq_mhz || 0) : 0) + '|panel');
+  }
+  window.__unitySync = function () { if (unityActive()) unitySyncSector(); };
+  function loadUnity() {
+    if (unityFrame) return;
+    unityFrame = document.createElement('iframe');
+    unityFrame.src = '../../unity/unity_embed.html';
+    unityFrame.title = 'Unity RF engine'; unityFrame.setAttribute('allow', 'autoplay; fullscreen');
+    unityFrame.style.cssText = 'width:100%; height:100%; border:0; display:block;';
+    document.getElementById('unityHost').appendChild(unityFrame);
+    document.getElementById('unityStatus').textContent = 'loading Unity C# engine…';
+  }
+  window.addEventListener('message', function (e) {
+    var d = e.data; if (!d || d.source !== 'unitySim') return;
+    var st = document.getElementById('unityStatus');
+    if (d.kind === 'status') st.textContent = d.text;
+    else if (d.kind === 'progress') st.textContent = 'loading Unity… ' + Math.round((d.value || 0) * 100) + '%';
+    else if (d.kind === 'ready') { unityReady = true; st.textContent = 'Unity ready — NoMa 3D + C# path loss'; unitySend('SetScene', 'outdoor'); unitySend('SetDimension', '3d'); setTimeout(unitySyncSector, 900); }
+    else if (d.kind === 'error') st.textContent = 'Unity failed: ' + d.text;
+  });
+
+  document.getElementById('btnSim').addEventListener('click', function () {
+    if (unityActive()) { document.getElementById('unityStatus').textContent = 'Simulating 3D path loss (C#)…'; unitySyncSector(); return; }
+    runSim();
+  });
   document.getElementById('btnSimOff').addEventListener('click', clearSim);
 
   // Rainbow / Viridis colour scale — applies to the walk dots AND the sim coverage (2D + 3D).
