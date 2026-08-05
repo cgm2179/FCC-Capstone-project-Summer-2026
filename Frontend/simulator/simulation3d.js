@@ -615,6 +615,9 @@ function mountCadObject(object, ext) {
 }
 async function ensureCadMesh() {
   if (cadRoot || ACTIVE_FIXED_SCENE !== 'indoor' || RUNTIME_SCENE) return cadRoot;
+  // Import-driven indoor: when the user imported their own model, do NOT load the built-in 7th-floor
+  // CAD — their model (via maybeLoadRouterImport) is the scene. Removes the built-in for indoor mode.
+  if (window.appImport && window.appImport.modelFiles && window.appImport.modelFiles.length) return null;
   if (cadLoading) return cadLoading;
   setStatus('Loading CAD model…');
   cadLoading = (async () => {
@@ -3128,6 +3131,22 @@ function onResize() {
   camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h);
 }
 
+// Import-driven scene: if the user imported a model on the router (Import/Preprocess screens →
+// window.appImport.modelFiles), simulate THAT instead of the built-in scene. Prefer a .glb/.gltf
+// (Draco, decoded off-thread); a raw .obj still works but is heavier. Loaded once per session.
+let routerImportLoaded = false;
+function maybeLoadRouterImport() {
+  if (routerImportLoaded || RUNTIME_SCENE) return false;
+  const files = window.appImport && window.appImport.modelFiles;
+  if (!files || !files.length) return false;
+  const arr = Array.from(files);
+  const f = arr.find((x) => /\.(glb|gltf)$/i.test(x.name)) || arr.find((x) => /\.obj$/i.test(x.name));
+  if (!f) return false;
+  routerImportLoaded = true;
+  loadModelFile(f, 80);          // real_longest_m ≈ 80 m (proportional; re-load via Sandbox bounds to resize)
+  return true;
+}
+
 // Init when the user opens the Simulation tab in 3D mode (the viewport must be
 // visible so the canvas gets a real size).
 const simBtn = document.getElementById('tabSimBtn');
@@ -3135,7 +3154,10 @@ if (simBtn) simBtn.addEventListener('click', () => {
   requestAnimationFrame(() => {
     syncModeSelectWithApp();
     applyMode();
-    if (window.appMode && window.appMode.dim === '3d' && viewport && viewport.offsetParent !== null) { ensureInit(); onResize(); }
+    if (window.appMode && window.appMode.dim === '3d' && viewport && viewport.offsetParent !== null) {
+      ensureInit(); onResize();
+      maybeLoadRouterImport();   // use the user's imported model, not the built-in 7th floor
+    }
   });
 });
 
