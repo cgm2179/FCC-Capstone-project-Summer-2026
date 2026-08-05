@@ -333,6 +333,29 @@
     const btn = document.getElementById(dim === '3d' ? 'mapMode3dBtn' : 'mapMode2dBtn');
     if (btn) btn.click();
 
+    // Outdoor mode: show the NoMa OSM outdoor view (2D map / 3D city with the whole 7/24 walk)
+    // in the Map Coverage tab, replacing the indoor signal map. The iframe carries its own 2D/3D
+    // toggle; we sync it to the chosen dimension on entry.
+    const outdoor = window.appMode.environment === 'outdoor';
+    const oHost = document.getElementById('outdoorMapHost');
+    const mapTab = document.getElementById('mapTab');
+    // CSS (#mapTab.outdoor-mode …) hides the indoor map + reveals the outdoor host with !important,
+    // which beats the inline display that dashboard.js keeps re-applying to #plot on every refresh.
+    if (mapTab) mapTab.classList.toggle('outdoor-mode', outdoor);
+    if (oHost && outdoor) {
+      let f = oHost.querySelector('iframe');
+      if (!f) {
+        f = document.createElement('iframe');
+        f.src = 'Frontend/osm3d/outdoor_view.html';
+        f.title = 'NoMa outdoor view';
+        f.style.cssText = 'width:100%; height:100%; border:0; display:block;';
+        oHost.appendChild(f);
+      }
+      const syncDim = () => { try { f.contentWindow.document.getElementById(dim === '3d' ? 'btn3d' : 'btn2d').click(); } catch (e) {} };
+      if (f.contentWindow && f.contentWindow.document.readyState === 'complete') syncDim();
+      else f.addEventListener('load', syncDim, { once: true });
+    }
+
     // Feed an imported model + CSV into the 3D viewer, best-effort.
     if (dim === '3d' && window.__viewer3d) {
       if (window.appImport.modelFiles && window.__viewer3d.loadFiles) window.__viewer3d.loadFiles(window.appImport.modelFiles);

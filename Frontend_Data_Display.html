@@ -349,6 +349,9 @@
         <div id="plot"></div>
         <!-- Leaflet live-OSM surface (PR #25); shown only when OSM basemap = live -->
         <div id="leafletMap" style="display:none; height:540px; border-radius:6px;"></div>
+        <!-- Outdoor mode (NoMa): the 2D/3D OSM outdoor view — the whole 7/24 walk on OSM, FCC centred,
+             base stations — embedded (iframe) when the workspace environment is Outdoor. -->
+        <div id="outdoorMapHost" style="display:none; height:640px; border-radius:6px; overflow:hidden; border:1px solid var(--line);"></div>
 
         <div id="plot3dWrap">
           <div class="viewer3d-toolbar">
