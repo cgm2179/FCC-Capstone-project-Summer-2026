@@ -8,9 +8,11 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link href="https://cdn.osmbuildings.org/4.1.1/OSMBuildings.css" rel="stylesheet">
   <script src="https://cdn.osmbuildings.org/4.1.1/OSMBuildings.js"></script>
-  <!-- base-station catalog (window.BASE_STATIONS) + the baked, tagged 7/24 outdoor walk -->
+  <!-- base-station catalog (window.BASE_STATIONS) + the baked, tagged 7/24 outdoor walk +
+       the 2D city-clutter raster for the outdoor path-loss sim (window.NOMA_CLUTTER) -->
   <script src="../../Data/base_stations.js"></script>
   <script src="../../Data/outdoor_walk.js"></script>
+  <script src="../../Data/noma_clutter.js"></script>
   <style>
     html, body { margin: 0; height: 100%; width: 100%; font-family: system-ui, sans-serif; background: #eef1f0; }
     #map2d, #map3d { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -43,7 +45,10 @@
       <option value="noma" selected>NoMa city + OSM</option>
       <option value="indoor">Indoor building (FCC 7th floor)</option>
     </select>
+    <button id="btnSim" type="button" title="2D path-loss over the rasterized city clutter, from a Tx (default FCC HQ; the selected PCI's base station when one is picked). Shows a predicts-vs-reality confidence score.">◈ Simulate 2D PL</button>
+    <button id="btnSimOff" type="button" style="display:none;" title="Hide the coverage overlay">Clear</button>
   </div>
+  <div id="simScore" style="position:absolute; top:56px; right:10px; z-index:500; display:none; background:rgba(10,18,36,.9); color:#dfe6f2; border-radius:8px; padding:9px 12px; font-size:12px; box-shadow:0 2px 10px rgba(0,0,0,.25); max-width:280px; line-height:1.5;"></div>
   <div id="filterNote">Whole 7/24 walk · <span id="shownN">0</span> pts</div>
   <div id="legend">
     <div><span class="fcc">◉ FCC</span> (walk centre) · ▲ base stations</div>
@@ -168,6 +173,107 @@
   // expose the facets so the parent can populate the sidebar options for outdoor mode
   window.__outdoorView = { n: PTS.length, bsN: BS.length, fcc: FCC, facets: (W.facets || {}), setFilter: function (f) { filter = f; applyFilter(); } };
   try { window.parent && window.parent.postMessage({ source: 'outdoorReady', facets: (W.facets || {}) }, '*'); } catch (e) {}
+  </script>
+
+  <script>
+  'use strict';
+  // ---------- Outdoor 2D path-loss sim over the rasterized city clutter ----------
+  var CL = window.NOMA_CLUTTER, clut = null, CNX = 0, CNZ = 0, CELL = 3;
+  if (CL) {
+    CNX = CL.nx; CNZ = CL.nz; CELL = CL.cell_m;
+    var raw = atob(CL.grid_b64); clut = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) clut[i] = raw.charCodeAt(i);
+  }
+  function isBldg(x, z) { if (x < 0 || x >= CNX || z < 0 || z >= CNZ) return false; var i = x * CNZ + z; return (clut[i >> 3] >> (7 - (i & 7))) & 1; }
+  // grid <-> lon/lat (corners: x0z0=SE, x1z0=SW, x0z1=NE). x↑ ⇒ west, z↑ ⇒ north.
+  var lonE = CL ? CL.corners.x0z0[0] : 0, lonW = CL ? CL.corners.x1z0[0] : 0;
+  var latS = CL ? CL.corners.x0z0[1] : 0, latN = CL ? CL.corners.x0z1[1] : 0;
+  function toGrid(lon, lat) { return { x: (lonE - lon) / (lonE - lonW) * (CNX - 1), z: (lat - latS) / (latN - latS) * (CNZ - 1) }; }
+
+  // link + propagation params (absolute level only tints the map; the confidence is rank-based)
+  var EIRP = 62, PL0 = 55, D0 = 10, N_EXP = 3.2, WALL_DB = 8, WALL_CAP = 60;
+  var PLgrid = null;
+  function solve2D(txx, txz) {
+    PLgrid = new Float32Array(CNX * CNZ);
+    for (var x = 0; x < CNX; x++) for (var z = 0; z < CNZ; z++) {
+      var dx = x - txx, dz = z - txz, d = Math.max(D0, Math.hypot(dx, dz) * CELL);
+      var steps = Math.max(Math.abs(dx), Math.abs(dz)), cross = 0;
+      if (steps > 0) {
+        var sx = dx / steps, sz = dz / steps, cx = txx, cz = txz, was = false;
+        for (var k = 1; k <= steps; k++) { cx += sx; cz += sz; var b = isBldg(Math.round(cx), Math.round(cz)); if (b && !was) cross++; was = b; }
+      }
+      PLgrid[x * CNZ + z] = PL0 + 10 * N_EXP * Math.log10(d / D0) + Math.min(WALL_CAP, cross * WALL_DB);
+    }
+  }
+  function samplePL(lon, lat) { if (!PLgrid) return null; var g = toGrid(lon, lat), x = Math.round(g.x), z = Math.round(g.z); if (x < 0 || x >= CNX || z < 0 || z >= CNZ) return null; return PLgrid[x * CNZ + z]; }
+  function rsrpRGB(v) { var s = rsrpColor(v).match(/\d+/g); return [+s[0], +s[1], +s[2]]; }
+
+  var covLayer = null, txMarker = null;
+  function renderCoverage() {
+    if (!PLgrid) return;
+    var cv = document.createElement('canvas'); cv.width = CNX; cv.height = CNZ;
+    var ctx = cv.getContext('2d'), img = ctx.createImageData(CNX, CNZ);
+    for (var py = 0; py < CNZ; py++) for (var px = 0; px < CNX; px++) {
+      var x = CNX - 1 - px, z = CNZ - 1 - py;                 // canvas top-left = NW = grid(CNX-1,CNZ-1)
+      var c = rsrpRGB(EIRP - PLgrid[x * CNZ + z]), o = (py * CNX + px) * 4;
+      img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = isBldg(x, z) ? 60 : 150;
+    }
+    ctx.putImageData(img, 0, 0);
+    if (covLayer) map2d.removeLayer(covLayer);
+    covLayer = L.imageOverlay(cv.toDataURL(), [[latS, lonW], [latN, lonE]], { opacity: 0.6, interactive: false }).addTo(map2d);
+  }
+
+  function spearman(a, b) {
+    var n = a.length; if (n < 3) return NaN;
+    function ranks(arr) { var ix = arr.map(function (v, i) { return [v, i]; }).sort(function (p, q) { return p[0] - q[0]; }); var r = new Array(arr.length);
+      for (var i = 0; i < ix.length;) { var j = i; while (j + 1 < ix.length && ix[j + 1][0] === ix[i][0]) j++; var avg = (i + j) / 2 + 1; for (var k = i; k <= j; k++) r[ix[k][1]] = avg; i = j + 1; } return r; }
+    var ra = ranks(a), rb = ranks(b), ma = 0, mb = 0;
+    for (var i = 0; i < n; i++) { ma += ra[i]; mb += rb[i]; } ma /= n; mb /= n;
+    var num = 0, da = 0, db = 0;
+    for (var i = 0; i < n; i++) { var x = ra[i] - ma, y = rb[i] - mb; num += x * y; da += x * x; db += y * y; }
+    return (da && db) ? num / Math.sqrt(da * db) : NaN;
+  }
+  function baseStationForPci(pci) { for (var i = 0; i < BS.length; i++) { var s = BS[i]; if ((s.sectors || []).some(function (se) { return String(se.pci) === String(pci); })) return s; } return null; }
+  function quality(r) { if (isNaN(r)) return ['n/a', '#888']; if (r >= 0.8) return ['Excellent', '#8cff8c']; if (r >= 0.6) return ['Good', '#40d840']; if (r >= 0.4) return ['Fair', '#ffe23f']; if (r >= 0.2) return ['Weak', '#ff9a1a']; return ['Poor', '#ff5a5a']; }
+  function showScore(s) {
+    var el = document.getElementById('simScore');
+    if (!s) { el.style.display = 'none'; return; }
+    var q = quality(s.rho);
+    el.style.display = 'block';
+    el.innerHTML = '<b>2D path-loss confidence</b><br>Tx: ' + s.tx + '<br>' +
+      (s.pci ? ('PCI ' + s.pci + ' · n=' + s.n + ' walk pts<br>predicted vs measured RSRP<br>Spearman ρ = <b style="color:' + q[1] + '">' + (isNaN(s.rho) ? 'n/a' : s.rho.toFixed(2)) + '</b> · <span style="color:' + q[1] + '">' + q[0] + '</span>')
+                : 'Pick a PCI in the sidebar to score predicted vs measured.');
+  }
+
+  function runSim() {
+    if (!CL) { showScore({ tx: 'no clutter raster', pci: null }); return; }
+    var pci = filter.pci, site = on(pci) ? baseStationForPci(pci) : null;
+    var txLL = site ? { lon: site.lon, lat: site.lat } : { lon: FCC.lon, lat: FCC.lat };
+    var g = toGrid(txLL.lon, txLL.lat);
+    document.getElementById('btnSim').textContent = '◈ Solving…';
+    setTimeout(function () {
+      solve2D(Math.round(g.x), Math.round(g.z));
+      renderCoverage();
+      if (txMarker) map2d.removeLayer(txMarker);
+      txMarker = L.marker([txLL.lat, txLL.lon]).addTo(map2d).bindTooltip('Tx · ' + (site ? site.name : 'FCC HQ (default)'), { permanent: false, direction: 'top' });
+      var s = { tx: site ? site.name : 'FCC HQ (default)', pci: on(pci) ? pci : null, n: 0, rho: NaN };
+      if (on(pci)) {
+        var pred = [], meas = [];
+        PTS.forEach(function (p) { if (String(p.pci) === String(pci)) { var pl = samplePL(p.lon, p.lat); if (pl != null) { pred.push(EIRP - pl); meas.push(p.rsrp); } } });
+        s.n = pred.length; s.rho = spearman(pred, meas);
+      }
+      showScore(s);
+      document.getElementById('btnSim').textContent = '◈ Simulate 2D PL';
+      document.getElementById('btnSimOff').style.display = '';
+    }, 30);
+  }
+  function clearSim() {
+    if (covLayer) { map2d.removeLayer(covLayer); covLayer = null; }
+    if (txMarker) { map2d.removeLayer(txMarker); txMarker = null; }
+    showScore(null); document.getElementById('btnSimOff').style.display = 'none';
+  }
+  document.getElementById('btnSim').addEventListener('click', runSim);
+  document.getElementById('btnSimOff').addEventListener('click', clearSim);
   </script>
 </body>
 </html>
