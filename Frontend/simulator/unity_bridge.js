@@ -20,12 +20,21 @@
  * PR #5 (Unity repo) fix carried over: Unity runs in its OWN document (unity_embed.html) inside an
  * <iframe> — its own WebGL context — so it never contends with this page's three.js-WebGPU + onnxruntime
  * for the GPU. The parent drives it with postMessage; Unity's .jslib status calls are forwarded back.
+ *
+ * Control surface (parity with Unity-repo PR #17 NoMa view + PR #18 instrument):
+ *   Indoor  — band · cut height · volumetric · opacity · scheme (iBwave-style wall-masked heatmap).
+ *   Outdoor — NoMa scene · 2D/3D view · donor base station · cascading sector picker (carrier → band →
+ *             PCI, band drives the solve frequency) · antenna geometry (Panel/Omni) · heatmap on/off ·
+ *             Move-Rx (click the street to reposition) · trajectory. The engine samples the baked 7/24
+ *             walk points for the picked PCI and shows a live Spearman correlation vs measured RSRP.
  */
 (function () {
   'use strict';
 
   // iframe host page, inside the nested Unity repo (relative to this dashboard, served from repo root).
   var EMBED_URL = 'Unity_RF_Simulator/unity_embed.html';
+  // sector catalog, from the nested Unity build's StreamingAssets (main repo has an extra nesting level).
+  var CATALOG_URL = 'Unity_RF_Simulator/Unity_RF_Simulator/Build/WebGL/StreamingAssets/base_stations.json';
   var BANDS_MHZ = [619, 1935, 2442, 3500, 5500, 6125];
 
   var state = { frame: null, active: false, ready: false, statusEl: null };
@@ -64,10 +73,10 @@
     // Unity host (hidden until activated), overlaying the viewport — an <iframe>, not a shared canvas.
     var host = el('div', { id: 'unitySimHost' }, 'position:absolute; inset:0; display:none; background:#0f1728;');
 
-    // Toolbar: band + cut-plane + status.
+    // Toolbar: band + cut-plane + status (wraps so the outdoor instrument controls fit).
     var bar = el('div', { id: 'unitySimBar' },
       'position:absolute; left:8px; top:8px; right:8px; z-index:2; display:flex; gap:10px; align-items:center;' +
-      'font:12px system-ui,sans-serif; color:#dfe6f2; background:rgba(10,18,36,.72); padding:6px 10px; border-radius:6px;');
+      'flex-wrap:wrap; font:12px system-ui,sans-serif; color:#dfe6f2; background:rgba(10,18,36,.72); padding:6px 10px; border-radius:6px;');
     var title = el('strong'); title.textContent = 'Unity RF engine (C#)';
     var bandSel = el('select', { id: 'unitySimBand', title: 'Solve frequency (MHz)' });
     BANDS_MHZ.forEach(function (m) {
@@ -93,17 +102,112 @@
     });
     schemeLabel.appendChild(scheme);
 
+    // PR #6 — NoMa outdoor base-station view: scene + 2D/3D + donor + trajectory.
+    var SITES = [
+      ['BS7_forte_hall', 'Forte Hall (Verizon)'], ['BS6_1005_n_capitol', 'Sixth · 1005 N Capitol'],
+      ['BS5_1140_n_capitol', 'Fifth · 1140 N Capitol'], ['BS4_55_m_st', 'Fourth · 55 M St'],
+      ['BS2_900_nj_ave', 'Second · 900 NJ Ave']];
+    var sceneLabel = el('label', null, 'display:flex; gap:5px; align-items:center;'); sceneLabel.textContent = 'Scene';
+    var sceneSel = el('select', { id: 'unitySimScene', title: 'Indoor 7th-floor vs NoMa outdoor 3D' });
+    [['indoor', 'Indoor floor'], ['outdoor', 'NoMa outdoor']].forEach(function (s) {
+      var o = el('option'); o.value = s[0]; o.textContent = s[1]; sceneSel.appendChild(o);
+    });
+    sceneLabel.appendChild(sceneSel);
+    var dimLabel = el('label', { id: 'unitySimDimWrap' }, 'display:none; gap:5px; align-items:center;'); dimLabel.textContent = 'View';
+    var dimSel = el('select', { id: 'unitySimDim', title: '2D top-down vs 3D perspective' });
+    [['3d', '3D perspective'], ['2d', '2D top-down']].forEach(function (s) {
+      var o = el('option'); o.value = s[0]; o.textContent = s[1]; dimSel.appendChild(o);
+    });
+    dimLabel.appendChild(dimSel);
+    var bsLabel = el('label', { id: 'unitySimBsWrap' }, 'display:none; gap:5px; align-items:center;'); bsLabel.textContent = 'Base stn';
+    var bsSel = el('select', { id: 'unitySimBs', title: 'Donor base station' });
+    SITES.forEach(function (s) { var o = el('option'); o.value = s[0]; o.textContent = s[1]; bsSel.appendChild(o); });
+    bsLabel.appendChild(bsSel);
+    var trajLabel = el('label', { id: 'unitySimTrajWrap' }, 'display:none; gap:5px; align-items:center;');
+    var traj = el('input', { id: 'unitySimTraj', type: 'checkbox' }); traj.checked = true;
+    trajLabel.appendChild(traj); trajLabel.appendChild(document.createTextNode('Trajectory'));
+
+    // PR #6 v2 (instrument) — cascading sector picker (carrier → band → PCI) + antenna geometry + heatmap + move-Rx.
+    function selWrap(id, text) {
+      var l = el('label', { id: id + 'Wrap' }, 'display:none; gap:4px; align-items:center;');
+      if (text) l.appendChild(document.createTextNode(text + ' '));
+      var s = el('select', { id: id }); l.appendChild(s); return { label: l, sel: s };
+    }
+    var carrier = selWrap('unitySimCarrier', 'Carrier');
+    var cellBand = selWrap('unitySimCellBand', 'Band');
+    var pci = selWrap('unitySimPci', 'PCI');
+    var geom = selWrap('unitySimGeom', 'Antenna');
+    [['panel', 'Panel'], ['omni', 'Omni']].forEach(function (g) { var o = el('option'); o.value = g[0]; o.textContent = g[1]; geom.sel.appendChild(o); });
+    var heatLabel = el('label', { id: 'unitySimHeatWrap' }, 'display:none; gap:5px; align-items:center;');
+    var heat = el('input', { id: 'unitySimHeat', type: 'checkbox' }); heat.checked = true;
+    heatLabel.appendChild(heat); heatLabel.appendChild(document.createTextNode('Heatmap'));
+    var rxLabel = el('label', { id: 'unitySimRxWrap' }, 'display:none; gap:5px; align-items:center;');
+    var rxChk = el('input', { id: 'unitySimRx', type: 'checkbox' });
+    rxLabel.appendChild(rxChk); rxLabel.appendChild(document.createTextNode('Move Rx'));
+
     var status = el('span', { id: 'unitySimStatus' }, 'margin-left:auto; opacity:.9;'); status.textContent = 'idle';
     state.statusEl = status;
-    [title, bandSel, sliceLabel, volLabel, opLabel, schemeLabel, status].forEach(function (n) { bar.appendChild(n); });
+    [title, sceneLabel, dimLabel, bandSel, sliceLabel, bsLabel, carrier.label, cellBand.label, pci.label,
+     geom.label, trajLabel, heatLabel, rxLabel, volLabel, opLabel, schemeLabel, status]
+      .forEach(function (n) { bar.appendChild(n); });
     host.appendChild(bar);
     wrap.appendChild(host);
+
+    // -- cascading sector catalog (fetched from the build's StreamingAssets) --------------------
+    var CATALOG = null;
+    function opts(sel, items) { sel.innerHTML = ''; items.forEach(function (it) { var o = el('option'); o.value = it[0]; o.textContent = it[1]; sel.appendChild(o); }); }
+    function uniq(a) { return a.filter(function (v, i) { return a.indexOf(v) === i; }); }
+    function siteSectors() { return (CATALOG && CATALOG[bsSel.value]) ? (CATALOG[bsSel.value].sectors || []).filter(function (s) { return s.freq_mhz > 1; }) : []; }
+    function fillCarriers() { opts(carrier.sel, uniq(siteSectors().map(function (s) { return s.carrier || '?'; })).map(function (c) { return [c, c]; })); fillBands(); }
+    function fillBands() {
+      opts(cellBand.sel, uniq(siteSectors().filter(function (s) { return (s.carrier || '?') === carrier.sel.value; }).map(function (s) { return s.network + '|' + s.band; }))
+        .map(function (b) { var p = b.split('|'); return [b, p[0].toUpperCase() + ' B' + p[1]]; }));
+      fillPcis();
+    }
+    function fillPcis() {
+      opts(pci.sel, siteSectors().filter(function (s) { return (s.carrier || '?') === carrier.sel.value && (s.network + '|' + s.band) === cellBand.sel.value; })
+        .map(function (s) { return [s.pci + '|' + s.freq_mhz, 'PCI ' + s.pci + ' · ' + Math.round(s.freq_mhz) + ' MHz']; }));
+      sendSector();
+    }
+    function sendSector() {
+      if (!pci.sel.value) { send('SelectBaseStation', bsSel.value); return; }
+      var pf = pci.sel.value.split('|');   // pci|freq
+      send('SelectSector', bsSel.value + '|' + pf[0] + '|' + pf[1] + '|' + geom.sel.value);
+    }
+    fetch(CATALOG_URL)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d && d.sites) { CATALOG = {}; d.sites.forEach(function (s) { CATALOG[s.site_id] = s; }); if (sceneSel.value === 'outdoor') fillCarriers(); } })
+      .catch(function () {});
 
     bandSel.addEventListener('change', function () { send('SetBand', bandSel.value); });
     slice.addEventListener('input', function () { send('SetSlice', slice.value); });
     vol.addEventListener('change', function () { send('SetVolumetric', vol.checked ? '1' : '0'); });
     opacity.addEventListener('input', function () { send('SetOpacity', opacity.value); });
     scheme.addEventListener('change', function () { send('SetColorScheme', scheme.value); });
+    carrier.sel.addEventListener('change', fillBands);
+    cellBand.sel.addEventListener('change', fillPcis);
+    pci.sel.addEventListener('change', sendSector);
+    geom.sel.addEventListener('change', sendSector);
+    heat.addEventListener('change', function () { send('ShowHeatmap', heat.checked ? '1' : '0'); });
+    rxChk.addEventListener('change', function () { send('SetRxMoveMode', rxChk.checked ? '1' : '0'); });
+
+    function setOutdoorUI(outdoor) {
+      dimLabel.style.display = outdoor ? 'flex' : 'none';
+      bsLabel.style.display = outdoor ? 'flex' : 'none';
+      [carrier.label, cellBand.label, pci.label, geom.label, heatLabel, rxLabel].forEach(function (n) { n.style.display = outdoor ? 'flex' : 'none'; });
+      trajLabel.style.display = outdoor ? 'flex' : 'none';
+      bandSel.style.display = outdoor ? 'none' : '';           // outdoor freq comes from the sector picker
+      sliceLabel.style.display = 'flex';                        // elevation slice: indoor cut-height AND outdoor
+    }
+    sceneSel.addEventListener('change', function () {
+      var outdoor = sceneSel.value === 'outdoor';
+      send('SetScene', sceneSel.value);
+      setOutdoorUI(outdoor);
+      if (outdoor) { send('SetDimension', dimSel.value); if (CATALOG) fillCarriers(); else send('SelectBaseStation', bsSel.value); }
+    });
+    dimSel.addEventListener('change', function () { send('SetDimension', dimSel.value); });
+    bsSel.addEventListener('change', function () { if (CATALOG) fillCarriers(); else send('SelectBaseStation', bsSel.value); });
+    traj.addEventListener('change', function () { send('ShowTrajectory', traj.checked ? '1' : '0'); });
 
     // Engine toggle, above the viewport.
     var toggle = el('button', { type: 'button', id: 'unitySimToggle', 'class': 'sim-btn ghost' }, 'margin:0 0 8px 0;');
