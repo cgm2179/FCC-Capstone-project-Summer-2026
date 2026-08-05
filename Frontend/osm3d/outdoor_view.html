@@ -140,7 +140,8 @@
     if (built3d) return; built3d = true;
     map3d = new OSMBuildings({ container: 'map3d', position: { latitude: FCC.lat, longitude: FCC.lon }, zoom: 16.3, minZoom: 14.5, maxZoom: 20, tilt: 27, rotation: 0,
       attribution: '© OpenStreetMap · © OSM Buildings · © CARTO' });
-    map3d.addMapTiles('https://a.basemap.cartocdn.com/light_all/{z}/{x}/{y}.png');
+    // OSM standard tiles for the ground (the old basemap.cartocdn.com URL renders black).
+    map3d.addMapTiles('https://tile.openstreetmap.org/{z}/{x}/{y}.png');
     map3d.addGeoJSONTiles('https://{s}.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json');
     var feats = [];
     BS.forEach(function (s) { var isForte = s.site_id === 'BS7_forte_hall'; feats.push(square(s.lon, s.lat, isForte ? 9 : 6, s.building_height_m || 15, isForte ? '#c0392b' : (s.status === 'live' ? '#e67e22' : '#95a5a6'))); });
