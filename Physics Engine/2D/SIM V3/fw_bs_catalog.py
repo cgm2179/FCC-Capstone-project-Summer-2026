@@ -41,20 +41,24 @@ HPBW_DEG = 65.0          # 3GPP macro sector azimuth HPBW
 AM_DB = 25.0             # front-to-back (max off-boresight attenuation)
 CATALOG = B._PHYS / "Cross_Validation" / "base_station_catalog" / "base_stations.csv"
 
-# Map catalog band → a SIM V3 real band label (cellular LTE + NR).
+# Map each walk-test frequency → its SIM band, named Network_Band(s)_Freq. Bands
+# are grouped only when within 30 MHz on the spectrum (then lumped, slashes in the
+# name); anything farther gets its own label = its own FDTD. Keys are both forms
+# load_stations tries (freq_mhz.rstrip("0").rstrip(".") and str(int(freq))).
 BAND_TO_LABEL = {
-    "617": "LTE_B71_617", "619": "LTE_B71_617", "627": "LTE_B71_617",
-    "731.5": "LTE_B13_751", "739": "LTE_B13_751", "751": "LTE_B13_751",
-    "763": "LTE_B13_751", "884.55": "LTE_B13_751",
-    "1970": "LTE_B2_1960", "1960": "LTE_B2_1960", "2145": "LTE_B2_1960",
-    "2510.55": "NR_n41_2506", "2506": "NR_n41_2506", "2355": "NR_n41_2506",
-    # 5G n77 C-band (real in the walk at Forte Hall: 3709.92 / 3809.28 MHz)
-    "3700": "NR_n77_3700", "3710": "NR_n77_3700", "3750": "NR_n77_3700", "375": "NR_n77_3700",
-    "3709.92": "NR_n77_3700", "3709": "NR_n77_3700", "3809.28": "NR_n77_3700",
-    "3809": "NR_n77_3700", "3810": "NR_n77_3700", "3800": "NR_n77_3700",
-    # WLAN (artificial Wi-Fi APs — not in the walk, synthetic coverage scenario)
-    "2442": "WiFi_2G4", "2437": "WiFi_2G4", "2412": "WiFi_2G4",
-    "5500": "WiFi_5G", "5180": "WiFi_5G", "5745": "WiFi_5G",
+    "617": "TMO_B71_617",
+    "731": "ATT/TMO/VZW_B12/B13/B14_746", "731.5": "ATT/TMO/VZW_B12/B13/B14_746",
+    "739": "ATT/TMO/VZW_B12/B13/B14_746", "751": "ATT/TMO/VZW_B12/B13/B14_746",
+    "763": "ATT/TMO/VZW_B12/B13/B14_746",
+    "884": "VZW_B5/B26_885", "884.55": "VZW_B5/B26_885",
+    "196": "ATT/TMO/VZW_B2_1965", "1960": "ATT/TMO/VZW_B2_1965", "1970": "ATT/TMO/VZW_B2_1965",
+    "2145": "ATT/TMO/VZW_B4/B65/B66_2160", "2174": "ATT/TMO/VZW_B4/B65/B66_2160",
+    "2174.55": "ATT/TMO/VZW_B4/B65/B66_2160",
+    "2355": "ATT_B30_2355",
+    "2442": "WLAN_WiFi_2442",
+    "2506": "TMO_n41_2508", "2510": "TMO_n41_2508", "2510.55": "TMO_n41_2508",
+    "3709": "VZW_n77/n78_3710", "3709.92": "VZW_n77/n78_3710",
+    "3809": "VZW_n77_3809", "3809.28": "VZW_n77_3809",
 }
 
 

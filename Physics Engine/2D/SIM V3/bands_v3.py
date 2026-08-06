@@ -45,6 +45,19 @@ BANDS_V3 = [
     Band("WiFi_2G4",     2442.0, "WLAN", "Wi-Fi 4/6 2.4 GHz"),
     Band("WiFi_5G",      5500.0, "WLAN", "Wi-Fi 5 U-NII"),
     Band("WiFi_6E",      6125.0, "WLAN", "Wi-Fi 6E 6 GHz"),
+    # --- Outdoor walk-test clusters: Network_Band(s)_Freq, grouped at 30 MHz so
+    # every band a station picked up gets its own FDTD unless it is within 30 MHz
+    # of the previous one on the spectrum (then lumped, with slashes in the name).
+    Band("TMO_B71_617",                 617.0,  "4G",   "TMO 600 MHz n71 (walk 617)"),
+    Band("ATT/TMO/VZW_B12/B13/B14_746", 746.0,  "4G",   "700 low-band; B12/B13/B14 lumped (walk 731.5-763)"),
+    Band("VZW_B5/B26_885",              885.0,  "4G",   "850 band; B5/B26 (walk 884.5)"),
+    Band("ATT/TMO/VZW_B2_1965",         1965.0, "4G",   "PCS B2 (walk 1960-1970)"),
+    Band("ATT/TMO/VZW_B4/B65/B66_2160", 2160.0, "4G",   "AWS; B4/B65/B66 lumped (walk 2145-2174.6)"),
+    Band("ATT_B30_2355",                2355.0, "4G",   "WCS B30 (walk 2355)"),
+    Band("WLAN_WiFi_2442",              2442.0, "WLAN", "artificial Wi-Fi 2.4 GHz AP (outdoor)"),
+    Band("TMO_n41_2508",                2508.0, "5G",   "2.5 GHz n41 (walk 2506-2510.6)"),
+    Band("VZW_n77/n78_3710",            3710.0, "5G",   "C-band low; n77/n78 (walk 3709.9)"),
+    Band("VZW_n77_3809",                3809.0, "5G",   "C-band high n77 (walk 3809.3); >30 MHz from 3710"),
 ]
 
 _BY_LABEL = {b.label: b for b in BANDS_V3}
