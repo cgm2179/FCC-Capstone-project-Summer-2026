@@ -52,27 +52,28 @@ def ort_check(onnx_path, hw=(128, 128)):
     return {"onnxruntime": "ok", "out_shape": list(y.shape)}
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", default="fw_unet2d.pt")
-    ap.add_argument("--data-meta", default="fw_data_617/dataset_meta.json")
-    ap.add_argument("--opset", type=int, default=17)
-    args = ap.parse_args()
+def _bands_to_mhz(bands):
+    """Band LABELS -> MHz via bands_v3, so the browser can match a picked frequency
+    numerically without parsing labels (WiFi labels carry no MHz). Unknowns skipped."""
+    out = []
+    try:
+        import bands_v3
+        for lb in (bands or []):
+            try:
+                out.append(round(bands_v3.get(lb).f_mhz))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return out
 
-    WEB.mkdir(parents=True, exist_ok=True)
-    model = load_model(HERE / args.ckpt, dev="cpu")
-    onnx_path = WEB / "fw_unet2d.onnx"
-    export_onnx(model, onnx_path, opset=args.opset)
-    check = ort_check(onnx_path)
 
-    manifest = json.loads(B.MANIFEST.read_text())
-    norm = D3.load_norm(manifest)
-    dmeta = {}
-    dm_path = HERE / args.data_meta
-    if dm_path.exists():
-        dmeta = json.loads(dm_path.read_text())
-
-    contract = {
+def build_contract(bands=None, box=None, check=None):
+    """The fw_unet2d.json sidecar. `bands` = the training-band LABELS (the notebook's
+    BANDS) — the ground truth for what the model saw, so ALWAYS pass it for a
+    multiband model. `trained_mhz` is derived so the front-ends can match by MHz."""
+    norm = D3.load_norm(json.loads(B.MANIFEST.read_text()))
+    return {
         "spec_version": "fw-unet2d-v1",
         "model_file": "fw_unet2d.onnx",
         "predicts": "complex full-wave field, phase-reduced",
@@ -95,16 +96,45 @@ def main():
             "normalized_by": "per-field 99th-percentile |U| (relative; re-anchor to "
                              "FSPL for absolute dB)",
         },
-        "bands_mhz": dmeta.get("bands"),
-        "box_train": dmeta.get("box"),
+        "bands_mhz": bands,
+        "trained_mhz": _bands_to_mhz(bands),
+        "box_train": box,
         "architecture": "UNet2D(base, cin=9, cout=2)",
         "trained": True,
         "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "smoke_check": check,
     }
-    (WEB / "fw_unet2d.json").write_text(json.dumps(contract, indent=2))
+
+
+def write_contract(bands=None, box=None, check=None, path=None):
+    """Write the sidecar next to the ONNX. Call this WHENEVER you export the ONNX —
+    `export_onnx()` alone does not, which is exactly how `bands_mhz` went stale (a
+    multiband model shipped with a single-band contract)."""
+    path = path or (WEB / "fw_unet2d.json")
+    path.write_text(json.dumps(build_contract(bands, box, check), indent=2))
+    return path
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--ckpt", default="fw_unet2d.pt")
+    ap.add_argument("--data-meta", default="fw_data_617/dataset_meta.json")
+    ap.add_argument("--opset", type=int, default=17)
+    args = ap.parse_args()
+
+    WEB.mkdir(parents=True, exist_ok=True)
+    model = load_model(HERE / args.ckpt, dev="cpu")
+    onnx_path = WEB / "fw_unet2d.onnx"
+    export_onnx(model, onnx_path, opset=args.opset)
+    check = ort_check(onnx_path)
+
+    dmeta = {}
+    dm_path = HERE / args.data_meta
+    if dm_path.exists():
+        dmeta = json.loads(dm_path.read_text())
+    path = write_contract(bands=dmeta.get("bands"), box=dmeta.get("box"), check=check)
     print(f"exported {onnx_path}  {check}")
-    print(f"contract  {WEB / 'fw_unet2d.json'}")
+    print(f"contract  {path}")
 
 
 if __name__ == "__main__":

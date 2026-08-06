@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 
 import _bootstrap  # noqa: F401
 import fullwave2d as FW
+import fw_solver as SV
 import perf_v3
 from bands_v3 import get, estimate
 from plane_extract import extract_plane
@@ -58,6 +60,18 @@ def main():
     ap.add_argument("--max-cells", type=int, default=6_000_000)
     ap.add_argument("--quick", action="store_true",
                     help="coarse + short: pipeline smoke test in seconds")
+    ap.add_argument("--solver", choices=SV.SOLVER_CHOICES, default="auto",
+                    help="auto: ONNX surrogate if available else FDTD (default); "
+                         "fdtd: force the full-wave engine; onnx: force the "
+                         "surrogate (errors if it is not available)")
+    ap.add_argument("--onnx-box", type=int, default=SV.DEFAULT_BOX,
+                    help="ONNX tile size (multiple of 16)")
+    ap.add_argument("--onnx-stride", type=int, default=SV.DEFAULT_STRIDE,
+                    help="ONNX tile stride (overlap = box - stride)")
+    ap.add_argument("--warn-threshold-s", type=float, default=20.0,
+                    help="prompt to confirm when the grid estimate exceeds this")
+    ap.add_argument("--yes", action="store_true",
+                    help="skip the pre-generation time-estimate confirmation")
     ap.add_argument("--no-gif", action="store_true")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
@@ -83,46 +97,83 @@ def main():
           f"extent={p.extent_m[0]:.1f}x{p.extent_m[1]:.1f} m  tx={p.tx_idx}  "
           f"height={p.height_m:.2f} m  N_eff={p.n_eff:.1f}")
 
-    # ---- build the solver ------------------------------------------------
-    sim = FullWaveScene(p.classes, p.h_m, band.f_mhz, p.tx_idx,
-                        source=args.source, with_loss=not args.no_loss)
-    steps = args.steps or _auto_steps(p.extent_m, sim.dt, args.crossings)
-    if args.quick:
-        steps = min(steps, 3000)
-    print(f"dt={sim.dt:.3e} s  CFL={sim.cfl():.3f} (limit {1/np.sqrt(2):.3f})  "
-          f"steps={steps}  loss={'off' if args.no_loss else 'on'}  "
-          f"cells={p.classes.size/1e6:.2f} M")
-    # up-front CPU-calibrated runtime estimate (the live tqdm/ETA self-corrects)
-    mcps = perf_v3.calibrate_throughput()
-    est = perf_v3.estimate_seconds(p.classes.size, steps, mcps)
-    print(f"est runtime ~{perf_v3.fmt_eta(est)} on this CPU "
-          f"({mcps:.0f} Mcell-updates/s calibrated)")
+    # ---- pick the solver: FDTD ground truth vs ONNX surrogate ------------
+    try:
+        solver, notice = SV.resolve_solver(args.solver)
+    except SV.SolverUnavailable as e:
+        raise SystemExit(f"error: {e}")
+    if notice:
+        print(notice)
 
-    # ---- time loop (shared): frames + RMS envelope + progress feed -------
-    prog = perf_v3.ProgressWriter(out / "progress.json", steps, p.classes.size)
-    res = FW.simulate(sim, steps, warmup_frac=args.warmup_frac,
-                      record_frames=args.record_frames, progress=prog,
-                      show_tqdm=True, desc=band.label)
-    frames, times, rms = res["frames"], res["times"], res["rms"]
-    dt_run, finite = res["dt_run"], res["finite"]
-    print(f"ran {steps} steps in {dt_run:.1f} s "
-          f"({steps*p.classes.size/1e6/max(dt_run,1e-9):.0f} Mcell-updates/s)  "
-          f"finite={finite}")
-    if not finite:
-        raise FloatingPointError("field blew up — CFL/safety too high")
+    if solver == "fdtd":
+        sim = FullWaveScene(p.classes, p.h_m, band.f_mhz, p.tx_idx,
+                            source=args.source, with_loss=not args.no_loss)
+        steps = args.steps or _auto_steps(p.extent_m, sim.dt, args.crossings)
+        if args.quick:
+            steps = min(steps, 3000)
+        sim_dt, cfl = sim.dt, sim.cfl()
+        print(f"dt={sim_dt:.3e} s  CFL={cfl:.3f} (limit {1/np.sqrt(2):.3f})  "
+              f"steps={steps}  loss={'off' if args.no_loss else 'on'}  "
+              f"cells={p.classes.size/1e6:.2f} M")
+        est, detail = SV.estimate_grid_seconds("fdtd", p.classes, steps=steps)
+    else:  # onnx surrogate
+        steps = 0
+        sim_dt = 1.0 / (band.f_mhz * 1e6) / max(1, args.record_frames)  # frame dt
+        cfl = float("nan")
+        est, detail = SV.estimate_grid_seconds(
+            "onnx", p.classes, box=args.onnx_box, stride=args.onnx_stride)
+        tb = SV.trained_bands()
+        if tb and band.label not in tb:
+            print(f"note: ONNX surrogate trained on {tb}; {band.label} is "
+                  f"extrapolation (freq feature interpolates; envelope may drift).")
+
+    # ---- TIME TO CALCULATE GRID warning (before generating anything) ------
+    print(SV.format_time_warning(est, solver, detail))
+    if not args.yes and est > args.warn_threshold_s and sys.stdin.isatty():
+        try:
+            if input("    proceed? [y/N] ").strip().lower() not in ("y", "yes"):
+                raise SystemExit("aborted before grid generation.")
+        except EOFError:
+            pass
+
+    # ---- generate the field grid -----------------------------------------
+    if solver == "fdtd":
+        prog = perf_v3.ProgressWriter(out / "progress.json", steps, p.classes.size)
+        res = FW.simulate(sim, steps, warmup_frac=args.warmup_frac,
+                          record_frames=args.record_frames, progress=prog,
+                          show_tqdm=True, desc=band.label)
+        frames, times, rms = res["frames"], res["times"], res["rms"]
+        dt_run, finite = res["dt_run"], res["finite"]
+        print(f"ran {steps} steps in {dt_run:.1f} s "
+              f"({steps*p.classes.size/1e6/max(dt_run,1e-9):.0f} Mcell-updates/s)  "
+              f"finite={finite}")
+        if not finite:
+            raise FloatingPointError("field blew up — CFL/safety too high")
+    else:  # onnx surrogate: one tiled inference -> steady-state phasor U
+        import time as _time
+        t0 = _time.time()
+        U = SV.onnx_tiled_predict(p.classes, p.tx_idx, p.h_m, band.f_mhz,
+                                  box=args.onnx_box, stride=args.onnx_stride)
+        dt_run = _time.time() - t0
+        frames, times, rms = SV.synth_frames(U, band.f_mhz, args.record_frames)
+        finite = bool(np.isfinite(U).all())
+        print(f"ONNX solve {dt_run*1e3:.0f} ms  grid {p.classes.shape}  "
+              f"finite={finite}")
+        if not finite:
+            raise FloatingPointError("ONNX field non-finite")
     ref = np.percentile(rms[rms > 0], 99.5) if np.any(rms > 0) else 1.0
     field_db = 20.0 * np.log10(np.maximum(rms, ref * 1e-6) / ref)  # 0 dB = strong
 
     np.savez_compressed(out / "wave_frames.npz",
                         frames=np.array(frames), times=np.array(times),
                         h_m=p.h_m, extent_m=np.array(p.extent_m),
-                        tx=np.array(p.tx_idx), dt=sim.dt, classes=p.classes)
+                        tx=np.array(p.tx_idx), dt=sim_dt, classes=p.classes)
     np.save(out / "field_rms.npy", rms.astype(np.float32))
     np.save(out / "field_db.npy", field_db.astype(np.float32))
-    meta = dict(band=band.label, f_mhz=band.f_mhz, h_m=p.h_m,
+    meta = dict(band=band.label, f_mhz=band.f_mhz, h_m=p.h_m, solver=solver,
                 extent_m=list(p.extent_m), grid=list(p.classes.shape),
                 tx_idx=list(p.tx_idx), height_m=p.height_m, n_eff=p.n_eff,
-                dt=sim.dt, cfl=sim.cfl(), steps=steps, loss=not args.no_loss,
+                dt=sim_dt, cfl=cfl, steps=steps, loss=not args.no_loss,
                 run_seconds=dt_run, finite=finite, plane_meta=p.meta)
     (out / "run_meta.json").write_text(json.dumps(meta, indent=2))
 
