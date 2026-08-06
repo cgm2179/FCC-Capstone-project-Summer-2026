@@ -1,0 +1,1 @@
+{"dims": [40, 40, 40], "h_m": 0.19435491604538085, "band": "LTE_B71_617", "f_mhz": 617.0, "tx": [20, 13, 20], "dtype": "float32", "layout": "[2(re,im), X, Y, Z]", "note": "animate Re{(re+j im)*exp(j*2pi*phase)} over phase in [0,1)"}

@@ -100,6 +100,40 @@ def validate(model, band_label="LTE_B71_617", n_per_wavelength=8.0, seed=99):
     return dict(rmse_db=rmse, spearman=float(rho), coherence=coh)
 
 
+def validate_outdoor(model, band_label="NR_n41_2506", region_m=40.0, npw=8.0,
+                     seed=7, max_cells=2_000_000):
+    """Outdoor g2: tiled prediction vs a fresh FDTD solve on a held-out NoMa
+    REGION (citywide full-wave is infeasible). Streets = air, buildings = barrier."""
+    from scipy.stats import spearmanr
+    import fw_dataset
+    band = get(band_label)
+    city = np.load(B.CITY_DIR / "material_grid.npy")
+    cs = 1.0
+    air = np.argwhere(city[:, 2, :] == 0)
+    tc = air[np.random.default_rng(seed).integers(len(air))]      # held-out tower
+    p, Utrue = fw_dataset._outdoor_field(city, cs, band, (float(tc[0]) * cs,
+                                         float(tc[1]) * cs), 2.0, npw, region_m,
+                                         2.5, max_cells)
+    Upred = tiled_predict(model, p.classes, p.tx_idx, p.h_m, band.f_mhz)
+
+    served = (p.classes == 0)                                     # streets/open
+    at, ap = np.abs(Utrue), np.abs(Upred)
+    reft = np.percentile(at[served][at[served] > 0], 99.0)
+    refp = np.percentile(ap[served][ap[served] > 0], 99.0)
+    et, ep = _db(at, reft), _db(ap, refp)
+    m = served & (et > -60)
+    rmse = float(np.sqrt(np.mean((et[m] - ep[m]) ** 2)))
+    rho, _ = spearmanr(et[m], ep[m])
+    a, b = Upred[m], Utrue[m]
+    coh = float(np.abs(np.vdot(a, b)) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-12))
+    print(f"outdoor g2 @ {band.label}  region {p.classes.shape} "
+          f"({p.extent_m[0]:.0f}x{p.extent_m[1]:.0f} m)")
+    print(f"   envelope dB RMSE = {rmse:.2f}   Spearman = {rho:+.3f}   coherence = {coh:.3f}")
+    _plot(HERE / "out" / f"fw_validate_out_{band.label}", et, ep, m, p, band,
+          rmse, rho, coh)
+    return dict(rmse_db=rmse, spearman=float(rho), coherence=coh)
+
+
 def _fdtd_field(band, tx_m, n_per_wavelength):
     p = PE.extract_plane(band, height_frac=0.5, n_per_wavelength=n_per_wavelength,
                          tx_m=tx_m, max_cells=1_200_000)
@@ -201,17 +235,23 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", default="fw_unet2d.pt")
     ap.add_argument("--band", default="LTE_B71_617")
-    ap.add_argument("--validate", action="store_true")
+    ap.add_argument("--validate", action="store_true", help="indoor g2 gate")
+    ap.add_argument("--outdoor", action="store_true", help="outdoor g2 (NoMa region)")
     ap.add_argument("--predict", action="store_true", help="whole-floor still + wave GIF")
+    ap.add_argument("--region-m", type=float, default=40.0)
+    ap.add_argument("--max-cells", type=int, default=2_000_000)
     ap.add_argument("--seed", type=int, default=99)
     args = ap.parse_args()
     model = load_model(HERE / args.ckpt)
     if args.validate:
         validate(model, args.band, seed=args.seed)
+    if args.outdoor:
+        validate_outdoor(model, args.band, region_m=args.region_m,
+                         seed=args.seed, max_cells=args.max_cells)
     if args.predict:
         render_prediction(model, args.band, seed=args.seed)
-    if not (args.validate or args.predict):
-        print("use --validate (g2 gate) and/or --predict (whole-floor still + GIF).")
+    if not (args.validate or args.outdoor or args.predict):
+        print("use --validate / --outdoor (g2 gates) or --predict (still + GIF).")
 
 
 if __name__ == "__main__":

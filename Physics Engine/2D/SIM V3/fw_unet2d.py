@@ -95,12 +95,14 @@ def train(data_dir, epochs=60, base=32, bs=8, lr=1e-3, val_frac=0.2, out=None):
     if not files:
         raise FileNotFoundError(f"no shards in {data_dir}")
     ds = ShardDS(files)
+    cin, cout = ds.x.shape[1], ds.y.shape[1]               # infer (9 or 10 in; 2 out)
     n = len(ds); nv = max(1, int(val_frac * n))
     g = torch.Generator().manual_seed(0)
     tr, va = torch.utils.data.random_split(ds, [n - nv, nv], generator=g)
     dev = pick_device()
-    m = UNet(base=base).to(dev)
-    print(f"device={dev}  params={sum(p.numel() for p in m.parameters())/1e6:.2f}M  "
+    m = UNet(base=base, in_ch=cin, out_ch=cout).to(dev)
+    print(f"device={dev}  cin={cin} cout={cout}  "
+          f"params={sum(p.numel() for p in m.parameters())/1e6:.2f}M  "
           f"train={len(tr)} val={len(va)}")
     opt = torch.optim.Adam(m.parameters(), lr=lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
@@ -125,8 +127,8 @@ def train(data_dir, epochs=60, base=32, bs=8, lr=1e-3, val_frac=0.2, out=None):
         if ep % 5 == 0 or ep == epochs - 1:
             print(f"  ep{ep:3d}  val_mse={vmse:.4f}  (best {best:.4f})")
     out = Path(out) if out else HERE / "fw_unet2d.pt"
-    torch.save({"state": m.state_dict(), "base": base, "in_ch": IN_CH,
-                "out_ch": OUT_CH}, out)
+    torch.save({"state": m.state_dict(), "base": base, "in_ch": cin,
+                "out_ch": cout}, out)
     print(f"saved {out}  best_val_mse={best:.4f}")
     return m, best
 

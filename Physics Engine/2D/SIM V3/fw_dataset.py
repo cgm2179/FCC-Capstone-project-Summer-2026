@@ -68,6 +68,23 @@ def _run_field(classes, h, tx_ij, f_mhz, crossings):
     return res["phasor"]
 
 
+def _calib_ref(band, npw, side=256, crossings=1.5):
+    """One free-space (air-only) FDTD → an ABSOLUTE, per-band amplitude reference.
+
+    The FDTD source is identical across fields, so free space gives a fixed
+    reference level. Normalizing every field by THIS one number (instead of each
+    field's own 99th-pct) keeps target levels consistent across fields/stations —
+    which is what removes the systematic under-prediction. Measured at a fixed
+    radius so it is not dominated by the near-source singularity."""
+    h = band.cell_size_m(npw)
+    c = np.zeros((side, side), np.int8)                     # all air
+    U = _run_field(c, h, (side // 2, side // 2), band.f_mhz, crossings)
+    ii, jj = np.mgrid[0:side, 0:side]
+    r = np.hypot(ii - side // 2, jj - side // 2)
+    ring = (r > side * 0.2) & (r < side * 0.35)             # fixed mid-radius annulus
+    return float(np.median(np.abs(U[ring]))) or 1.0
+
+
 def _indoor_field(band, tx_m, height_frac, npw, crossings, max_cells):
     p = PE.extract_plane(band, height_frac=height_frac, n_per_wavelength=npw,
                          tx_m=tx_m, max_cells=max_cells)
@@ -103,7 +120,10 @@ def _outdoor_field(city_grid, cs, band, tx_m, height_m, npw, region_m,
 
 def generate(band_labels, scene="indoor", n_tx=3, boxes_per_field=80, box=128,
              height_frac=0.5, n_per_wavelength=8.0, region_m=40.0, crossings=2.5,
-             max_cells=1_500_000, out_dir=None, seed=0):
+             max_cells=1_500_000, out_dir=None, seed=0, absolute_norm=False):
+    # absolute_norm: one per-band free-space reference (consistent levels across
+    # fields). Tested worse at low data scale (far-field targets shrink → less
+    # signal); default False = per-field 99th-pct (more signal to learn from).
     rng = np.random.default_rng(seed)
     out = Path(out_dir) if out_dir else HERE / f"fw_data_{scene}"
     out.mkdir(parents=True, exist_ok=True)
@@ -128,6 +148,9 @@ def generate(band_labels, scene="indoor", n_tx=3, boxes_per_field=80, box=128,
         band = get(label)
         k = 2.0 * np.pi / band.wavelength_m
         ff = norm.freq_feature(band.f_mhz)
+        band_ref = _calib_ref(band, n_per_wavelength) if absolute_norm else None
+        if absolute_norm:
+            print(f"  [{band.label}] absolute free-space ref = {band_ref:.4g}")
         for _ in range(n_tx):
             tc = tx_cells[rng.integers(len(tx_cells))]
             tx_m = (float(tc[0]) * cs, float(tc[1]) * cs)
@@ -140,7 +163,7 @@ def generate(band_labels, scene="indoor", n_tx=3, boxes_per_field=80, box=128,
             H, W = U.shape
             h = p.h_m
             txf = np.array(p.tx_idx, float)
-            ref = np.percentile(np.abs(U), 99.0) or 1.0
+            ref = band_ref if absolute_norm else (np.percentile(np.abs(U), 99.0) or 1.0)
             xs, ys = [], []
             for _ in range(boxes_per_field):
                 if H <= box or W <= box:
@@ -185,11 +208,14 @@ def main():
     ap.add_argument("--max-cells", type=int, default=1_500_000)
     ap.add_argument("--out", default=None)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--absolute-norm", action="store_true",
+                    help="per-band absolute reference (default: per-field 99th-pct)")
     args = ap.parse_args()
     generate(args.bands, scene=args.scene, n_tx=args.n_tx,
              boxes_per_field=args.boxes_per_field, box=args.box,
              n_per_wavelength=args.n_per_wavelength, region_m=args.region_m,
-             max_cells=args.max_cells, out_dir=args.out, seed=args.seed)
+             max_cells=args.max_cells, out_dir=args.out, seed=args.seed,
+             absolute_norm=args.absolute_norm)
 
 
 if __name__ == "__main__":
