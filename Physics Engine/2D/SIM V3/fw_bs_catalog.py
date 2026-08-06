@@ -104,12 +104,29 @@ def _place_source(fine, tx_fine, boresight_deg, zoom):
     return (ix, iz)
 
 
-def bs_field(grid, man, st, npw=8.0, region_m=60.0, crossings=2.5, max_cells=2_500_000):
-    """FDTD complex field for one real station (facade source + backplane)."""
+def band_region_m(f_mhz):
+    """Band-adaptive coverage region (metres): bigger for low bands (longer range),
+    local for high bands. `max_cells` still caps the actual grid per GPU, so this
+    is the *target* extent — set max_cells high on an A100 to realize it."""
+    if f_mhz < 900:
+        return 400.0
+    if f_mhz < 2000:
+        return 250.0
+    if f_mhz < 3000:
+        return 180.0
+    return 140.0
+
+
+def bs_region(grid, man, st, npw=8.0, region_m=None, max_cells=2_500_000):
+    """Extract + resample the region around a station (classes at lambda/N + the
+    facade source/backplane placement), WITHOUT the FDTD — for surrogate-only
+    inference/coverage. `bs_field` = this + a solve."""
     from scipy import ndimage
     cs = float(man["cell_size_m"]); NX, NZ = grid.shape[0], grid.shape[2]
     plane = grid[:, 2, :]
     band = get(st["band"]); h = band.cell_size_m(npw); zoom = cs / h
+    if region_m is None:                                 # band-adaptive default
+        region_m = band_region_m(band.f_mhz)
     half = int(region_m / cs / 2)
     while (2 * half * zoom) ** 2 > max_cells and half > 10:
         half = int(half * 0.85)
@@ -118,9 +135,14 @@ def bs_field(grid, man, st, npw=8.0, region_m=60.0, crossings=2.5, max_cells=2_5
     fine = ndimage.zoom(plane[x0:x1, z0:z1], zoom, order=0).astype(np.int8)
     txf = [(st["vx"] - x0) * zoom, (st["vz"] - z0) * zoom]
     tx = _place_source(fine, txf, st["boresight"], zoom)
-    U = FD._run_field(fine, h, tx, band.f_mhz, crossings)
-    p = Plane(fine, h, (fine.shape[0] * h, fine.shape[1] * h), tx, 2.0, npw,
-              dict(scene="outdoor-bs", site=st["site"], boresight=st["boresight"]))
+    return Plane(fine, h, (fine.shape[0] * h, fine.shape[1] * h), tx, 2.0, npw,
+                 dict(scene="outdoor-bs", site=st["site"], boresight=st["boresight"]))
+
+
+def bs_field(grid, man, st, npw=8.0, region_m=None, crossings=2.5, max_cells=2_500_000):
+    """FDTD complex field for one real station (facade source + backplane)."""
+    p = bs_region(grid, man, st, npw=npw, region_m=region_m, max_cells=max_cells)
+    U = FD._run_field(p.classes, p.h_m, p.tx_idx, get(st["band"]).f_mhz, crossings)
     return p, U
 
 
@@ -148,7 +170,7 @@ def _dedupe_by_site(stations):
 
 
 def generate_bs(band_labels, holdout_site="BS7_forte_hall", boxes_per_station=48,
-                box=128, npw=8.0, region_m=60.0, max_cells=1_600_000,
+                box=128, npw=8.0, region_m=None, max_cells=1_600_000,
                 out_dir=None, seed=1):
     """Dataset from REAL stations: train on known sites, hold out one for test."""
     import json
@@ -217,7 +239,7 @@ def _tiled_predict_bs(model, classes, tx_ij, h, f_mhz, boresight, box=128, strid
     return Ut * np.exp(-1j * k * np.hypot(ii - tx_ij[0], jj - tx_ij[1]) * h)
 
 
-def validate_bs(model, band_labels, holdout_site="BS7_forte_hall", region_m=60.0,
+def validate_bs(model, band_labels, holdout_site="BS7_forte_hall", region_m=None,
                 max_cells=1_600_000):
     from pathlib import Path
     from scipy.stats import spearmanr
