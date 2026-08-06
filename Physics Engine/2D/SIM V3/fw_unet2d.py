@@ -106,20 +106,20 @@ def train(data_dir, epochs=60, base=32, bs=8, lr=1e-3, val_frac=0.2, out=None, a
           f"train={len(tr)} val={len(va)}")
     # fp16 mixed precision (AMP) on CUDA — ~2-3x faster on tensor-core GPUs (T4/L4/A100),
     # ~half the memory (bigger batches). No-op on CPU/MPS, so those paths are unchanged.
-    use_amp = (amp if amp is not None else (dev == "cuda"))
+    # bf16 mixed precision on CUDA GPUs that support it. NOT fp16: this field's
+    # activation range overflows fp16 (max 65504) -> inf -> NaN loss with every
+    # GradScaler step skipped. bf16 keeps fp32's exponent range, so it can't
+    # overflow and needs no GradScaler. Falls back to fp32 on CPU/MPS and on GPUs
+    # without bf16 (e.g. T4).
+    use_amp = amp if amp is not None else (dev == "cuda" and torch.cuda.is_bf16_supported())
     pin = (dev == "cuda")
     ac = lambda: torch.autocast(device_type=("cuda" if dev == "cuda" else "cpu"),
-                                dtype=torch.float16, enabled=use_amp)
+                                dtype=torch.bfloat16, enabled=use_amp)
     opt = torch.optim.Adam(m.parameters(), lr=lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
-    try:
-        scaler = torch.amp.GradScaler("cuda", enabled=use_amp)   # torch >= 2.3
-    except (AttributeError, TypeError):
-        scaler = torch.cuda.amp.GradScaler(enabled=use_amp)      # older torch
-
     tl = DataLoader(tr, bs, shuffle=True, pin_memory=pin)
     vl = DataLoader(va, bs, pin_memory=pin)
-    print(f"  mixed precision (AMP fp16): {'on' if use_amp else 'off'}  batch={bs}")
+    print(f"  mixed precision (AMP bf16): {'on' if use_amp else 'off'}  batch={bs}")
     best = float("inf")
     for ep in range(epochs):
         m.train()
@@ -128,8 +128,7 @@ def train(data_dir, epochs=60, base=32, bs=8, lr=1e-3, val_frac=0.2, out=None, a
             opt.zero_grad(set_to_none=True)
             with ac():
                 loss, _, _ = complex_loss(m(x), y)
-            scaler.scale(loss).backward()
-            scaler.step(opt); scaler.update()
+            loss.backward(); opt.step()          # bf16 needs no GradScaler
         sched.step()
         m.eval(); vmse = 0.0; nv2 = 0
         with torch.no_grad():
