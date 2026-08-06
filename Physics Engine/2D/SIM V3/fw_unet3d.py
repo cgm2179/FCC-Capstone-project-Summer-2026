@@ -50,6 +50,36 @@ def load_model3d(path, dev=None):
     return m.to(dev or pick_device())
 
 
+def tiled_predict3d(model, classes, tx, h, f_mhz, box=24, stride=18, dev=None):
+    """Tile the 3-D surrogate over a whole-floor grid → complex U (for the
+    FDTD-vs-surrogate timing comparison)."""
+    import json
+    import _bootstrap as B
+    import dataset_3d as D3
+    from fw_dataset3d import featurize3d
+    dev = dev or pick_device()
+    norm = D3.load_norm(json.loads(B.MANIFEST.read_text()))
+    ff = norm.freq_feature(f_mhz); k = 2 * np.pi / (299_792_458.0 / (f_mhz * 1e6))
+    Xd, Yd, Zd = classes.shape
+    acc = np.zeros((2, Xd, Yd, Zd)); wsum = np.zeros((Xd, Yd, Zd))
+    ax = lambda D: sorted(set(list(range(0, max(1, D - box + 1), stride)) + [max(0, D - box)]))
+    for x0 in ax(Xd):
+        for y0 in ax(Yd):
+            for z0 in ax(Zd):
+                bx, by, bz = min(box, Xd), min(box, Yd), min(box, Zd)
+                sl = (slice(x0, x0 + bx), slice(y0, y0 + by), slice(z0, z0 + bz))
+                ii, jj, kk = np.mgrid[x0:x0 + bx, y0:y0 + by, z0:z0 + bz]
+                d_m = np.sqrt((ii - tx[0]) ** 2 + (jj - tx[1]) ** 2 + (kk - tx[2]) ** 2) * h
+                xin = featurize3d(classes[sl], (tx[0] - x0, tx[1] - y0, tx[2] - z0), d_m, ff)
+                with torch.no_grad():
+                    pr = model(torch.from_numpy(xin[None]).to(dev)).cpu().numpy()[0]
+                acc[(slice(None),) + sl] += pr; wsum[sl] += 1
+    Ut = (acc[0] + 1j * acc[1]) / np.maximum(wsum, 1e-9)
+    ii, jj, kk = np.mgrid[0:Xd, 0:Yd, 0:Zd]
+    dg = np.sqrt((ii - tx[0]) ** 2 + (jj - tx[1]) ** 2 + (kk - tx[2]) ** 2) * h
+    return Ut * np.exp(-1j * k * dg)
+
+
 def train(data, epochs=25, base=16, bs=4, lr=1e-3, val_frac=0.2, out=None):
     files = sorted(glob.glob(str(Path(data) / "shard_*.npz")))
     ds = ShardDS(files)

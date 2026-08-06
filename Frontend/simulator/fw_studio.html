@@ -1,0 +1,245 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SIM V3 · Full-Wave Studio</title>
+  <style>
+    /* palette + font consistent with the app (Frontend/2d-3d/dashboard.css) */
+    :root { --bg:#f4f6f3; --panel:#ffffff; --ink:#1f2a2a; --muted:#5b6662; --accent:#0a7f7a; --line:#d9e0dc; }
+    * { box-sizing: border-box; }
+    body { margin:0; height:100vh; display:flex; background:var(--bg); color:var(--ink);
+           font:13px/1.5 "Avenir Next","Helvetica Neue",Helvetica,sans-serif; overflow:hidden; }
+    #side { width:300px; flex:none; background:var(--panel); border-right:1px solid var(--line);
+            padding:18px; overflow-y:auto; }
+    #side h2 { margin:0 0 2px; font-size:1.15rem; } #side .sub { color:var(--muted); font-size:0.82rem; margin:0 0 16px; }
+    .grp { margin-bottom:13px; } .grp > label { display:block; font-weight:600; margin-bottom:5px; color:var(--muted); font-size:0.84rem; }
+    select, input[type=number] { width:100%; background:#fff; color:var(--ink); border:1px solid var(--line);
+            border-radius:10px; padding:7px 10px; font:inherit; }
+    .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+    .seg button { flex:1; background:#fff; color:var(--muted); border:0; padding:7px; cursor:pointer; font:inherit; }
+    .seg button.on { background:var(--accent); color:#fff; }
+    .row { display:flex; gap:6px; } .row > label { flex:1; font-size:0.72rem; color:var(--muted); }
+    .btn { width:100%; padding:9px; border:0; border-radius:10px; background:var(--accent); color:#fff;
+           font-weight:600; cursor:pointer; margin-top:4px; }
+    .btn.ghost { background:#eef2ef; color:var(--ink); border:1px solid var(--line); }
+    #status { margin-top:12px; font-size:0.78rem; color:var(--muted); min-height:16px; } #status.err { color:#c0392b; }
+    #view { flex:1; position:relative; } #hud { position:absolute; top:12px; left:14px; font-size:0.75rem;
+            color:var(--ink); pointer-events:none; }
+    .sw { display:inline-block; width:9px; height:9px; border-radius:2px; vertical-align:middle; }
+  </style>
+  <script type="importmap">
+  { "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }}
+  </script>
+</head>
+<body>
+  <div id="side">
+    <h2>Full-Wave Studio</h2>
+    <p class="sub">SIM V3 · place a Tx, pick a waveform, see the full-wave field on the CAD.</p>
+
+    <div class="grp"><label>Environment</label>
+      <div class="seg" id="envSeg"><button class="on" data-v="indoor">Indoor</button><button data-v="outdoor">Outdoor</button></div></div>
+    <div class="grp"><label>Waveform</label>
+      <div class="seg" id="wfSeg"><button class="on" data-v="wifi">Wi-Fi (WLAN)</button><button data-v="cell">Cellular 4G/5G</button></div></div>
+    <div class="grp"><label>Band</label><select id="band"></select></div>
+    <div class="grp"><label>Tx power (dBm)</label><input id="txp" type="number" value="20" min="0" max="46" step="1"></div>
+    <div class="grp"><label>Antenna</label>
+      <select id="ant"><option value="sector">Sector / panel (default)</option><option value="omni">Omni</option><option value="dish">Dish</option></select>
+      <div id="sectorP" class="row" style="margin-top:6px">
+        <label>Azimuth°<input id="az" type="number" value="0" min="0" max="359"></label>
+        <label>Beam°<input id="bw" type="number" value="65" min="10" max="180"></label>
+        <label>Tilt°<input id="tilt" type="number" value="0" min="-20" max="20"></label>
+      </div></div>
+    <button class="btn ghost" id="place">＋ Place Tx (click the model)</button>
+    <button class="btn" id="run">▶ Run full-wave</button>
+    <div class="grp" style="margin-top:14px"><label>Field view</label>
+      <div class="seg" id="viewSeg"><button class="on" data-v="heat">Heatmap</button><button data-v="wave">Wavefront</button></div></div>
+    <div id="status">ready</div>
+  </div>
+  <div id="view">
+    <div id="hud">
+      <div><b style="color:#0a7f7a">SIM V3 — full-wave on the 7th-floor CAD</b></div>
+      <div id="hudMeta"></div>
+      <div><span class="sw" style="background:#d73027"></span> strong &nbsp;<span class="sw" style="background:#4575b4"></span> weak &nbsp;·&nbsp;
+           <span class="sw" style="background:#ff5a4a"></span> crest <span class="sw" style="background:#4aa0ff"></span> trough</div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+    import { surfaceNets } from './smooth_surface.js';
+    const $ = id => document.getElementById(id);
+    const setStatus = (m, e) => { $('status').textContent = m; $('status').className = e ? 'err' : ''; };
+
+    const BANDS = { wifi: [['2442', '2.4 GHz'], ['5500', '5 GHz'], ['6125', '6 GHz (6E)']],
+                    cell: [['617', 'LTE 617'], ['751', 'LTE 751'], ['1960', 'LTE 1960'], ['2506', 'NR n41 2506'], ['3700', 'NR n77 3700']] };
+    function fillBands(wf) { $('band').innerHTML = BANDS[wf].map(([v, t]) => `<option value="${v}">${t} MHz</option>`).join(''); }
+    fillBands('wifi');
+
+    // ---- segmented controls ----
+    function seg(id, cb) { const el = $(id); el.querySelectorAll('button').forEach(b => b.onclick = () => {
+      el.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); cb(b.dataset.v); }); }
+    seg('envSeg', () => {}); seg('wfSeg', v => fillBands(v));
+    $('ant').onchange = () => { $('sectorP').style.display = $('ant').value === 'sector' ? 'flex' : 'none'; };
+
+    // jet colormap (blue → cyan → green → yellow → red) for the coverage heatmap
+    const cl = v => Math.max(0, Math.min(1, v));
+    function turbo(t) { t = cl(t);
+      return [cl(1.5 - Math.abs(4 * t - 3)), cl(1.5 - Math.abs(4 * t - 2)), cl(1.5 - Math.abs(4 * t - 1))]; }
+
+    // ---- three.js scene ----
+    const view = $('view');
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(view.clientWidth, view.clientHeight); renderer.setPixelRatio(devicePixelRatio);
+    view.appendChild(renderer.domElement);
+    const scene = new THREE.Scene(); scene.background = new THREE.Color(0xeceef0);
+    const camera = new THREE.PerspectiveCamera(50, view.clientWidth / view.clientHeight, 0.01, 1e5);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    const dl = new THREE.DirectionalLight(0xffffff, 0.7); dl.position.set(1, 2, 1); scene.add(dl);
+
+    // ---- load field + CAD ----
+    let X, Y, Z, NV, re, im, solid, cmin, csz, center, cadMesh = null;
+    async function loadField() {
+      const meta = await (await fetch('fw_floor.json?t=' + Date.now())).json();
+      [X, Y, Z] = meta.dims; NV = X * Y * Z;
+      const buf = new Float32Array(await (await fetch('fw_floor.bin')).arrayBuffer());
+      re = buf.subarray(0, NV); im = buf.subarray(NV, 2 * NV);
+      solid = new Uint8Array(await (await fetch('fw_floor_solid.bin')).arrayBuffer());
+      $('hudMeta').textContent = `${X}×${Y}×${Z} field · FDTD ${meta.gen_seconds}s`;
+      return meta;
+    }
+    async function loadCAD() {
+      try {
+        const draco = new DRACOLoader(); draco.setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/');
+        const ld = new GLTFLoader(); ld.setDRACOLoader(draco);
+        const g = await ld.loadAsync('../../Data/models/7th_floor_full.glb');
+        g.scene.traverse(o => { if (o.isMesh) o.material = new THREE.MeshStandardMaterial(
+          { color: 0xaab4ad, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }); });
+        scene.add(g.scene); cadMesh = g.scene;
+        const bb = new THREE.Box3().setFromObject(g.scene);
+        cmin = bb.min; csz = new THREE.Vector3().subVectors(bb.max, bb.min); center = bb.getCenter(new THREE.Vector3());
+      } catch (e) { /* field-extent fallback set by caller */ throw e; }
+    }
+    const idx = (x, y, z) => (x * Y + y) * Z + z;
+    const wx = v => cmin.x + (v / X) * csz.x, wy = v => cmin.y + (v / Y) * csz.y, wz = v => cmin.z + (v / Z) * csz.z;
+
+    // ---- HEATMAP: colored instanced voxels of |U| (dB) ----
+    let heatMesh = null;
+    function buildHeat() {
+      const amp = new Float32Array(NV);
+      for (let i = 0; i < NV; i++) amp[i] = solid[i] ? 0 : Math.hypot(re[i], im[i]);
+      const nz = Array.from(amp).filter(a => a > 0).sort((a, b) => a - b);   // robust ref
+      const ref = nz[Math.floor(nz.length * 0.99)] || 1e-9;
+      const cells = []; for (let i = 0; i < NV; i++) if (amp[i] > ref * 0.035) cells.push(i);
+      const g = new THREE.BoxGeometry(csz.x / X * 1.15, csz.y / Y * 1.15, csz.z / Z * 1.15);
+      const m = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.62, depthWrite: false });
+      const mesh = new THREE.InstancedMesh(g, m, cells.length);
+      mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cells.length * 3), 3);
+      const M = new THREE.Matrix4(), col = new THREE.Color();
+      cells.forEach((i, k) => {
+        const z = i % Z, y = ((i - z) / Z) % Y, x = ((i - z) / Z - y) / Y;
+        M.setPosition(wx(x + .5), wy(y + .5), wz(z + .5)); mesh.setMatrixAt(k, M);
+        const db = 20 * Math.log10(amp[i] / ref);                  // ~+6 strong .. -35 weak
+        const [r, gg, b] = turbo((db + 35) / 38); col.setRGB(r, gg, b); mesh.setColorAt(k, col);
+      });
+      mesh.instanceColor.needsUpdate = true; return mesh;
+    }
+
+    // ---- WAVEFRONT: Surface-Nets crest/trough shells over one period ----
+    function isoGeom(scalar) {
+      const { vertices, faces } = surfaceNets(scalar, [X, Y, Z]); const pos = [];
+      for (const f of faces) { const P = j => [wx(vertices[j][0]), wy(vertices[j][1]), wz(vertices[j][2])];
+        const A = P(f[0]), B = P(f[1]), C = P(f[2]), D = P(f[3]); pos.push(...A, ...B, ...C, ...A, ...C, ...D); }
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.computeVertexNormals(); return g;
+    }
+    const matC = new THREE.MeshStandardMaterial({ color: 0xff5a4a, emissive: 0x2c0a06, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+    const matT = new THREE.MeshStandardMaterial({ color: 0x4aa0ff, emissive: 0x06182c, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+    let waves = [];
+    function buildWaves() {
+      const NPH = 12, L = 0.22;
+      for (let p = 0; p < NPH; p++) {
+        const c = Math.cos(2 * Math.PI * p / NPH), s = Math.sin(2 * Math.PI * p / NPH);
+        const v = new Float32Array(NV);
+        for (let x = 0; x < X; x++) for (let y = 0; y < Y; y++) for (let z = 0; z < Z; z++) {
+          const iS = idx(x, y, z), jN = x + X * (y + Y * z); v[jN] = solid[iS] ? 0 : (re[iS] * c - im[iS] * s); }
+        const grp = new THREE.Group();
+        grp.add(new THREE.Mesh(isoGeom(v.map(a => L - a)), matC));
+        grp.add(new THREE.Mesh(isoGeom(v.map(a => a + L)), matT));
+        grp.visible = false; scene.add(grp); waves.push(grp);
+      }
+    }
+
+    // ---- Tx marker (spheres + azimuth arrow, warehouse style) ----
+    let txMarker = new THREE.Group(); scene.add(txMarker);
+    function setTxMarker(pos, azDeg) {
+      txMarker.clear(); txMarker.position.copy(pos);
+      for (const dx of [-0.6, 0, 0.6]) txMarker.add(new THREE.Mesh(new THREE.SphereGeometry(0.5),
+        new THREE.MeshStandardMaterial({ color: 0xf2f2f2 })).translateX(dx));
+      const a = (azDeg || 0) * Math.PI / 180;
+      const arrow = new THREE.ArrowHelper(new THREE.Vector3(-Math.sin(a), 0.2, Math.cos(a)).normalize(),
+        new THREE.Vector3(0, 0, 0), Math.max(csz.x, csz.z) * 0.12, 0x2fff6a, undefined, 1.2); txMarker.add(arrow);
+    }
+
+    // ---- view toggle (heatmap ↔ animated wavefront) ----
+    let mode = 'heat', waveTimer = null, wk = 0;
+    function applyView() {
+      if (heatMesh) heatMesh.visible = (mode === 'heat');
+      if (waveTimer) { clearInterval(waveTimer); waveTimer = null; }
+      waves.forEach(w => w.visible = false);
+      if (mode === 'wave' && waves.length) {
+        waves[wk % waves.length].visible = true;
+        waveTimer = setInterval(() => {
+          waves[wk % waves.length].visible = false; wk++; waves[wk % waves.length].visible = true;
+        }, 75);
+      }
+    }
+    seg('viewSeg', v => { mode = v; applyView(); });
+
+    // ---- place Tx by clicking the model ----
+    let placing = false;
+    $('place').onclick = () => { placing = true; setStatus('click the model to place the Tx…'); };
+    renderer.domElement.addEventListener('pointerdown', ev => {
+      if (!placing || !cadMesh) return; placing = false;
+      const r = renderer.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+      const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera);
+      const hit = ray.intersectObject(cadMesh, true)[0];
+      if (hit) { setTxMarker(hit.point, +$('az').value); setStatus('Tx placed. Press Run.'); }
+    });
+
+    // ---- run ----
+    $('run').onclick = () => {
+      const band = $('band').selectedOptions[0].textContent, txp = $('txp').value, ant = $('ant').value;
+      applyView();
+      setStatus(`full-wave · ${band} · ${txp} dBm · ${ant}${ant === 'sector' ? ' @' + $('az').value + '°' : ''} (precomputed SIM V3 field)`);
+    };
+
+    (async function init() {
+      try {
+        const meta = await loadField();
+        try { await loadCAD(); } catch (e) {
+          const [ex, ey, ez] = meta.extent_m; cmin = new THREE.Vector3(0, 0, 0);
+          csz = new THREE.Vector3(ex, ey, ez); center = new THREE.Vector3(ex / 2, ey / 2, ez / 2);
+          setStatus('CAD unavailable — field only', true);
+        }
+        camera.position.set(cmin.x + csz.x * 1.1, cmin.y + csz.y * 3.2, cmin.z + csz.z * 1.4);
+        controls.target.copy(center); controls.update();
+        setStatus('building heatmap…'); heatMesh = buildHeat(); scene.add(heatMesh);
+        setStatus('building wavefronts…'); buildWaves();
+        setTxMarker(new THREE.Vector3(wx(meta.tx[0]), wy(meta.tx[1]), wz(meta.tx[2])), +$('az').value);
+        applyView(); setStatus('ready — place a Tx, pick a band, press Run');
+      } catch (e) { setStatus('error: ' + e.message, true); throw e; }
+      (function loop() { controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); })();
+    })();
+    addEventListener('resize', () => { camera.aspect = view.clientWidth / view.clientHeight;
+      camera.updateProjectionMatrix(); renderer.setSize(view.clientWidth, view.clientHeight); });
+  </script>
+</body>
+</html>
