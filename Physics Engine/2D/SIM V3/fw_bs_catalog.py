@@ -60,9 +60,12 @@ def _bearing_to_grid(bearing_deg):
     return np.array([-np.sin(th), np.cos(th)])          # (dX, dZ)
 
 
-def load_stations(band_labels=None):
-    """Georeferenced grid + manifest + a list of real Tx dicts (one per sector)."""
-    grid, man = CG.load_georef_city()
+def load_stations(band_labels=None, city_dir=None):
+    """Georeferenced grid + manifest + a list of real Tx dicts (one per sector).
+
+    city_dir: alternate city grid (e.g. the real-OSM city/NoMa_DC_osm from
+    voxelize_gpkg.py); default = the NoMa OBJ grid."""
+    grid, man = CG.load_georef_city(city_dir)
     NX, NZ = grid.shape[0], grid.shape[2]
     want = set(band_labels) if band_labels else None
     out = []
@@ -171,15 +174,17 @@ def _dedupe_by_site(stations):
 
 def generate_bs(band_labels, holdout_site="BS7_forte_hall", boxes_per_station=48,
                 box=128, npw=8.0, region_m=None, max_cells=1_600_000,
-                out_dir=None, seed=1):
-    """Dataset from REAL stations: train on known sites, hold out one for test."""
+                out_dir=None, seed=1, city_dir=None):
+    """Dataset from REAL stations: train on known sites, hold out one for test.
+
+    city_dir: alternate city grid (e.g. city/NoMa_DC_osm real OSM buildings)."""
     import json
     from pathlib import Path
     rng = np.random.default_rng(seed)
     out = Path(out_dir) if out_dir else B._PHYS.parent / "fw_data_bs"
     out.mkdir(parents=True, exist_ok=True)
     norm = D3.load_norm(json.loads(B.MANIFEST.read_text()))
-    grid, man, sts = load_stations(band_labels)
+    grid, man, sts = load_stations(band_labels, city_dir=city_dir)
     train = _dedupe_by_site([s for s in sts if s["site"] != holdout_site])
     print(f"train sites: {[s['site'] for s in train]}  (holdout {holdout_site})")
     sid = 0
@@ -240,11 +245,11 @@ def _tiled_predict_bs(model, classes, tx_ij, h, f_mhz, boresight, box=128, strid
 
 
 def validate_bs(model, band_labels, holdout_site="BS7_forte_hall", region_m=None,
-                max_cells=1_600_000):
+                max_cells=1_600_000, city_dir=None):
     from pathlib import Path
     from scipy.stats import spearmanr
     import fw_infer
-    grid, man, sts = load_stations(band_labels)
+    grid, man, sts = load_stations(band_labels, city_dir=city_dir)
     cand = _dedupe_by_site([s for s in sts if s["site"] == holdout_site])
     if not cand:
         print(f"holdout {holdout_site} not in bands {band_labels}"); return None
@@ -274,12 +279,15 @@ def main():
     ap.add_argument("--validate", action="store_true")
     ap.add_argument("--ckpt", default="fw_bs.pt")
     ap.add_argument("--out", default="fw_data_bs")
+    ap.add_argument("--city-dir", default=None,
+                    help="alternate city grid dir (e.g. the real-OSM "
+                         "'3D Map Physics/SIM V1 3D/city/NoMa_DC_osm')")
     a = ap.parse_args()
     if a.gen:
-        generate_bs(a.bands, holdout_site=a.holdout, out_dir=a.out)
+        generate_bs(a.bands, holdout_site=a.holdout, out_dir=a.out, city_dir=a.city_dir)
     if a.validate:
         from fw_unet2d import load_model
-        validate_bs(load_model(a.ckpt), a.bands, holdout_site=a.holdout)
+        validate_bs(load_model(a.ckpt), a.bands, holdout_site=a.holdout, city_dir=a.city_dir)
 
 
 if __name__ == "__main__":
