@@ -20,7 +20,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as CANNON from 'cannon-es';
-import { smoothSurfaceForClass } from './smooth_surface.js';   // A2: smooth surface from the voxels
+import { smoothSurfaceForClass, surfaceNets } from './smooth_surface.js';   // A2: smooth surface; surfaceNets = SIM V3 wave-mesh
 import { voxelizeTriangles, objectToTriangles } from './voxelize_browser.js';   // B: imported-model voxelizer
 import { makeMarchPL } from './solve_core.js';   // shared analytic kernel (also runs in sim_worker.js)
 
@@ -89,6 +89,9 @@ const dispSmooth    = document.getElementById('disp3dSmooth');
 const dispCad       = document.getElementById('disp3dCad');
 const dispVoxels    = document.getElementById('disp3dVoxels');
 const dispWash      = document.getElementById('disp3dWash');
+const dispPalette   = document.getElementById('disp3dPalette');      // Rainbow / Viridis colour scale
+const dispModelVis  = document.getElementById('disp3dModelVis');     // CAD/building shell opacity (Indoor + Outdoor)
+const dispModelVisVal = document.getElementById('disp3dModelVisVal');
 const modelFile     = document.getElementById('sim3dModelFile');    // Phase B: load a model to simulate
 const sizeX         = document.getElementById('sim3dSizeX');         // sandbox real-world bounds (m)
 const sizeY         = document.getElementById('sim3dSizeY');
@@ -456,6 +459,26 @@ function disposeSurface() {
   for (const m of surfaceMeshes) { scene.remove(m); m.geometry.dispose(); m.material.dispose(); }
   surfaceMeshes = [];
 }
+// ---- Model visibility (Indoor CAD + Outdoor city shell) --------------------
+// One slider fades the whole building shell so the field reads through it. Absolute
+// opacity (not per-material) so the model dims uniformly; default ≈ the translucent
+// Studio look the field was designed to sit inside. Rendering only — cache-safe.
+let MODEL_VIS = 0.35;
+function fadeMeshOpacity(o) {
+  if (!o || !o.isMesh || !o.material) return;
+  const mats = Array.isArray(o.material) ? o.material : [o.material];
+  for (const m of mats) {
+    m.transparent = MODEL_VIS < 0.999;
+    m.opacity = MODEL_VIS;
+    m.depthWrite = MODEL_VIS > 0.6;
+    m.needsUpdate = true;
+  }
+}
+function applyModelVisibility() {
+  if (cadRoot) cadRoot.traverse(fadeMeshOpacity);   // skips the LineSegments edge overlay (not isMesh)
+  for (const m of wallMeshes) fadeMeshOpacity(m);
+  for (const m of surfaceMeshes) fadeMeshOpacity(m);
+}
 function applyGeometryVisibility() {
   // CAD is the default indoor look. Smooth / voxel boxes are optional debug overlays
   // (mutually exclusive with CAD so the view does not stack three buildings).
@@ -463,6 +486,7 @@ function applyGeometryVisibility() {
   for (const m of wallMeshes) m.visible = !!(DISPLAY.voxels && !showCad);
   for (const m of surfaceMeshes) m.visible = !!(DISPLAY.smooth && !showCad);
   if (cadRoot) cadRoot.visible = showCad;
+  applyModelVisibility();                            // keep the shell at the chosen visibility
 }
 // Show either the voxel cubes or the smooth surface (built lazily on first use). The surface
 // build is ~1.5 s of synchronous surface-nets, so defer it behind a painted status message.
@@ -1046,9 +1070,15 @@ refreshLists();
 // ---- Static field: first-pass FSPL point cloud from the first transmitter ----
 function firstTx() { return placed.find((p) => p.role === 'tx'); }
 
-// viridis-ish ramp, t: 0 (weak) → 1 (strong), returns normalized rgb.
+// Colour ramps, t: 0 (weak) → 1 (strong). Rainbow (jet) matches the warehouse-reference
+// look; Viridis is perceptually uniform. Chosen live from the Display "Colour palette".
+const PALETTES = {
+  rainbow: [[0, 0, 255], [0, 255, 255], [0, 255, 0], [255, 255, 0], [255, 128, 0], [255, 0, 0]],
+  viridis: [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]],
+};
+let RAMP_PAL = 'rainbow';
 function ramp(t) {
-  const s = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
+  const s = PALETTES[RAMP_PAL] || PALETTES.viridis;
   t = Math.min(1, Math.max(0, t)) * (s.length - 1);
   const i = Math.floor(t), f = t - i, a = s[i], b = s[Math.min(i + 1, s.length - 1)];
   return [(a[0] + (b[0] - a[0]) * f) / 255, (a[1] + (b[1] - a[1]) * f) / 255, (a[2] + (b[2] - a[2]) * f) / 255];
@@ -2079,6 +2109,21 @@ if (dispWash) dispWash.addEventListener('change', () => {
 });
 if (dispEirp) dispEirp.addEventListener('change', () => { DISPLAY.eirpDbm = Number(dispEirp.value) || 20; reRunViz(); });
 if (dispScale) dispScale.addEventListener('change', () => { DISPLAY.scale = dispScale.value; reRunViz(); });
+// Colour palette (Rainbow / Viridis) — recolours every field render, incl. the full-wave layer.
+if (dispPalette) {
+  RAMP_PAL = dispPalette.value || RAMP_PAL;
+  dispPalette.addEventListener('change', () => { RAMP_PAL = dispPalette.value; reRunViz(); });
+}
+// Model visibility — live-fade the shell (no re-solve); default reflects the slider's initial value.
+if (dispModelVis) {
+  MODEL_VIS = (Number(dispModelVis.value) || 35) / 100;
+  const upd = () => {
+    MODEL_VIS = (Number(dispModelVis.value) || 0) / 100;
+    if (dispModelVisVal) dispModelVisVal.textContent = dispModelVis.value;
+    applyModelVisibility();
+  };
+  dispModelVis.addEventListener('input', upd);
+}
 if (dispClasses) dispClasses.addEventListener('change', () => { DISPLAY.classes = dispClasses.checked; reRunViz(); });
 if (dispThresh) {
   dispThresh.addEventListener('input', () => {
@@ -3037,9 +3082,204 @@ function applyWave() {
   if (animScrub) animScrub.value = String(Math.round(1000 * u.r / u.rMax));
 }
 
+// ============================================================================
+// Full-wave field (SIM V3) — the precomputed 3-D FDTD / surrogate complex field
+// rendered on the real CAD as a |U| heatmap (Rainbow/Viridis) or an animated
+// Re{U·e^{jωt}} wave-mesh (Surface-Nets crest/trough shells). Additive: its own
+// scene groups + an in-viewport toggle; never touches the cache/surrogate/
+// analytic tiers. Reuses ramp() + the model-visibility slider. v1 renders the
+// PRECOMPUTED field (Frontend/simulator/fw_floor.*); a live per-arbitrary-Tx
+// solve needs in-browser ONNX or a backend.
+// ============================================================================
+let FW = null;          // active render state: { heatGroup, waveGroup, waves, timer, toggleEl, k, meta }
+let fwData = null;      // cached fetch: { meta, X,Y,Z,NV, re, im, solid }
+let fwRunToken = 0;     // guards against overlapping runs (the first fetch awaits) stacking layers
+
+async function loadFwData() {
+  if (fwData) return fwData;
+  const base = 'Frontend/simulator/';        // fetch is relative to the page (repo root), not this module
+  const meta = await (await fetch(base + 'fw_floor.json')).json();
+  const [X, Y, Z] = meta.dims, NV = X * Y * Z;
+  const buf = new Float32Array(await (await fetch(base + 'fw_floor.bin')).arrayBuffer());
+  const solid = new Uint8Array(await (await fetch(base + 'fw_floor_solid.bin')).arrayBuffer());
+  fwData = { meta, X, Y, Z, NV, re: buf.subarray(0, NV), im: buf.subarray(NV, 2 * NV), solid };
+  return fwData;
+}
+
+function disposeFullWave() {
+  // Sweep-clean by marker: remove every full-wave layer + toggle, incl. orphans from a
+  // superseded re-entrant run, so heatmap and wavefront can never stack.
+  if (FW && FW.timer) clearInterval(FW.timer);
+  if (scene) {
+    const doomed = [];
+    scene.traverse((o) => { if (o.userData && o.userData.__fw) doomed.push(o); });
+    for (const g of doomed) {
+      scene.remove(g);
+      g.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+    }
+  }
+  document.querySelectorAll('.fw3d-toggle').forEach((el) => el.remove());
+  FW = null;
+}
+
+// field grid → world, mapped onto the CAD bounding box (fallback: the extent box),
+// so the field sits inside the building footprint however the scene is framed.
+function fwFrame(X, Y, Z) {
+  let cmin, csz;
+  if (cadRoot) {
+    const bb = new THREE.Box3().setFromObject(cadRoot);
+    cmin = bb.min.clone(); csz = new THREE.Vector3().subVectors(bb.max, bb.min);
+  } else {
+    cmin = new THREE.Vector3(0, 0, 0);
+    csz = new THREE.Vector3(extent[0], extent[1], extent[2]);
+  }
+  return {
+    cmin, csz,
+    wx: (v) => cmin.x + (v / X) * csz.x,
+    wy: (v) => cmin.y + (v / Y) * csz.y,
+    wz: (v) => cmin.z + (v / Z) * csz.z,
+  };
+}
+
+async function runFullWaveField(animate) {
+  const myToken = ++fwRunToken;                           // newest run wins
+  disposeField(); disposeLobes(); disposeVectors(); disposeInterference(); disposeSweep();
+  disposeFullWave();
+  setStatus('Full-wave (SIM V3): loading precomputed field…');
+  let d;
+  try { d = await loadFwData(); }
+  catch (e) { setStatus('Full-wave (SIM V3): field unavailable — ' + ((e && e.message) || e)); return; }
+  if (myToken !== fwRunToken) return;                     // a newer run superseded this one
+  if (vizMode && vizMode.value !== 'fullwave') return;   // user navigated away while loading
+  const { meta, X, Y, Z, NV, re, im, solid } = d;
+  const fr = fwFrame(X, Y, Z), wx = fr.wx, wy = fr.wy, wz = fr.wz;
+
+  // ---- |U| heatmap: one small cube per illuminated cell, dB → palette ----
+  const amp = new Float32Array(NV);
+  for (let x = 0; x < X; x++) for (let y = 0; y < Y; y++) for (let z = 0; z < Z; z++) {
+    const iS = (x * Y + y) * Z + z, jN = x + X * (y + Y * z);
+    amp[jN] = solid[iS] ? 0 : Math.hypot(re[iS], im[iS]);
+  }
+  const nz = Array.from(amp).filter((a) => a > 0).sort((a, b) => a - b);
+  const ref = nz.length ? (nz[Math.floor(nz.length * 0.99)] || nz[nz.length - 1]) : 1e-9;
+  const keep = [];
+  for (let jN = 0; jN < NV; jN++) {
+    if (amp[jN] > 0 && 20 * Math.log10(amp[jN] / ref) > -35) keep.push(jN);
+  }
+  const heatGroup = new THREE.Group();
+  const cube = new THREE.BoxGeometry((fr.csz.x / X) * 0.92, (fr.csz.y / Y) * 0.92, (fr.csz.z / Z) * 0.92);
+  const hmat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, clippingPlanes: GEOM_CLIP });
+  const inst = new THREE.InstancedMesh(cube, hmat, keep.length);
+  const dummy = new THREE.Object3D(), col = new THREE.Color();
+  for (let n = 0; n < keep.length; n++) {
+    const jN = keep[n], x = jN % X, y = ((jN - x) / X) % Y, z = Math.floor(jN / (X * Y));
+    dummy.position.set(wx(x + 0.5), wy(y + 0.5), wz(z + 0.5)); dummy.updateMatrix();
+    inst.setMatrixAt(n, dummy.matrix);
+    const c = ramp((20 * Math.log10(amp[jN] / ref) + 35) / 38);
+    col.setRGB(c[0], c[1], c[2]); inst.setColorAt(n, col);
+  }
+  inst.instanceMatrix.needsUpdate = true;
+  if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+  heatGroup.userData.__fw = true;                         // marker for the sweep-clean teardown
+  heatGroup.add(inst); scene.add(heatGroup);
+
+  FW = { heatGroup, waveGroup: null, waves: [], timer: null, toggleEl: null, k: 0, meta };
+
+  // ---- wave-mesh (built lazily on first Wavefront switch — keeps heatmap snappy) ----
+  function buildWaves() {
+    const isoGeom = (scalar) => {
+      const { vertices, faces } = surfaceNets(scalar, [X, Y, Z]);
+      const pos = [];
+      for (const f of faces) {
+        const W = (p) => [wx(p[0]), wy(p[1]), wz(p[2])];
+        const a = W(vertices[f[0]]), b = W(vertices[f[1]]), c = W(vertices[f[2]]), e = W(vertices[f[3]]);
+        pos.push(...a, ...b, ...c, ...a, ...c, ...e);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.computeVertexNormals();
+      return g;
+    };
+    const phaseV = (ph) => {
+      const cph = Math.cos(ph), sph = Math.sin(ph), v = new Float32Array(NV);
+      for (let x = 0; x < X; x++) for (let y = 0; y < Y; y++) for (let z = 0; z < Z; z++) {
+        const iS = (x * Y + y) * Z + z, jN = x + X * (y + Y * z);
+        v[jN] = solid[iS] ? 0 : (re[iS] * cph - im[iS] * sph);
+      }
+      return v;
+    };
+    const NPH = 12, L = 0.22;
+    const waveGroup = new THREE.Group(); waveGroup.visible = false;
+    const matC = new THREE.MeshStandardMaterial({ color: 0xff5a4a, transparent: true, opacity: 0.9, side: THREE.DoubleSide, clippingPlanes: GEOM_CLIP });
+    const matT = new THREE.MeshStandardMaterial({ color: 0x4aa0ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, clippingPlanes: GEOM_CLIP });
+    for (let p = 0; p < NPH; p++) {
+      const vv = phaseV(2 * Math.PI * p / NPH);
+      const crest = new Float32Array(NV), trough = new Float32Array(NV);
+      for (let i = 0; i < NV; i++) { crest[i] = L - vv[i]; trough[i] = vv[i] + L; }
+      const grp = new THREE.Group();
+      grp.add(new THREE.Mesh(isoGeom(crest), matC));
+      grp.add(new THREE.Mesh(isoGeom(trough), matT));
+      grp.visible = false; waveGroup.add(grp); FW.waves.push(grp);
+    }
+    waveGroup.userData.__fw = true;                        // marker for the sweep-clean teardown
+    scene.add(waveGroup); FW.waveGroup = waveGroup;
+  }
+
+  // ---- in-viewport Heatmap ↔ Wavefront toggle (app palette / font) ----
+  const wrap = viewport ? viewport.parentElement : null;
+  const toggleEl = document.createElement('div');
+  toggleEl.className = 'fw3d-toggle';                     // swept clean on teardown
+  toggleEl.style.cssText = 'position:absolute;top:10px;right:10px;z-index:6;display:flex;gap:4px;'
+    + 'background:rgba(255,255,255,.86);border:1px solid #d9e0dc;border-radius:9px;padding:3px;'
+    + 'font:12px "Avenir Next","Helvetica Neue",Helvetica,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.12)';
+  const mkBtn = (m, txt) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = txt; b.dataset.m = m;
+    b.style.cssText = 'border:0;border-radius:6px;padding:4px 10px;cursor:pointer;color:#1f2a2a;background:transparent';
+    return b;
+  };
+  const bHeat = mkBtn('heat', 'Heatmap'), bWave = mkBtn('wave', 'Wavefront');
+  toggleEl.append(bHeat, bWave);
+  if (wrap) wrap.appendChild(toggleEl);
+  FW.toggleEl = toggleEl;
+
+  function show(mode) {
+    if (mode === 'wave' && !FW.waveGroup) { setStatus('Full-wave (SIM V3): building wave-mesh…'); buildWaves(); }
+    FW.heatGroup.visible = (mode === 'heat');
+    if (FW.waveGroup) FW.waveGroup.visible = (mode === 'wave');
+    if (FW.timer) { clearInterval(FW.timer); FW.timer = null; }
+    for (const b of [bHeat, bWave]) {
+      const on = b.dataset.m === mode;
+      b.style.background = on ? '#0a7f7a' : 'transparent';
+      b.style.color = on ? '#ffffff' : '#1f2a2a';
+    }
+    if (mode === 'wave' && FW.waveGroup) {
+      FW.waves.forEach((g, i) => { g.visible = (i === 0); }); FW.k = 0;
+      FW.timer = setInterval(() => {
+        if (!FW || !FW.waveGroup) return;
+        FW.waves[FW.k].visible = false; FW.k = (FW.k + 1) % FW.waves.length; FW.waves[FW.k].visible = true;
+      }, 70);
+      setStatus('Full-wave (SIM V3) · ' + meta.band + ' · ' + meta.f_mhz + ' MHz · animated wave-mesh '
+        + 'Re{U·e^{jωt}} (' + meta.dims.join('×') + ') · FDTD gen ' + meta.gen_seconds + ' s · precomputed.');
+    } else {
+      setStatus('Full-wave (SIM V3) · ' + meta.band + ' · ' + meta.f_mhz + ' MHz · |U| heatmap ('
+        + RAMP_PAL + ', dB) · ' + keep.length.toLocaleString() + ' cells on the CAD · precomputed field.');
+    }
+  }
+  toggleEl.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) show(b.dataset.m); });
+
+  applyModelVisibility();          // translucent shell so the field reads inside the model
+  show(animate ? 'wave' : 'heat');
+  window.SIM3D_TIER = 'full-wave (SIM V3)';
+  if (typeof refreshMeta === 'function') refreshMeta();
+}
+
 // ---- rail wiring ----
-if (runStatic) runStatic.addEventListener('click', runStaticField);
-if (runAnim) runAnim.addEventListener('click', runAnimWave);
+// With the full-wave property selected, the two Run buttons drive the SIM V3 layer:
+// Static → |U| heatmap, Animated → the Re{U·e^{jωt}} wave-mesh.
+const inFullWave = () => vizMode && vizMode.value === 'fullwave';
+if (runStatic) runStatic.addEventListener('click', () => { if (inFullWave()) return void runFullWaveField(false); runStaticField(); });
+if (runAnim) runAnim.addEventListener('click', () => { if (inFullWave()) return void runFullWaveField(true); runAnimWave(); });
 if (animPlay) animPlay.addEventListener('click', () => {
   if (sweepState) { sweepState.playing = !sweepState.playing; animPlay.textContent = sweepState.playing ? 'Pause' : 'Play'; return; }
   if (!waveObj) return;
@@ -3056,6 +3296,8 @@ if (animScrub) animScrub.addEventListener('input', () => {
 // Central dispatch — every viz mode routes through here so the Tx-placement and band
 // handlers below stay a one-liner instead of repeating the same if-chain three times.
 function runVizMode(mode) {
+  if (mode !== 'fullwave') disposeFullWave();     // leaving the full-wave layer tears it down
+  if (mode === 'fullwave') { runFullWaveField(false); return; }
   // Vacuum's coverage view IS the invariant gate, so it replaces the plain field render.
   if (currentMode() === 'vacuum' && (mode === 'coverage' || mode === 'path_loss')) {
     runVacuumField(); return;

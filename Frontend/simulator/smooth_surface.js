@@ -34,8 +34,9 @@ const EDGE_TABLE = new Int32Array(256);
 
 // Naive Surface Nets on a scalar field `data` (< 0 = inside the surface), dims [dx,dy,dz],
 // x fastest (data[x + dx*(y + dy*z)]). Returns { vertices:[[x,y,z],…], faces:[[a,b,c,d],…] }
-// in grid coordinates.
-function surfaceNets(data, dims) {
+// in grid coordinates. Exported so the SIM V3 CAD viewer can isosurface the RF field
+// (not just voxel occupancy) — the smooth "wave mesh".
+export function surfaceNets(data, dims) {
   const vertices = [], faces = [];
   const R = [1, dims[0] + 1, (dims[0] + 1) * (dims[1] + 1)];
   const grid = new Float32Array(8);

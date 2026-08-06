@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SIM V3 · Full-Wave (FDTD) progress</title>
+  <style>
+    :root { --accent: #3b82f6; }
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 40px; color: #111; background: #fafafa; }
+    h3 { margin: 0 0 4px; }
+    .card { max-width: 560px; padding: 20px 22px; border: 1px solid #e3e3e3; border-radius: 10px; background: #fff; }
+    #sim3dStatus { color: #555; margin: 10px 0; }
+    .hint { color: #888; font-size: 12px; margin-top: 14px; }
+    code { background: #f0f0f0; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h3>SIM V3 — Full-Wave (FDTD) run</h3>
+    <div id="est">estimating…</div>
+    <div id="sim3dStatus">waiting for progress.json…</div>
+    <div id="host"></div>
+    <p class="hint">Polls a run's <code>progress.json</code> written by
+      <code>perf_v3.ProgressWriter</code>. Point it with
+      <code>?url=&lt;progress.json&gt;</code>. Drives the same <code>#simProgress</code>
+      bar the simulator uses. No backend — the static server serves the file.</p>
+  </div>
+
+  <script type="module">
+    import { pollFdtdProgress, estimateLine, mountFdtdProgress } from './fdtd_progress.js';
+    const params = new URLSearchParams(location.search);
+    // default: a representative whole-floor 617 MHz run
+    const url = params.get('url') || '../../Physics%20Engine/2D/SIM%20V3/out/LTE_B71_617/progress.json';
+    document.getElementById('est').textContent =
+      estimateLine(+params.get('cells') || 1.3e6, +params.get('steps') || 13700, +params.get('mcps') || 120);
+    mountFdtdProgress(document.getElementById('host'));
+    pollFdtdProgress(url, { intervalMs: 400, anchor: document.getElementById('host'),
+      onDone: () => { document.getElementById('sim3dStatus').textContent = 'done — loading result…'; } });
+  </script>
+</body>
+</html>
