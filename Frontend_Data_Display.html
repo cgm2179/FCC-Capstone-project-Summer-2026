@@ -654,6 +654,10 @@
                     <option value="radiation">Radiation pattern</option>
                     <option value="interference">Interference &amp; multipath</option>
                     <option value="coverage">Propagation &amp; coverage</option>
+                    <!-- SIM V3 full-wave: the precomputed 3-D FDTD/surrogate field rendered on
+                         the real CAD, as a |U| heatmap or an animated Re{U·e^{jωt}} wave-mesh.
+                         Static run = heatmap, Animated run = wave-mesh; toggle in the viewport. -->
+                    <option value="fullwave">Full-wave field (SIM V3) — heatmap / wave-mesh</option>
                     <option value="sweep">Wavefront sweep (eikonal T)</option>
                     <option value="mechlapse">Mechanism time-lapse</option>
                     <!-- Per-mechanism views read the m_<mech>_*.bin channels written by
@@ -689,6 +693,11 @@
                 <!-- Geometry view: CAD mesh is the default look; voxel boxes stay for physics
                      / collision only. Smooth heatmap wash = WinProp-style draped coverage. -->
                 <label class="sim3d-cbx"><input type="checkbox" id="disp3dCad" checked> Show CAD model</label>
+                <!-- Fade the CAD/building shell so the field reads through it (Indoor + Outdoor).
+                     Default ≈ the translucent Studio look; slide to 100 % for a solid model. -->
+                <label class="sim3d-field">Model visibility
+                  <span class="sim3d-cell"><input type="range" id="disp3dModelVis" min="0" max="100" value="35"> <span id="disp3dModelVisVal" class="sim3d-cellval">35</span>%</span>
+                </label>
                 <label class="sim3d-cbx"><input type="checkbox" id="disp3dVoxels"> Show voxel boxes</label>
                 <label class="sim3d-cbx"><input type="checkbox" id="disp3dSmooth"> Smooth surface (from voxels)</label>
                 <label class="sim3d-cbx"><input type="checkbox" id="disp3dWash" checked> Smooth heatmap wash</label>
@@ -707,6 +716,14 @@
                   <select id="disp3dScale">
                     <option value="auto">Auto · path loss (dB)</option>
                     <option value="fixed">Fixed · received power (dBm)</option>
+                  </select>
+                </label>
+                <!-- Colour palette for the field/heatmap (weak → strong): Rainbow (jet) matches
+                     the warehouse-reference look; Viridis is perceptually uniform. -->
+                <label class="sim3d-field">Colour palette
+                  <select id="disp3dPalette">
+                    <option value="rainbow">Rainbow (jet)</option>
+                    <option value="viridis">Viridis</option>
                   </select>
                 </label>
                 <label class="sim3d-cbx"><input type="checkbox" id="disp3dClasses"> Coverage classes (good / marginal / dead)</label>
@@ -766,7 +783,7 @@
   <!-- 3D Simulation tab: three.js + cannon-es sandbox (construct/place Tx & Rx,
        waveform, static field + animated wavefront). Lazy-inits when the
        Simulation tab is opened in 3D mode. -->
-  <script type="module" src="Frontend/simulator/simulation3d.js?v=cad-wash-5"></script>
+  <script type="module" src="Frontend/simulator/simulation3d.js?v=fullwave-2"></script>
 
   <!-- Additive: "3D engine: Three.js ⇄ Unity (C#)" toggle for the Simulation tab. Overlays the Unity
        WebGL C# engine (from the nested Unity_RF_Simulator/ repo) in an isolated iframe when switched on;
