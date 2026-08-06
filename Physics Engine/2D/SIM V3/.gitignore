@@ -1,0 +1,8 @@
+# SIM V3 run artifacts (frames, GIFs, envelopes, logs) — regenerate with run_wave2d.py
+out/
+*.log
+__pycache__/
+# ML surrogate artifacts (Part 3) — regenerate with fw_dataset/fw_unet2d
+fw_data*/
+*.pt
+*_dummy.*

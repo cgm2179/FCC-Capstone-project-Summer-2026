@@ -1,0 +1,54 @@
+{
+  "spec_version": "fw-unet2d-v1",
+  "model_file": "fw_unet2d.onnx",
+  "predicts": "complex full-wave field, phase-reduced",
+  "input": {
+    "name": "x",
+    "layout": "N,C,H,W",
+    "dtype": "float32",
+    "channels": [
+      "material_onehot_0",
+      "material_onehot_1",
+      "material_onehot_2",
+      "material_onehot_3",
+      "material_onehot_4",
+      "material_onehot_5",
+      "tx_blob",
+      "freq_feat",
+      "log_distance"
+    ],
+    "material_classes": 6,
+    "tx_blob_sigma_cells": 2.0,
+    "logdist_divisor": 3.0,
+    "freq_log_lo_mhz": 600.0,
+    "freq_log_hi_mhz": 6200.0,
+    "size_multiple": 16
+  },
+  "output": {
+    "name": "y",
+    "layout": "N,C,H,W",
+    "channels": [
+      "field_re",
+      "field_im"
+    ],
+    "phase_reduced": true,
+    "reconstruct": "U(x) = (re + j*im) * exp(-j*k*d),  k=2*pi/lambda,  d = |x - tx| metres;  envelope |U|, animation Re{U e^{jwt}}",
+    "normalized_by": "per-field 99th-percentile |U| (relative; re-anchor to FSPL for absolute dB)"
+  },
+  "bands_mhz": [
+    "LTE_B71_617"
+  ],
+  "box_train": 128,
+  "architecture": "UNet2D(base, cin=9, cout=2)",
+  "trained": true,
+  "exported_at": "2026-08-06T00:57:22Z",
+  "smoke_check": {
+    "onnxruntime": "ok",
+    "out_shape": [
+      1,
+      2,
+      128,
+      128
+    ]
+  }
+}
