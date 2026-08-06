@@ -36,8 +36,16 @@
     "normalized_by": "per-field 99th-percentile |U| (relative; re-anchor to FSPL for absolute dB)"
   },
   "bands_mhz": [
-    "LTE_B71_617"
+    "LTE_B71_617",
+    "LTE_B13_751",
+    "LTE_B2_1960",
+    "NR_n41_2506",
+    "NR_n77_3700",
+    "WiFi_2G4",
+    "WiFi_5G"
   ],
+  "trained_mhz": [617, 751, 1960, 2442, 2506, 3700, 5500],
+  "bands_note": "Multiband: trained on the 7 bands above per SIM V3_Indoor_Phase_BCD.ipynb (617-5500 MHz). The earlier single-entry value was stale -- that notebook's export cell calls export_onnx() only, which does NOT rewrite this sidecar. WiFi_6E (6125 MHz) is the one catalog band NOT in the training set. Corrected 2026-08-06.",
   "box_train": 128,
   "architecture": "UNet2D(base, cin=9, cout=2)",
   "trained": true,

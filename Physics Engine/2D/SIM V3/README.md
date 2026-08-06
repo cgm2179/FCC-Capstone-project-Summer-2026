@@ -42,6 +42,8 @@ the lossless path — and the sandbox `--demo` — is unchanged.
 - `plane_extract.py` — slice the horizontal floor plane from the 3-D voxels,
   nearest-resample 0.30 m classes up to the FDTD cell, place the Tx.
 - `fullwave2d.py`    — `FullWaveScene(WaveSim)`: real medium + loss term.
+- `fw_solver.py`     — solver switch: FDTD ground truth vs the `fw_unet2d.onnx`
+  surrogate (onnxruntime, no torch), + the up-front "time to calculate grid" estimate.
 - `run_wave2d.py`    — driver: run → GIF + frame stack + RMS envelope + diagnostics.
 - `validate_vs_eikonal.py` — Spearman(SceneV3 `PL`, FDTD loss) on the same plane.
 
@@ -52,11 +54,37 @@ the lossless path — and the sandbox `--demo` — is unchanged.
 
 ```bash
 python bands_v3.py                                  # cell-size budget per band
-python run_wave2d.py --band LTE_B71_617             # cheap whole-floor 4G low-band
+python run_wave2d.py --band LTE_B71_617             # auto: ONNX surrogate if present, else FDTD
+python run_wave2d.py --band LTE_B71_617 --solver fdtd   # force the full-wave FDTD ground truth
+python run_wave2d.py --band LTE_B71_617 --solver onnx   # force the surrogate (errors if unavailable)
 python run_wave2d.py --band LTE_B71_617 --quick     # pipeline smoke test (~20 s)
 python run_wave2d.py --band NR_n77_3700 --crop 34 47 14 26   # real 3.7 GHz, cropped
 python validate_vs_eikonal.py --band LTE_B71_617 --out out/LTE_B71_617
 ```
+
+## Solver switch (`fw_solver.py`) + the grid-time warning
+
+The field grid can be produced two ways; both return the same steady-state complex
+phasor `U(x)`, so every output (envelope, GIF, `.npz`) is identical in shape:
+
+| `--solver` | Engine | Cost | Availability |
+|---|---|---|---|
+| `fdtd` | `FullWaveScene` leapfrog (ground truth) | seconds → minutes | always |
+| `onnx` | `fw_unet2d.onnx` under **onnxruntime** (no torch), tiled | milliseconds | needs the exported model |
+| `auto` *(default)* | ONNX if available, **else FDTD** | — | never fails |
+
+- `auto` prefers the surrogate and **falls back to FDTD** with a printed notice
+  when the ONNX model / onnxruntime is missing.
+- `onnx` is an explicit opt-in: if the model is **not** available it **raises**
+  (`SolverUnavailable`) instead of silently running the slow FDTD.
+- Before either grid is generated, the driver prints the up-front cost, e.g.
+  `⏱  TIME TO CALCULATE GRID  ~2 min   [solver: FDTD]` (CPU-calibrated for FDTD;
+  tiles × per-tile inference for ONNX). On an interactive TTY a grid estimated
+  over `--warn-threshold-s` (20 s) prompts to confirm; pass `--yes` to skip, or
+  `--onnx-box` / `--onnx-stride` to tune the surrogate tiling.
+- The surrogate is trained on `LTE_B71_617`; other bands run but are
+  extrapolation (the driver says so). Export/refresh the model with
+  `python fw_export.py --ckpt fw_unet2d.pt`.
 
 **Resolution budget (pick two of three).** Full-wave needs `h <= lambda/10`, so a
 band's grid grows as `f^2`. Over the shipped 78.6 x 39.6 m floor: 617 MHz is
