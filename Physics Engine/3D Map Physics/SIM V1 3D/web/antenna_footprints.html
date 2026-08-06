@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SIM V3 — Antenna 2D Footprints & Patterns</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; background: #0b0e12; color: #e7edf3;
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding: 20px 24px 8px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #8fa0b0; font-size: 13px; line-height: 1.5; max-width: 760px; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 12px; padding: 16px 24px 40px; }
+  .card { background: rgba(18,22,28,.9); border: 1px solid #2a323d; border-radius: 10px;
+    padding: 10px 10px 8px; }
+  .card svg { width: 100%; height: 168px; display: block; }
+  .name { font-size: 12.5px; font-weight: 600; margin-top: 6px; }
+  .meta { color: #9fb0c0; font-size: 11px; margin-top: 2px; }
+  .tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 999px;
+    border: 1px solid #37414d; color: #9fb0c0; margin-left: 4px; }
+  .tag.dir { color: #7dd3fc; border-color: #38618c; }
+  .tag.omni { color: #fbbf6b; border-color: #7a5a2a; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Antenna 2D Footprints &amp; Radiation Patterns</h1>
+  <div class="sub">Top-down silhouette (boresight → right) over its azimuth lobe, straight from
+    <code>window.SIM3D_ANTENNA_CATALOG</code> — the same per-family HPBW / front-to-back the
+    outdoor surrogate uses for its directivity channel (antenna_patterns.py). Directional families
+    (dish, yagi, panel…) show a forward beam; omni families (loop, dipole…) a round pattern.</div>
+</header>
+<div id="grid"></div>
+
+<script src="antenna_catalog_3d.js"></script>
+<script>
+const CAT = window.SIM3D_ANTENNA_CATALOG;
+const NS = "http://www.w3.org/2000/svg";
+const hex = (c) => "#" + ((c >>> 0) & 0xffffff).toString(16).padStart(6, "0");
+
+// azimuth gain 0..1 for the 3GPP-form pattern (matches antenna_patterns.pattern_gain)
+function gain(hpbw, am, deg) {
+  const d = ((deg + 180) % 360) - 180;
+  return Math.pow(10, -Math.min(12 * (d / hpbw) ** 2, am) / 20);
+}
+// polar lobe path (boresight +X = screen right; screen-y down)
+function lobePath(hpbw, am, R) {
+  let pts = [];
+  for (let a = -180; a <= 180; a += 2) {
+    const r = gain(hpbw, am, a) * R, rad = a * Math.PI / 180;
+    pts.push([r * Math.cos(rad), -r * Math.sin(rad)]);
+  }
+  return "M" + pts.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" L") + " Z";
+}
+function poly(points, s) {   // metres → scaled px, screen-y down
+  return "M" + points.map((p) => (p[0] * s).toFixed(1) + "," + (-p[1] * s).toFixed(1)).join(" L");
+}
+function el(tag, attrs) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+}
+
+function card(kind) {
+  const e = CAT.entries[kind], fp = e.footprint2d, pat = e.pattern, col = hex(e.color);
+  const card = document.createElement("div"); card.className = "card";
+  const svg = el("svg", { viewBox: "-100 -100 200 200" });
+
+  // radiation lobe (filled, faint) + -3 dB beamwidth guides
+  const R = pat.directional ? 82 : 66;
+  svg.appendChild(el("circle", { cx: 0, cy: 0, r: R, fill: "none", stroke: "#1e2630", "stroke-dasharray": "2 4" }));
+  svg.appendChild(el("path", { d: lobePath(pat.hpbw_deg, pat.am_db, R),
+    fill: col, "fill-opacity": 0.16, stroke: col, "stroke-opacity": 0.5, "stroke-width": 1 }));
+
+  // boresight axis + arrow (directional only)
+  if (fp.boresight) {
+    svg.appendChild(el("line", { x1: 0, y1: 0, x2: R + 8, y2: 0, stroke: "#4b5768", "stroke-width": 1 }));
+    svg.appendChild(el("path", { d: `M${R + 8},0 L${R + 2},-4 L${R + 2},4 Z`, fill: "#4b5768" }));
+  }
+
+  // footprint silhouette — auto-scaled to a legible icon at the origin
+  const allPts = fp.outline.concat(...fp.detail);
+  const mx = Math.max(0.02, ...allPts.map((p) => Math.max(Math.abs(p[0]), Math.abs(p[1]))));
+  const s = 30 / mx;
+  if (fp.outline.length)
+    svg.appendChild(el("path", { d: poly(fp.outline, s), fill: "none", stroke: col, "stroke-width": 2.4,
+      "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  for (const d of fp.detail)
+    svg.appendChild(el("path", { d: poly(d, s), fill: "none", stroke: col, "stroke-width": 1.6,
+      "stroke-opacity": 0.85, "stroke-linecap": "round" }));
+  svg.appendChild(el("circle", { cx: 0, cy: 0, r: 2, fill: "#e7edf3" }));  // phase centre
+
+  card.appendChild(svg);
+  const name = document.createElement("div"); name.className = "name";
+  name.innerHTML = (e.label || kind) +
+    `<span class="tag ${pat.directional ? "dir" : "omni"}">${pat.directional ? "directional" : "omni"}</span>`;
+  const meta = document.createElement("div"); meta.className = "meta";
+  meta.textContent = pat.directional
+    ? `HPBW ${pat.hpbw_deg}° · front-to-back ${pat.am_db} dB`
+    : `≈omnidirectional · ripple ${pat.am_db} dB`;
+  card.appendChild(name); card.appendChild(meta);
+  return card;
+}
+
+const grid = document.getElementById("grid");
+// order: directional (narrow→wide) then omni, so the beam progression reads left→right
+const order = CAT.kinds.slice().sort((a, b) => {
+  const pa = CAT.entries[a].pattern, pb = CAT.entries[b].pattern;
+  return (pb.directional - pa.directional) || (pa.hpbw_deg - pb.hpbw_deg);
+});
+for (const k of order) grid.appendChild(card(k));
+</script>
+</body>
+</html>

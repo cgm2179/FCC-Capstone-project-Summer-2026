@@ -50,10 +50,15 @@ def georef_manifest(man: dict) -> dict:
     return out
 
 
-def load_georef_city():
-    """City material grid + a georeferenced manifest (non-invasive, in-memory)."""
-    man = georef_manifest(json.loads(CITY_MANIFEST.read_text()))
-    grid = np.load(B.require(B.CITY_DIR / "material_grid.npy"))
+def load_georef_city(city_dir=None):
+    """City material grid + a georeferenced manifest (non-invasive, in-memory).
+
+    city_dir: point at an alternate city grid (e.g. the real-OSM
+    `city/NoMa_DC_osm` from voxelize_gpkg.py). Default = the NoMa OBJ grid
+    (B.CITY_DIR). The FCC anchor is injected the same way for any grid."""
+    cdir = Path(city_dir) if city_dir else B.CITY_DIR
+    man = georef_manifest(json.loads((cdir / "manifest_3d.json").read_text()))
+    grid = np.load(B.require(cdir / "material_grid.npy"))
     return grid, man
 
 
