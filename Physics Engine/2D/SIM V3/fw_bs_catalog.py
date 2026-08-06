@@ -7,13 +7,16 @@ from base_stations.csv on its building via lonlat_to_vox, as a directional
 panel/sector source. Unlike random-street Tx, real cells sit ON buildings and
 are panel-shaped → low Tx variation → easier to learn (the user's insight).
 
-Directivity: the panel boresight is the catalog `bearing_deg` (site→coverage
-area) — the real fitted azimuths live in free-text notes, so bearing is the
-clean proxy for "which way the sector faces." The FDTD source gets a small rigid
-BACKPLANE behind it (opposite boresight) so radiation is forward — a real panel
-= radiator + back reflector. The 3GPP horizontal pattern A(φ)=min(12(φ/65)²,25)
-(RadiationPattern.cs) is carried as an input channel so the net learns the beam
-direction.
+Directivity: the boresight is the catalog `bearing_deg` (site→coverage area) —
+the real fitted azimuths live in free-text notes, so bearing is the clean proxy
+for "which way the sector faces." Each PCI's `antenna_type` (base_stations.csv)
+selects a per-family azimuth pattern from antenna_patterns.py — dish = narrow
+pencil, yagi/lpda = forward lobe, patch/panel/slot = ~65° sector, horn = medium
+flare, loop/fractal (+ the rod family) = ~omni. The 0..1 gain is carried as the
+directivity INPUT channel so the net learns the beam shape; and the FDTD source
+gets a rigid BACKPLANE (radiator + reflector → forward) for directional families
+but NONE for ~omni ones, so the ground-truth field matches the channel. `panel`
+stays the 3GPP macro A(φ)=min(12(φ/65)²,25) (byte-identical, back-compatible).
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ import csv
 import numpy as np
 
 import _bootstrap as B
+import antenna_patterns as AP
 import city_georef as CG
 import dataset_3d as D3
 import fw_dataset as FD
@@ -48,9 +52,10 @@ BAND_TO_LABEL = {
 
 
 def panel_atten_db(bearing_to_cell_deg, boresight_deg):
-    """3GPP horizontal sector attenuation (dB ≥ 0) off boresight."""
-    d = ((np.asarray(bearing_to_cell_deg, float) - boresight_deg + 180.0) % 360.0) - 180.0
-    return np.minimum(12.0 * (d / HPBW_DEG) ** 2, AM_DB)
+    """3GPP horizontal sector attenuation (dB ≥ 0) off boresight (panel family).
+    Kept for back-compat; delegates to antenna_patterns so there is one pattern
+    source of truth. Per-family patterns: AP.pattern_atten_db(kind, …)."""
+    return AP.pattern_atten_db("panel", bearing_to_cell_deg, boresight_deg)
 
 
 def _bearing_to_grid(bearing_deg):
@@ -82,28 +87,33 @@ def load_stations(band_labels=None, city_dir=None):
         out.append(dict(site=r["site_id"], vx=float(vx), vz=float(vz),
                         band=label, f_mhz=get(label).f_mhz,
                         boresight=float(r["bearing_deg"]) if r["bearing_deg"] else 0.0,
+                        kind=(r.get("antenna_type") or "panel").strip() or "panel",
                         pci=r["pci"], rsrp_mean=(float(r["rsrp_mean"]) if r["rsrp_mean"] else None),
                         distance_m=float(r["distance_m"]) if r["distance_m"] else None,
                         agl=float(r["antenna_agl_m"]) if r["antenna_agl_m"] else 11.0))
     return grid, man, out
 
 
-def _place_source(fine, tx_fine, boresight_deg, zoom):
-    """Snap the source to air and add a rigid backplane behind it (opposite
-    boresight) so the FDTD beam radiates forward (panel = radiator + reflector)."""
+def _place_source(fine, tx_fine, boresight_deg, zoom, kind="panel"):
+    """Snap the source to air and, for DIRECTIONAL families, add a rigid backplane
+    behind it (opposite boresight) so the FDTD beam radiates forward (panel =
+    radiator + reflector). Near-omni families (loop/dipole/omni/…) get NO backplane
+    so the ground-truth field is ~omni, consistent with their flat directivity
+    channel — the pattern's HPBW/front-to-back is carried in featurize_bs."""
     H, W = fine.shape
     ix, iz = int(np.clip(tx_fine[0], 2, H - 3)), int(np.clip(tx_fine[1], 2, W - 3))
     if fine[ix, iz] != 0:                                # snap out of a building
         air = np.argwhere(fine == 0)
         j = np.argmin(np.abs(air[:, 0] - ix) + np.abs(air[:, 1] - iz))
         ix, iz = int(air[j, 0]), int(air[j, 1])
-    d = _bearing_to_grid(boresight_deg)
-    back = np.array([ix, iz]) - np.round(d * 2).astype(int)   # 2 cells behind
-    perp = np.array([-d[1], d[0]])
-    for t in np.arange(-6, 7):                            # short rigid backplane
-        bx, bz = np.round(back + perp * t).astype(int)
-        if 0 <= bx < H and 0 <= bz < W and (abs(bx - ix) > 1 or abs(bz - iz) > 1):
-            fine[bx, bz] = 3
+    if AP.is_directional(kind):
+        d = _bearing_to_grid(boresight_deg)
+        back = np.array([ix, iz]) - np.round(d * 2).astype(int)   # 2 cells behind
+        perp = np.array([-d[1], d[0]])
+        for t in np.arange(-6, 7):                        # short rigid backplane
+            bx, bz = np.round(back + perp * t).astype(int)
+            if 0 <= bx < H and 0 <= bz < W and (abs(bx - ix) > 1 or abs(bz - iz) > 1):
+                fine[bx, bz] = 3
     return (ix, iz)
 
 
@@ -137,9 +147,10 @@ def bs_region(grid, man, st, npw=8.0, region_m=None, max_cells=2_500_000):
     z0, z1 = max(0, int(st["vz"]) - half), min(NZ, int(st["vz"]) + half)
     fine = ndimage.zoom(plane[x0:x1, z0:z1], zoom, order=0).astype(np.int8)
     txf = [(st["vx"] - x0) * zoom, (st["vz"] - z0) * zoom]
-    tx = _place_source(fine, txf, st["boresight"], zoom)
+    tx = _place_source(fine, txf, st["boresight"], zoom, st.get("kind", "panel"))
     return Plane(fine, h, (fine.shape[0] * h, fine.shape[1] * h), tx, 2.0, npw,
-                 dict(scene="outdoor-bs", site=st["site"], boresight=st["boresight"]))
+                 dict(scene="outdoor-bs", site=st["site"], boresight=st["boresight"],
+                      kind=st.get("kind", "panel")))
 
 
 def bs_field(grid, man, st, npw=8.0, region_m=None, crossings=2.5, max_cells=2_500_000):
@@ -153,13 +164,16 @@ def bs_field(grid, man, st, npw=8.0, region_m=None, crossings=2.5, max_cells=2_5
 IN_CH_BS = len(D3.INPUT_CHANNELS) + 1
 
 
-def featurize_bs(classes, tx_local, d_m, freq_feat, boresight_deg):
+def featurize_bs(classes, tx_local, d_m, freq_feat, boresight_deg, kind="panel"):
+    """10-ch input: the 9 dataset_3d channels + a per-family directivity channel
+    (0..1 linear gain from antenna_patterns.pattern_gain, so a dish → narrow, a
+    loop → ~flat). IN_CH_BS stays 10 regardless of family."""
     x9 = FD._featurize(classes, tx_local, d_m, freq_feat)
     H, W = classes.shape
     ii, jj = np.mgrid[0:H, 0:W]
     bearing = np.degrees(np.arctan2(-(ii - tx_local[0]), (jj - tx_local[1])))  # to-cell bearing
-    gain = 10.0 ** (-panel_atten_db(bearing, boresight_deg) / 20.0)            # 0..1
-    return np.concatenate([x9, gain[None].astype(np.float32)], 0)
+    gain = AP.pattern_gain(kind, bearing, boresight_deg).astype(np.float32)     # 0..1, per family
+    return np.concatenate([x9, gain[None]], 0)
 
 
 def _dedupe_by_site(stations):
@@ -203,10 +217,11 @@ def generate_bs(band_labels, holdout_site="BS7_forte_hall", boxes_per_station=48
             Ut = U[x0:x0 + b, y0:y0 + b] * np.exp(1j * k * d_m)
             ys.append((np.stack([Ut.real, Ut.imag]) / ref).astype(np.float32))
             xs.append(featurize_bs(p.classes[x0:x0 + b, y0:y0 + b],
-                                   (txf[0] - x0, txf[1] - y0), d_m, ff, st["boresight"]))
+                                   (txf[0] - x0, txf[1] - y0), d_m, ff, st["boresight"],
+                                   st.get("kind", "panel")))
         np.savez_compressed(out / f"shard_{sid:03d}.npz", x=np.stack(xs), y=np.stack(ys),
                             site=st["site"], band=st["band"], h_m=h, ref=ref,
-                            boresight=st["boresight"])
+                            boresight=st["boresight"], kind=st.get("kind", "panel"))
         print(f"  shard {sid:03d} {st['site']} {st['band']} boxes={len(xs)}")
         sid += 1
     (out / "dataset_meta.json").write_text(json.dumps(dict(
@@ -216,7 +231,8 @@ def generate_bs(band_labels, holdout_site="BS7_forte_hall", boxes_per_station=48
     return out
 
 
-def _tiled_predict_bs(model, classes, tx_ij, h, f_mhz, boresight, box=128, stride=96):
+def _tiled_predict_bs(model, classes, tx_ij, h, f_mhz, boresight, kind="panel",
+                      box=128, stride=96):
     import json
     import torch
     from fw_unet2d import pick_device
@@ -234,7 +250,7 @@ def _tiled_predict_bs(model, classes, tx_ij, h, f_mhz, boresight, box=128, strid
             ii, jj = np.mgrid[x0:x0 + b, y0:y0 + b]
             d_m = np.hypot(ii - tx_ij[0], jj - tx_ij[1]) * h
             xin = featurize_bs(classes[x0:x0 + b, y0:y0 + b],
-                               (tx_ij[0] - x0, tx_ij[1] - y0), d_m, ff, boresight)
+                               (tx_ij[0] - x0, tx_ij[1] - y0), d_m, ff, boresight, kind)
             with torch.no_grad():
                 pr = model(torch.from_numpy(xin[None]).to(dev)).cpu().numpy()[0]
             acc[:, x0:x0 + b, y0:y0 + b] += pr * win[:b, :b]
@@ -255,7 +271,8 @@ def validate_bs(model, band_labels, holdout_site="BS7_forte_hall", region_m=None
         print(f"holdout {holdout_site} not in bands {band_labels}"); return None
     st = cand[0]
     p, Ut = bs_field(grid, man, st, npw=8, region_m=region_m, max_cells=max_cells)
-    Up = _tiled_predict_bs(model, p.classes, p.tx_idx, p.h_m, st["f_mhz"], st["boresight"])
+    Up = _tiled_predict_bs(model, p.classes, p.tx_idx, p.h_m, st["f_mhz"], st["boresight"],
+                           st.get("kind", "panel"))
     air = (p.classes == 0); at, ap = np.abs(Ut), np.abs(Up)
     et = fw_infer._db(at, np.percentile(at[air][at[air] > 0], 99))
     ep = fw_infer._db(ap, np.percentile(ap[air][ap[air] > 0], 99))
