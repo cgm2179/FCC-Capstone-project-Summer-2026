@@ -90,7 +90,7 @@ def pick_device():
     return "cpu"
 
 
-def train(data_dir, epochs=60, base=32, bs=8, lr=1e-3, val_frac=0.2, out=None):
+def train(data_dir, epochs=60, base=32, bs=8, lr=1e-3, val_frac=0.2, out=None, amp=None):
     files = sorted(glob.glob(str(Path(data_dir) / "shard_*.npz")))
     if not files:
         raise FileNotFoundError(f"no shards in {data_dir}")
@@ -104,24 +104,40 @@ def train(data_dir, epochs=60, base=32, bs=8, lr=1e-3, val_frac=0.2, out=None):
     print(f"device={dev}  cin={cin} cout={cout}  "
           f"params={sum(p.numel() for p in m.parameters())/1e6:.2f}M  "
           f"train={len(tr)} val={len(va)}")
+    # fp16 mixed precision (AMP) on CUDA — ~2-3x faster on tensor-core GPUs (T4/L4/A100),
+    # ~half the memory (bigger batches). No-op on CPU/MPS, so those paths are unchanged.
+    use_amp = (amp if amp is not None else (dev == "cuda"))
+    pin = (dev == "cuda")
+    ac = lambda: torch.autocast(device_type=("cuda" if dev == "cuda" else "cpu"),
+                                dtype=torch.float16, enabled=use_amp)
     opt = torch.optim.Adam(m.parameters(), lr=lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
-    tl = DataLoader(tr, bs, shuffle=True)
-    vl = DataLoader(va, bs)
+    try:
+        scaler = torch.amp.GradScaler("cuda", enabled=use_amp)   # torch >= 2.3
+    except (AttributeError, TypeError):
+        scaler = torch.cuda.amp.GradScaler(enabled=use_amp)      # older torch
+
+    tl = DataLoader(tr, bs, shuffle=True, pin_memory=pin)
+    vl = DataLoader(va, bs, pin_memory=pin)
+    print(f"  mixed precision (AMP fp16): {'on' if use_amp else 'off'}  batch={bs}")
     best = float("inf")
     for ep in range(epochs):
         m.train()
         for x, y in tl:
-            x, y = x.to(dev), y.to(dev)
-            opt.zero_grad()
-            loss, _, _ = complex_loss(m(x), y)
-            loss.backward(); opt.step()
+            x = x.to(dev, non_blocking=pin); y = y.to(dev, non_blocking=pin)
+            opt.zero_grad(set_to_none=True)
+            with ac():
+                loss, _, _ = complex_loss(m(x), y)
+            scaler.scale(loss).backward()
+            scaler.step(opt); scaler.update()
         sched.step()
         m.eval(); vmse = 0.0; nv2 = 0
         with torch.no_grad():
             for x, y in vl:
-                x, y = x.to(dev), y.to(dev)
-                vmse += nn.functional.mse_loss(m(x), y).item() * len(x); nv2 += len(x)
+                x = x.to(dev, non_blocking=pin); y = y.to(dev, non_blocking=pin)
+                with ac():
+                    pred = m(x)
+                vmse += nn.functional.mse_loss(pred.float(), y).item() * len(x); nv2 += len(x)
         vmse /= max(nv2, 1)
         best = min(best, vmse)
         if ep % 5 == 0 or ep == epochs - 1:
