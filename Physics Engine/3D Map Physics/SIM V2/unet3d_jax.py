@@ -21,6 +21,11 @@ this module owns the architecture so both share one definition.
 """
 from __future__ import annotations
 
+try:  # SIM V2: put the shared SIM V3 engine on sys.path (harmless if absent)
+    import bootstrap  # noqa: F401
+except Exception:
+    pass
+
 import argparse
 import time
 from pathlib import Path
