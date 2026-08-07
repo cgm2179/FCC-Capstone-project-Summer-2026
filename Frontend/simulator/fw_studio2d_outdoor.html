@@ -1,0 +1,428 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SIM V3 · Outdoor Full-Wave Studio (2D)</title>
+  <style>
+    :root { --bg:#f4f6f3; --panel:#ffffff; --ink:#1f2a2a; --muted:#5b6662; --accent:#0a7f7a; --line:#d9e0dc; --warn:#b26a00; --err:#c0392b; }
+    * { box-sizing: border-box; }
+    body { margin:0; height:100vh; display:flex; background:var(--bg); color:var(--ink);
+           font:13px/1.5 "Avenir Next","Helvetica Neue",Helvetica,sans-serif; overflow:hidden; }
+    #side { width:314px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:18px; overflow-y:auto; }
+    #side h2 { margin:0 0 2px; font-size:1.15rem; } #side .sub { color:var(--muted); font-size:0.82rem; margin:0 0 16px; }
+    .grp { margin-bottom:13px; } .grp > label { display:block; font-weight:600; margin-bottom:5px; color:var(--muted); font-size:0.84rem; }
+    select, input[type=number] { width:100%; background:#fff; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:7px 10px; font:inherit; }
+    .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+    .seg button { flex:1; background:#fff; color:var(--muted); border:0; padding:7px; cursor:pointer; font:inherit; }
+    .seg button.on { background:var(--accent); color:#fff; }
+    .btn { width:100%; padding:9px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; margin-top:4px; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    #engine { font-size:0.76rem; color:var(--muted); margin-top:6px; }
+    #warn { margin-top:10px; font-size:0.8rem; color:var(--warn); min-height:16px; white-space:pre-line; }
+    #status { margin-top:8px; font-size:0.8rem; color:var(--muted); min-height:16px; } #status.err { color:var(--err); font-weight:600; }
+    #bar { height:8px; background:rgba(10,127,122,.15); border-radius:4px; overflow:hidden; margin-top:8px; display:none; }
+    #barFill { height:100%; width:0%; background:var(--accent); transition:width .12s linear; }
+    #view { flex:1; display:flex; flex-direction:column; background:#eceef0; overflow:hidden; }
+    #stage { flex:1; position:relative; display:flex; align-items:center; justify-content:center; min-height:0; }
+    #desc { flex:none; padding:9px 16px 11px; border-top:1px solid var(--line); background:var(--panel);
+            font-size:0.78rem; line-height:1.45; color:var(--muted); max-height:32%; overflow-y:auto; }
+    #desc b { color:var(--ink); } #desc sup { font-size:0.7em; }
+    .row { display:flex; gap:8px; } .row > label { flex:1; font-size:0.72rem; color:var(--muted); }
+    #cv { image-rendering:pixelated; box-shadow:0 2px 18px rgba(0,0,0,.12); max-width:96%; max-height:92%; cursor:crosshair; }
+    #hud { position:absolute; top:12px; left:14px; font-size:0.75rem; color:var(--ink); pointer-events:none; text-shadow:0 1px 2px #fff; }
+    #cbar { position:absolute; right:16px; top:16px; width:158px; }
+    #cbar canvas { width:158px; height:12px; border-radius:3px; border:1px solid var(--line); }
+    #cbar .lab { display:flex; justify-content:space-between; font-size:0.7rem; color:var(--muted); }
+    #compass { position:absolute; top:12px; right:16px; margin-top:40px; font-size:0.72rem; color:var(--muted); text-align:center; }
+    #readout { position:absolute; bottom:12px; left:14px; font-size:0.74rem; color:var(--ink); font-family:ui-monospace,monospace; text-shadow:0 1px 2px #fff; }
+    #legend { width:100%; border-collapse:collapse; font-size:0.74rem; margin-top:4px; }
+    #legend td { padding:2px 5px; color:var(--muted); }
+    #legend .sw2 { display:inline-block; width:12px; height:12px; border-radius:3px; border:1px solid #999; vertical-align:middle; }
+    #scale { position:absolute; bottom:12px; right:16px; display:flex; flex-direction:column; align-items:center; font-size:0.72rem; color:var(--ink); text-shadow:0 1px 2px #fff; }
+    #scaleBar { height:7px; border:1.5px solid var(--ink); border-top:0; box-sizing:border-box; }
+    .note { font-size:0.74rem; color:var(--muted); margin:2px 0 0; }
+  </style>
+</head>
+<body>
+  <div id="side">
+    <h2>Outdoor Full-Wave Studio · 2D</h2>
+    <p class="sub">SIM V3 · pick a base station on the NoMa map, choose a band, generate the full-wave coverage over the real OSM city — ONNX surrogate (fast) or the penetrable FDTD solver.</p>
+
+    <div class="grp"><label>Solver</label>
+      <div class="seg" id="solverSeg">
+        <button class="on" data-v="auto">Auto</button><button data-v="onnx">ONNX</button><button data-v="fdtd">FDTD</button>
+      </div>
+      <div id="engine">loading model…</div>
+      <p class="note">SIM&nbsp;V3 full-wave · Auto = ONNX surrogate → penetrable FDTD. This is <b>not</b> the legacy path-loss “Simulate 2D PL” engine.</p>
+    </div>
+    <div class="grp"><label>Base station</label><select id="station"></select></div>
+    <div class="grp"><label>Band</label><select id="band"></select></div>
+    <div class="row" style="gap:8px">
+      <div class="grp" style="flex:1"><label>Boresight (° from N)</label><input id="bore" type="number" value="0" min="0" max="359" step="1"></div>
+      <div class="grp" style="flex:1"><label>Antenna</label><select id="ant"></select></div>
+    </div>
+    <div class="grp"><label>Coverage region (m across)</label>
+      <input id="region" type="number" value="250" min="60" max="800" step="20">
+      <p class="note" id="resNote"></p></div>
+
+    <button class="btn" id="run">▶ Generate coverage</button>
+    <div id="bar"><div id="barFill"></div></div>
+    <div id="warn"></div>
+    <div id="status">ready</div>
+
+    <div class="grp" style="margin-top:16px"><label>Field view</label>
+      <div class="seg" id="viewSeg"><button class="on" data-v="heat">Heatmap |U|</button><button data-v="wave">Wavefront</button></div></div>
+
+    <div class="grp"><label>Colour scale</label>
+      <div class="seg" id="cmapSeg"><button class="on" data-v="viridis">Viridis</button><button data-v="rainbow">Rainbow</button><button data-v="rdbu">Red-White-Blue</button></div></div>
+    <div class="grp"><label>Field range (dB, relative)</label>
+      <div class="row"><label>strong<input id="rangeHi" type="number" value="0" step="5"></label>
+        <label>weak<input id="rangeLo" type="number" value="-40" step="5"></label></div></div>
+
+    <div class="grp"><label>Materials (legend ↔ map)</label><table id="legend"></table>
+      <p class="note" id="scaleNote"></p></div>
+  </div>
+
+  <div id="view">
+    <div id="stage">
+      <canvas id="cv"></canvas>
+      <div id="hud">
+        <div><b style="color:#0a7f7a">SIM V3 — outdoor full-wave · NoMa DC (2D)</b></div>
+        <div id="hudMeta"></div>
+      </div>
+      <div id="cbar"><canvas id="cbarCv" width="158" height="12"></canvas><div class="lab"><span id="cbLo">−40 dB</span><span id="cbHi">0 dB</span></div></div>
+      <div id="compass">▲ N</div>
+      <div id="readout"></div>
+      <div id="scale"><div id="scaleBar"></div><span id="scaleLab"></span></div>
+    </div>
+    <div id="desc"></div>
+  </div>
+
+  <!-- onnxruntime-web (same CDN build the dashboard uses) -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+  <!-- the baked penetrable NoMa city grid + stations; sets window.NOMA_CITY_2D -->
+  <script src="../../Data/noma_city2d.js"></script>
+
+  <script type="module">
+    import * as S from './fw_solve2d_bs.js';
+
+    const $ = id => document.getElementById(id);
+    const setStatus = (m, e) => { $('status').textContent = m; $('status').className = e ? 'err' : ''; };
+    const setWarn = m => { $('warn').textContent = m || ''; };
+    const setBar = f => { $('bar').style.display = f == null ? 'none' : 'block'; if (f != null) $('barFill').style.width = Math.round(f * 100) + '%'; };
+
+    const MODEL = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_bs.onnx';
+    const CONTRACT_URL = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_bs.json';
+
+    // ---- decode the baked city ----
+    if (!window.NOMA_CITY_2D) { setStatus('noma_city2d.js failed to load (serve from the repo root over http).', true); throw new Error('no NOMA_CITY_2D'); }
+    const CITY = window.NOMA_CITY_2D;
+    function u8(b) { const s = atob(b), a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
+    CITY.grid = u8(CITY.grid_b64);
+    const NX = CITY.nx, NZ = CITY.nz, CS = CITY.cell_m, PHYS = CITY.physics || {};
+    const MATS = CITY.materials || [];
+    const hex2rgb = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+    const MATCOLORS = {}; MATS.forEach(m => { MATCOLORS[m.id] = m.color ? hex2rgb(m.color) : [140, 140, 140]; });
+    const SOLID = c => c !== 0 && c !== 4;          // buildings/glass opaque; air + foliage carry the field
+
+    // ---- canvas: full city, north-up / east-right (X = -easting runs west; Z runs north) ----
+    const cv = $('cv'); cv.width = NX; cv.height = NZ;
+    cv.style.width = Math.min(NX * 1.15, 900) + 'px';
+    const cx = cv.getContext('2d');
+    const EXT_X = NX * CS, EXT_Z = NZ * CS;          // real extent (m)
+    // native city cell (x=X row, z=Z col) -> flipped canvas pixel index (north up, east right)
+    const dstCity = (x, z) => ((NZ - 1 - z) * NX + (NX - 1 - x));
+    // canvas pixel (px col, py row) -> native city (x, z)
+    const pxToCity = (pcol, prow) => ({ x: NX - 1 - pcol, z: NZ - 1 - prow });
+
+    // ---- geo: bilinear lon/lat over the 4 baked corners ----
+    const CN = CITY.corners;
+    function lonlat(x, z) {
+      const u = NX > 1 ? x / (NX - 1) : 0, v = NZ > 1 ? z / (NZ - 1) : 0;
+      const a = CN.x0z0, b = CN.x1z0, c = CN.x0z1, d = CN.x1z1;
+      const lon = (1 - u) * (1 - v) * a[0] + u * (1 - v) * b[0] + (1 - u) * v * c[0] + u * v * d[0];
+      const lat = (1 - u) * (1 - v) * a[1] + u * (1 - v) * b[1] + (1 - u) * v * c[1] + u * v * d[1];
+      return [lon, lat];
+    }
+
+    // ---- legend ----
+    $('legend').innerHTML = MATS.map(m =>
+      `<tr><td><span class="sw2" style="background:${m.color}"></span></td><td>${m.name}</td><td>${m.loss || '—'}</td></tr>`).join('');
+    $('scaleNote').textContent = `City ${EXT_X.toFixed(0)} × ${EXT_Z.toFixed(0)} m · cell ${CS} m · ${NX}×${NZ} grid`;
+
+    // ---- stations + bands ----
+    const STA = CITY.stations || [];
+    $('station').innerHTML = STA.map((s, i) => `<option value="${i}">${s.site.split('_')[0]} · PCI ${s.pci} · ${s.f_mhz} MHz</option>`).join('');
+    let sel = STA[0] || { vx: NX / 2, vz: NZ / 2, boresight: 0, band: '', f_mhz: 617, site: '—', pci: '' };
+
+    let contract = null, session = null, onnxReady = false, onnxWhy = 'not loaded';
+    let solverSel = 'auto', viewMode = 'heat', cmapName = 'viridis', rangeHi = 0, rangeLo = -40;
+    let field = null;
+
+    // band + antenna dropdowns populated from the contract (fallback to station bands)
+    function fillBands() {
+      let pairs = [];
+      if (contract && contract.bands.length && contract.trainedMhz.length)
+        pairs = contract.bands.map((lb, i) => [contract.trainedMhz[i], lb]);
+      if (!pairs.length) { const seen = new Set(); STA.forEach(s => { if (!seen.has(s.f_mhz)) { seen.add(s.f_mhz); pairs.push([s.f_mhz, s.band]); } }); }
+      pairs.sort((a, b) => a[0] - b[0]);
+      $('band').innerHTML = pairs.map(([mhz, lb]) => `<option value="${mhz}">${lb} · ${mhz} MHz</option>`).join('');
+      selectStationBand();
+    }
+    function fillAnts() {
+      const fams = (contract && Object.keys(contract.families).length) ? Object.keys(contract.families)
+        : ['panel', 'omni', 'dish', 'yagi', 'patch'];
+      const order = ['panel', 'patch', 'slot', 'yagi', 'dish', 'horn', 'omni'];
+      fams.sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
+      $('ant').innerHTML = fams.map(f => `<option value="${f}"${f === 'panel' ? ' selected' : ''}>${f}</option>`).join('');
+    }
+    function selectStationBand() {
+      const opt = [...$('band').options].find(o => Math.abs(parseFloat(o.value) - sel.f_mhz) < 1);
+      if (opt) $('band').value = opt.value;
+    }
+
+    // ---- segmented controls ----
+    function seg(id, cb) { const el = $(id); el.querySelectorAll('button').forEach(b => b.onclick = () => {
+      el.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); cb(b.dataset.v); }); }
+    seg('solverSeg', v => { solverSel = v; reflectEngine(); });
+    seg('viewSeg', v => { viewMode = v; if (field) render(); else drawCbar(); });
+    seg('cmapSeg', v => { cmapName = v; if (field) render(); else drawCbar(); });
+    ['rangeHi', 'rangeLo'].forEach(id => $(id).addEventListener('input', () => {
+      rangeHi = parseFloat($('rangeHi').value); rangeLo = parseFloat($('rangeLo').value);
+      if (field && isFinite(rangeHi) && isFinite(rangeLo)) render();
+    }));
+    $('station').addEventListener('change', () => {
+      sel = STA[parseInt($('station').value, 10)]; $('bore').value = Math.round(sel.boresight);
+      selectStationBand(); field = null; updateResNote(); drawCity();
+    });
+    $('bore').addEventListener('input', () => { sel = { ...sel, boresight: parseFloat($('bore').value) || 0 }; });
+    $('band').addEventListener('change', updateResNote);
+    $('region').addEventListener('input', updateResNote);
+    $('bore').value = Math.round(sel.boresight);
+
+    function reflectEngine() {
+      const eff = solverSel === 'auto' ? (onnxReady ? 'ONNX surrogate (full-wave)' : 'penetrable FDTD (ONNX unavailable)') :
+                  solverSel === 'onnx' ? (onnxReady ? 'ONNX surrogate (full-wave)' : 'ONNX UNAVAILABLE — will error') : 'penetrable FDTD (approx.)';
+      $('engine').textContent = `engine: SIM V3 · ${eff}` + (onnxReady ? '' : `  ·  ${onnxWhy}`);
+    }
+    function curFMHz() { return parseFloat($('band').value) || sel.f_mhz; }
+    function curRegionM() { return Math.max(60, parseFloat($('region').value) || S.bandRegionM(curFMHz())); }
+    function updateResNote() {
+      const f = curFMHz(), wl = S.C0 / (f * 1e6), rm = curRegionM();
+      const npw = S.chooseNpw(rm, wl, 3_000_000), h = wl / npw;
+      const cells = Math.round((rm / h)) ** 2;
+      $('resNote').textContent = `≈ ${(rm / h | 0)}×${(rm / h | 0)} cells · ${(h * 100).toFixed(1)} cm/cell · ${npw.toFixed(1)} pts/λ`;
+    }
+
+    // ---- generate ----
+    $('run').onclick = generate;
+    async function generate() {
+      setWarn(''); setStatus('preparing…');
+      const fMHz = curFMHz(), regionM = curRegionM(), kind = $('ant').value;
+      const st = { ...sel, boresight: parseFloat($('bore').value) || 0, kind };
+
+      // 1) resolve solver (Auto → ONNX if available else FDTD; ONNX → hard error)
+      let solver = solverSel;
+      if (solver === 'auto') solver = onnxReady ? 'onnx' : 'fdtd';
+      if (solver === 'onnx' && !onnxReady) {
+        setStatus(`ONNX solver requested but unavailable — ${onnxWhy}. Switch to FDTD or export/serve fw_bs.onnx.`, true); return;
+      }
+      let preWarn = '';
+      if (solverSel === 'auto' && !onnxReady) preWarn = 'ONNX unavailable → defaulting to the penetrable FDTD solver.';
+      if (contract && solver === 'onnx' && contract.trainedMhz.length && !contract.trainedMhz.some(m => Math.abs(m - fMHz) < 1))
+        preWarn = `note: surrogate trained on ${contract.trainedMhz.join(', ')} MHz; ${fMHz} MHz is extrapolation.`;
+
+      // 2) build the fine region around the Tx (bigger budget for ONNX; the FDTD
+      //    fallback runs single-threaded so it gets a much smaller grid — coarse but
+      //    tractable; the TIME estimate + confirm still guards it).
+      $('run').disabled = true;
+      const budget = solver === 'onnx' ? 3_000_000 : 130_000;
+      const region = S.buildRegion(CITY, st, fMHz, { regionM, budget });
+      const fdtdOpts = { crossings: 1.3 };
+
+      // 3) TIME TO CALCULATE GRID — estimate before generating anything
+      let estS, detail;
+      try {
+        if (solver === 'onnx') {
+          const perTile = await S.calibrateOnnxPerTileMsBs(session, contract);
+          estS = S.estimateOnnxSecondsBs(region, contract, perTile);
+          detail = `${S.onnxNumTiles(region, contract)} tile(s) × ${perTile.toFixed(0)} ms · ${region.H}×${region.W} @ ${(region.h_m * 100).toFixed(0)} cm (ONNX)`;
+        } else {
+          const mcps = S.calibrateFdtdMcps();
+          estS = S.estimateFdtdSecondsBs(region, mcps, fdtdOpts);
+          const { cells, steps } = S.fdtdCostBs(region, fdtdOpts);
+          detail = `${(cells / 1e6).toFixed(2)} M cells × ${steps} steps @ ${mcps.toFixed(0)} Mcell/s · ${region.H}×${region.W} (FDTD, approx.)`;
+        }
+      } catch (e) { setStatus('estimate failed: ' + e.message, true); $('run').disabled = false; return; }
+
+      const warnLine = `⏱ TIME TO CALCULATE GRID  ~${S.fmtEta(estS)}   [${solver.toUpperCase()}]\n${detail}`;
+      setWarn((preWarn ? preWarn + '\n' : '') + warnLine);
+
+      // 4) confirm for anything non-trivial (the FDTD grid can take a while)
+      if (estS > 6 && !confirm(`${warnLine}\n\nGenerate the coverage grid now?`)) {
+        setStatus('cancelled before grid generation.'); $('run').disabled = false; return;
+      }
+
+      // 5) solve
+      setStatus(`generating (${solver.toUpperCase()})…`); setBar(0);
+      const t0 = performance.now();
+      let U;
+      try {
+        if (solver === 'onnx') U = await S.onnxTiledPredictBs(session, region, contract, st, setBar);
+        else U = await S.fdtdSolvePenetrable(region, PHYS, fdtdOpts, setBar);
+      } catch (e) { setBar(null); setStatus('solve failed: ' + e.message, true); $('run').disabled = false; return; }
+      const secs = (performance.now() - t0) / 1000;
+      setBar(null); $('run').disabled = false;
+
+      // 6) render (composite the region field onto the city map)
+      const env = S.envelopeDb(U.re, U.im, region.classes, region.H, region.W);
+      field = { region, re: U.re, im: U.im, db: env.db, fMHz, solver, st };
+      $('hudMeta').textContent = `${sel.site.split('_')[0]} · ${solver.toUpperCase()} · ${fMHz} MHz · ${kind} · ${secs < 1 ? (secs * 1000).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}`;
+      setStatus(`done — ${solver.toUpperCase()} coverage in ${secs < 1 ? (secs * 1000).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}.`);
+      render();
+    }
+
+    // ---- rendering: base city, then the coverage patch, then Tx ----
+    let waveTimer = null;
+    const stopWave = () => { if (waveTimer) { cancelAnimationFrame(waveTimer); waveTimer = null; } };
+    function paintCityBase(img) {
+      for (let x = 0; x < NX; x++) for (let z = 0; z < NZ; z++) {
+        const c = CITY.grid[x * NZ + z];
+        const col = c === 0 ? [238, 242, 239] : (MATCOLORS[c] || [140, 140, 140]);
+        const o = dstCity(x, z) * 4; img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
+      }
+    }
+    function paintStations(img) {
+      STA.forEach(s => {
+        const on = s === sel; const col = on ? [230, 40, 40] : [90, 90, 90];
+        const x0 = Math.round(s.vx), z0 = Math.round(s.vz);
+        for (let di = -3; di <= 3; di++) for (let dj = -3; dj <= 3; dj++) {
+          if (di * di + dj * dj > (on ? 9 : 5)) continue;
+          const x = x0 + di, z = z0 + dj; if (x < 0 || z < 0 || x >= NX || z >= NZ) continue;
+          const o = dstCity(x, z) * 4; img.data[o] = col[0]; img.data[o + 1] = col[1]; img.data[o + 2] = col[2]; img.data[o + 3] = 255;
+        }
+      });
+    }
+    function drawCity() {
+      stopWave();
+      const img = cx.createImageData(NX, NZ);
+      paintCityBase(img); paintStations(img); cx.putImageData(img, 0, 0);
+    }
+    // sample the fine region field at city cell (x,z); returns fine index or -1 (outside crop)
+    function fineIdx(region, x, z) {
+      const fi = Math.round((x - region.x0) * region.zoom), fj = Math.round((z - region.z0) * region.zoom);
+      if (fi < 0 || fj < 0 || fi >= region.H || fj >= region.W) return -1;
+      return fi * region.W + fj;
+    }
+    function render() {
+      if (!field) { drawCity(); return; }
+      if (viewMode === 'heat') renderHeat(); else renderWave();
+      drawCbar(); updateDesc();
+    }
+    function renderHeat() {
+      stopWave();
+      const img = cx.createImageData(NX, NZ), R = field.region, db = field.db;
+      paintCityBase(img);
+      const lo = rangeLo, span = (rangeHi - rangeLo) || 1;
+      for (let x = R.x0; x < Math.min(NX, R.x0 + Math.ceil(R.H / R.zoom) + 1); x++)
+        for (let z = R.z0; z < Math.min(NZ, R.z0 + Math.ceil(R.W / R.zoom) + 1); z++) {
+          const fi = fineIdx(R, x, z); if (fi < 0) continue;
+          if (SOLID(R.classes[fi])) continue;                 // keep the building colour from the base
+          const [r, g, b] = S.cmap(cmapName, (db[fi] - lo) / span);
+          const o = dstCity(x, z) * 4; img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
+        }
+      paintStations(img); cx.putImageData(img, 0, 0);
+    }
+    function renderWave() {
+      stopWave();
+      const R = field.region, re = field.re, im = field.im;
+      const mags = [];
+      for (let i = 0; i < R.H * R.W; i++) if (!SOLID(R.classes[i])) { const a = Math.hypot(re[i], im[i]); if (a > 0) mags.push(a); }
+      mags.sort((a, b) => a - b);
+      const m50 = mags[Math.floor(mags.length * 0.5)] || 1e-9;
+      const m99 = mags[Math.floor(mags.length * 0.99)] || 1e-9;
+      // Compress about the MEDIAN field (not the 99th pct): the near-Tx amplitude
+      // dwarfs the far ripple, so anchoring at the median keeps the wavefront visible
+      // across the whole coverage instead of only next to the antenna.
+      const eps = Math.max(m50 * 0.3, m99 / 1500, 1e-12), vlim = Math.asinh(m99 / eps) || 1;
+      const base = cx.createImageData(NX, NZ); paintCityBase(base);
+      const xspan = Math.min(NX, R.x0 + Math.ceil(R.H / R.zoom) + 1), zspan = Math.min(NZ, R.z0 + Math.ceil(R.W / R.zoom) + 1);
+      let phase = 0;
+      function frame() {
+        const img = cx.createImageData(NX, NZ); img.data.set(base.data);
+        const c = Math.cos(phase), s = Math.sin(phase);
+        for (let x = R.x0; x < xspan; x++) for (let z = R.z0; z < zspan; z++) {
+          const fi = fineIdx(R, x, z); if (fi < 0 || SOLID(R.classes[fi])) continue;
+          const v = Math.max(-1, Math.min(1, Math.asinh((re[fi] * c - im[fi] * s) / eps) / vlim));
+          const [r, g, b] = S.cmapSigned(cmapName, v);
+          const o = dstCity(x, z) * 4; img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = 255;
+        }
+        paintStations(img); cx.putImageData(img, 0, 0);
+        phase += 0.15; waveTimer = requestAnimationFrame(frame);
+      }
+      frame();
+    }
+    function drawCbar() {
+      const cb = $('cbarCv'), c = cb.getContext('2d'), wave = viewMode === 'wave';
+      for (let x = 0; x < cb.width; x++) {
+        const t = x / (cb.width - 1);
+        const [r, g, b] = wave ? S.cmapSigned(cmapName, 2 * t - 1) : S.cmap(cmapName, t);
+        c.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`; c.fillRect(x, 0, 1, cb.height);
+      }
+      $('cbLo').textContent = wave ? '− trough (behind)' : `weak · ${rangeLo} dB`;
+      $('cbHi').textContent = wave ? 'crest + (toward)' : `${rangeHi} dB · strong`;
+    }
+    function updateScale() {
+      const rect = cv.getBoundingClientRect(); if (!rect.width) return;
+      const pxPerM = rect.width / EXT_X; let Lm = 10;
+      for (const n of [10, 20, 50, 100, 200, 500]) if (n * pxPerM <= 120) Lm = n;
+      $('scaleBar').style.width = (Lm * pxPerM) + 'px'; $('scaleLab').textContent = Lm + ' m';
+    }
+    addEventListener('resize', updateScale);
+
+    cv.addEventListener('mousemove', ev => {
+      const r = cv.getBoundingClientRect();
+      const pcol = Math.floor((ev.clientX - r.left) * NX / r.width), prow = Math.floor((ev.clientY - r.top) * NZ / r.height);
+      const { x, z } = pxToCity(pcol, prow);
+      if (x < 0 || z < 0 || x >= NX || z >= NZ) return;
+      const [lon, lat] = lonlat(x, z);
+      let s = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+      if (field) { const fi = fineIdx(field.region, x, z); if (fi >= 0 && !SOLID(field.region.classes[fi])) s += ` · ${field.db[fi].toFixed(1)} dB`; }
+      const c = CITY.grid[x * NZ + z]; if (SOLID(c)) { const m = MATS.find(mm => mm.id === c); if (m) s += ` · ${m.name}`; }
+      $('readout').textContent = s;
+    });
+
+    function updateDesc() {
+      const f = field ? `${field.fMHz} MHz` : 'the selected band';
+      const eng = field ? field.solver.toUpperCase() : 'the ONNX surrogate or FDTD';
+      const site = field ? sel.site.split('_')[0] : 'the selected base station';
+      $('desc').innerHTML =
+        `<b>What this simulation computes.</b> The steady-state complex full-wave field U(x,y) radiating from <b>${site}</b> at ${f} across the real NoMa DC blocks, solved by ${eng} — ` +
+        `either the <b>ONNX surrogate</b> (a U-Net trained on FDTD solves of this penetrable city; milliseconds) or a direct <b>penetrable FDTD</b> of the damped scalar wave equation. ` +
+        `The map is <b>north-up, east-right</b>; buildings are drawn from OSM footprints as <b>concrete cores with glass façades</b>, plus <b>foliage</b>, each with its own ITU permittivity and loss (legend at left). ` +
+        `<b>Heatmap</b> shows |U| as relative field strength in dB (0 dB = strongest near the antenna; range adjustable). ` +
+        `<b>Wavefront</b> shows the instantaneous Re{U·e<sup>jωt</sup>} so you can watch the beam form, diffract around corners, penetrate glass, and shadow behind concrete. ` +
+        `The antenna directivity (boresight + family) shapes the beam. Values are <i>relative</i> field strength, not calibrated dBm (an EIRP-anchored RSRP mode is a follow-on).`;
+    }
+
+    // ---- init: draw the city, load contract + ONNX ----
+    fillBands(); fillAnts(); updateResNote(); drawCity();
+    $('hudMeta').textContent = `${NX}×${NZ} grid · ${EXT_X.toFixed(0)} × ${EXT_Z.toFixed(0)} m · cell ${CS} m`;
+    requestAnimationFrame(updateScale);
+    drawCbar(); updateDesc();
+    (async function init() {
+      try { contract = await S.loadContractBs(CONTRACT_URL); fillBands(); fillAnts(); updateResNote(); }
+      catch (e) { onnxWhy = 'contract fetch failed (' + e.message + ')'; reflectEngine(); }
+      if (location.protocol === 'file:') { onnxWhy = 'needs http (file:// blocks model fetch)'; reflectEngine(); setStatus('ready — serve over http to enable ONNX'); return; }
+      if (!window.ort) { onnxWhy = 'onnxruntime-web not loaded'; reflectEngine(); setStatus('ready (FDTD only — ort missing)'); return; }
+      for (const ep of [['webgpu'], ['wasm']]) {
+        try { session = await ort.InferenceSession.create(MODEL, { executionProviders: ep }); onnxReady = true; onnxWhy = 'onnx (' + ep[0] + ')'; break; }
+        catch (e) { onnxWhy = 'onnx init failed (' + (e.message || e) + ')'; }
+      }
+      reflectEngine();
+      setStatus(onnxReady ? 'ready — pick a station, band, press Generate.' : 'ready — penetrable FDTD (ONNX unavailable). Export fw_bs.onnx to enable the surrogate.');
+    })();
+    reflectEngine();
+  </script>
+</body>
+</html>
