@@ -1,0 +1,21 @@
+{
+  "band": "LTE_B71_617",
+  "f_mhz": 617.0,
+  "cell_m": 0.3,
+  "super": 3,
+  "dims": [
+    261,
+    16,
+    131
+  ],
+  "keys": [
+    "carpet",
+    "concrete",
+    "glass",
+    "marble",
+    "metal",
+    "plasterboard",
+    "wood"
+  ],
+  "crop_m": null
+}
