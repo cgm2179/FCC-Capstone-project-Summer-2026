@@ -94,7 +94,9 @@ def _make_net(jax, jnp, lax):
 
 # --------------------------------------------------------------------------- data
 def load_shards(data_dir):
-    files = sorted(glob.glob(str(Path(data_dir) / "shard_*.npz")))
+    # accept a single band dir (shard_*.npz) OR a multiband root (<band>/shard_*.npz)
+    files = sorted(glob.glob(str(Path(data_dir) / "shard_*.npz"))) or \
+        sorted(glob.glob(str(Path(data_dir) / "*" / "shard_*.npz")))
     if not files:
         raise FileNotFoundError(f"no shards in {data_dir} — run fw_dataset3d first")
     xs = [np.load(f)["x"] for f in files]; ys = [np.load(f)["y"] for f in files]
@@ -137,6 +139,142 @@ def train(data_dir, epochs=40, base=16, bs=4, lr=1e-3, seed=0, out=None):
             for kk, vv in (v.items() if isinstance(v, dict) else [("_", v)])}
     np.savez(out, base=base, cin=cin, cout=cout, **flat)
     print(f"saved {out}")
+    return P
+
+
+# V3/V4 input-channel layout (see fw_dataset3d.INPUT_CHANNELS_V4): 0-5 material one-hot,
+# 6 tx_blob, 7 freq, 8 log_distance, 9 epsr_eff, 10 sigma, 11 sdf, 12-14 normals, 15-17 antenna J
+CH_LOGDIST, CH_EPSR = 8, 9
+EPSR_NORM = 6.0                      # must match fw_dataset3d.EPSR_NORM (de-normalize εr)
+
+
+def _load_shards_phys(data_dir):
+    """load_shards + per-box (k0, h, phys_mask) for the Helmholtz-residual loss. phys_mask=1 for
+    isotropic shards (the field satisfies ∇²E+k²E=0), 0 for directional shards (masked → skip)."""
+    from bands_v3 import get
+    files = sorted(glob.glob(str(Path(data_dir) / "shard_*.npz"))) or \
+        sorted(glob.glob(str(Path(data_dir) / "*" / "shard_*.npz")))
+    if not files:
+        raise FileNotFoundError(f"no shards in {data_dir} — run fw_dataset3d first")
+    C0 = 299_792_458.0
+    xs, ys, ks, hs, ms = [], [], [], [], []
+    for f in files:
+        d = np.load(f, allow_pickle=True)
+        x, y = d["x"], d["y"]; n = len(x)
+        k0 = 2.0 * np.pi * get(str(d["band"])).f_mhz * 1e6 / C0
+        directional = bool(d["directional"]) if "directional" in d.files else False
+        xs.append(x); ys.append(y)
+        ks.append(np.full(n, k0, np.float32)); hs.append(np.full(n, float(d["h_m"]), np.float32))
+        ms.append(np.full(n, 0.0 if directional else 1.0, np.float32))
+    return (np.concatenate(xs).astype(np.float32), np.concatenate(ys).astype(np.float32),
+            np.concatenate(ks), np.concatenate(hs), np.concatenate(ms))
+
+
+def train_resumable(data_dir, total_epochs=100, base=48, bs=8, lr=1e-3, seed=0,
+                    ckpt="unet3d_ckpt.pkl", ckpt_every=5, out=None, log_every=1, phys_weight=0.05):
+    """Checkpointed Phase C that SURVIVES Colab timeouts. Saves (params + optax state + epoch + rng)
+    to `ckpt` every `ckpt_every` epochs; on restart it reloads that and resumes from the saved epoch.
+    Point `ckpt`/`out` at Google Drive so the state persists across sessions. `data_dir` may be one
+    band or a multiband root.
+
+    Loss = MSE + `phys_weight`·Helmholtz-residual (the scalar vector-wave equation ∇²E+k²εr·E=0,
+    the field reconstructed from the phase-reduced envelope; applied only to isotropic samples, since
+    the directional teacher is a masked field). Set phys_weight=0 for pure MSE."""
+    import jax, jax.numpy as jnp, optax, pickle, time
+    from jax import lax
+    import dataset_3d as D3
+    x, y, kbox, hbox, physmask = _load_shards_phys(data_dir)
+    cin, cout = x.shape[1], y.shape[1]
+    n = len(x)
+    print(f"data x{x.shape} y{y.shape}  cin={cin} cout={cout}  base={base}  "
+          f"device={jax.default_backend()}  boxes={n}  phys_weight={phys_weight}  "
+          f"iso_frac={physmask.mean():.2f}")
+    forward = _make_net(jax, jnp, lax)
+    opt = optax.adam(lr)
+
+    LOGDIST_DIVISOR = float(D3.LOGDIST_DIVISOR)
+    LAP = np.zeros((3, 3, 3), np.float32); LAP[1, 1, 1] = -6.0
+    for a in range(3):
+        for o in (0, 2):
+            ix = [1, 1, 1]; ix[a] = o; LAP[tuple(ix)] = 1.0
+    LAPj = jnp.asarray(LAP)[None, None]                     # (1,1,3,3,3) 7-point Laplacian
+
+    def helm_res_box(pred, xb, kb, hb):
+        """Per-box mean |∇²E/k² + εr·E|² (normalized, ~O(1)); E from the phase-reduced envelope."""
+        d = 10.0 ** (xb[:, CH_LOGDIST] * LOGDIST_DIVISOR)           # metres (N,D,H,W)
+        epsr = xb[:, CH_EPSR] * EPSR_NORM + 1.0
+        ph = kb[:, None, None, None] * d
+        c, s = jnp.cos(ph), jnp.sin(ph)
+        Ar, Ai = pred[:, 0], pred[:, 1]
+        Er = Ar * c + Ai * s; Ei = Ai * c - Ar * s                 # E = A·exp(-i k d)
+
+        def lap(fld):
+            L = lax.conv_general_dilated(fld[:, None], LAPj, (1, 1, 1), [(1, 1)] * 3,
+                                         dimension_numbers=("NCDHW", "OIDHW", "NCDHW"))[:, 0]
+            return L / (hb[:, None, None, None] ** 2)
+        invk2 = 1.0 / (kb[:, None, None, None] ** 2)
+        Rr = lap(Er) * invk2 + epsr * Er
+        Ri = lap(Ei) * invk2 + epsr * Ei
+        r2 = (Rr ** 2 + Ri ** 2)[:, 1:-1, 1:-1, 1:-1]              # drop the conv border
+        return r2.mean(axis=(1, 2, 3))                             # (N,)
+
+    def loss_fn(P, xb, yb, kb, hb, mb):
+        pred = forward(P, xb)
+        mse = jnp.mean((pred - yb) ** 2)
+        if phys_weight > 0:
+            r2 = helm_res_box(pred, xb, kb, hb)
+            lphys = jnp.sum(mb * r2) / (jnp.sum(mb) + 1e-6)         # isotropic samples only
+        else:
+            lphys = jnp.asarray(0.0)
+        return mse + phys_weight * lphys, (mse, lphys)
+
+    @jax.jit
+    def step(P, state, xb, yb, kb, hb, mb):
+        (l, aux), g = jax.value_and_grad(loss_fn, has_aux=True)(P, xb, yb, kb, hb, mb)
+        upd, state = opt.update(g, state, P)
+        return optax.apply_updates(P, upd), state, aux[0], aux[1]
+
+    ckpt = Path(ckpt)
+    if ckpt.exists():
+        d = pickle.load(open(ckpt, "rb"))
+        P = jax.tree_util.tree_map(jnp.asarray, d["params"])
+        state = jax.tree_util.tree_map(jnp.asarray, d["opt"])
+        start, rng_state = d["epoch"], d.get("rng")
+        rng = np.random.default_rng(); rng.bit_generator.state = rng_state if rng_state else \
+            np.random.default_rng(seed).bit_generator.state
+        assert d["cin"] == cin, f"ckpt cin={d['cin']} != data cin={cin} (delete {ckpt} to restart)"
+        print(f"[resume] {ckpt.name} @ epoch {start}/{total_epochs}")
+    else:
+        P = jax.tree_util.tree_map(jnp.asarray, init_params(jax.random.PRNGKey(seed), cin, cout, base))
+        state = opt.init(P); start = 0; rng = np.random.default_rng(seed)
+        print(f"[fresh ] training 0/{total_epochs}")
+
+    def save_ckpt(ep):
+        tmp = ckpt.with_suffix(".tmp")
+        pickle.dump(dict(params=jax.tree_util.tree_map(np.asarray, P),
+                         opt=jax.tree_util.tree_map(np.asarray, state), epoch=ep,
+                         rng=rng.bit_generator.state, cin=cin, cout=cout, base=base),
+                    open(tmp, "wb"))
+        tmp.replace(ckpt)   # atomic: a timeout mid-write can't corrupt the checkpoint
+
+    xj, yj = jnp.asarray(x), jnp.asarray(y)
+    kj, hj, mj = jnp.asarray(kbox), jnp.asarray(hbox), jnp.asarray(physmask)
+    for ep in range(start, total_epochs):
+        t0 = time.time(); idx = rng.permutation(n); tmse = tphys = 0.0
+        for i in range(0, n, bs):
+            b = idx[i:i + bs]
+            P, state, mse_b, phys_b = step(P, state, xj[b], yj[b], kj[b], hj[b], mj[b])
+            tmse += float(mse_b) * len(b); tphys += float(phys_b) * len(b)
+        if ep % log_every == 0 or ep == total_epochs - 1:
+            print(f"  ep{ep:3d}/{total_epochs}  mse={tmse/n:.5f}  phys={tphys/n:.5f}  {time.time()-t0:.1f}s")
+        if (ep + 1) % ckpt_every == 0 or ep == total_epochs - 1:
+            save_ckpt(ep + 1); print(f"    [ckpt] epoch {ep+1} -> {ckpt.name}")
+
+    out = Path(out) if out else HERE / "unet3d_jax.npz"
+    flat = {f"{k}.{kk}": np.asarray(vv) for k, v in P.items()
+            for kk, vv in (v.items() if isinstance(v, dict) else [("_", v)])}
+    np.savez(out, base=base, cin=cin, cout=cout, **flat)
+    print(f"saved {out}  (ckpt {ckpt} kept for resume)")
     return P
 
 
@@ -224,14 +362,21 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="fw_data3d/LTE_B71_617")
     ap.add_argument("--epochs", type=int, default=40)
-    ap.add_argument("--base", type=int, default=16)
+    ap.add_argument("--base", type=int, default=48)
     ap.add_argument("--bs", type=int, default=4)
     ap.add_argument("--validate", action="store_true")
     ap.add_argument("--params", default="unet3d_jax.npz")
     ap.add_argument("--band", default="LTE_B71_617")
+    ap.add_argument("--resume", action="store_true", help="checkpointed, timeout-safe training")
+    ap.add_argument("--ckpt", default="unet3d_ckpt.pkl")
+    ap.add_argument("--ckpt-every", type=int, default=5)
+    ap.add_argument("--phys-weight", type=float, default=0.05, help="Helmholtz-residual loss weight")
     a = ap.parse_args()
     if a.validate:
         validate(a.params, a.band)
+    elif a.resume:
+        train_resumable(a.data, total_epochs=a.epochs, base=a.base, bs=a.bs,
+                        ckpt=a.ckpt, ckpt_every=a.ckpt_every, phys_weight=a.phys_weight)
     else:
         train(a.data, epochs=a.epochs, base=a.base, bs=a.bs)
 
