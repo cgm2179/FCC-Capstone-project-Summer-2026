@@ -490,6 +490,33 @@
           })();
         </script>
 
+        <!-- SIM V3 OUTDOOR full-wave (2D): base-station coverage over the real NoMa
+             OSM city (penetrable concrete/glass/foliage). Revealed by landing.js in
+             OUTDOOR mode; embeds Frontend/simulator/fw_studio2d_outdoor.html. -->
+        <div class="sim-bar" id="simFwBarOut" style="display:none; align-items:center; gap:10px; flex-wrap:wrap;">
+          <button type="button" class="sim-btn" id="simFwToggleOut">▶ Outdoor Full-Wave (SIM&nbsp;V3 · base-station coverage)</button>
+          <span class="sim-note">Live base-station coverage over the real NoMa OSM city via <code>fw_bs.onnx</code> (fast) or the penetrable FDTD, with a “time to calculate grid” estimate — <b>not</b> the legacy path-loss engine below.</span>
+        </div>
+        <div id="simFwWrapOut" style="display:none; margin:6px 0 16px;">
+          <iframe id="simFwFrameOut" title="SIM V3 Outdoor Full-Wave 2D"
+                  style="width:100%; height:78vh; border:1px solid #d9e0dc; border-radius:12px; background:#f4f6f3;"></iframe>
+        </div>
+        <script>
+          (function () {
+            var b = document.getElementById('simFwToggleOut'),
+                w = document.getElementById('simFwWrapOut'),
+                f = document.getElementById('simFwFrameOut');
+            if (!b) return;
+            var LABEL = ' Outdoor Full-Wave (SIM V3 · base-station coverage)';
+            b.addEventListener('click', function () {
+              var open = w.style.display === 'none';
+              if (open && !f.getAttribute('src')) f.setAttribute('src', 'Frontend/simulator/fw_studio2d_outdoor.html');
+              w.style.display = open ? 'block' : 'none';
+              b.innerHTML = (open ? '▼' : '▶') + LABEL;
+            });
+          })();
+        </script>
+
         <div class="sim-subtabs">
           <button type="button" class="sim-subtab" data-sub="received">Received Signal (outdoor BS)</button>
           <button type="button" class="sim-subtab active" data-sub="transmitter">Transmitter (indoor Tx)</button>

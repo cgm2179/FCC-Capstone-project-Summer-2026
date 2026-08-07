@@ -5,8 +5,10 @@ The **Simulation** tab UI — a per-mode tab with a 2D and a 3D variant.
 | File | Role | Script type |
 |---|---|---|
 | `simulation3d.js` | 3D Simulation shell — construct/place Tx & Rx, waveform, static field + animated wavefront | **ES module** |
-| `fw_studio2d.html` | **SIM V3 full-wave (2D)** live studio — ONNX surrogate / FDTD field on the floor plan | standalone page |
-| `fw_solve2d.js` | full-wave solvers: `onnxTiledPredict` (`fw_unet2d.onnx` via onnxruntime-web) + `fdtdSolve` (in-browser leapfrog) + time estimates, colormaps | **ES module** |
+| `fw_studio2d.html` | **SIM V3 full-wave (2D)** live studio — ONNX surrogate / FDTD field on the floor plan (indoor) | standalone page |
+| `fw_studio2d_outdoor.html` | **SIM V3 outdoor full-wave (2D)** — base-station coverage over the real NoMa OSM city | standalone page |
+| `fw_solve2d.js` | indoor full-wave solvers: `onnxTiledPredict` (`fw_unet2d.onnx`) + `fdtdSolve` (leapfrog) + time estimates, colormaps | **ES module** |
+| `fw_solve2d_bs.js` | outdoor solvers: `buildRegion` + `onnxTiledPredictBs` (10-ch `fw_bs.onnx`, +directivity) + `fdtdSolvePenetrable` (per-class ε/loss) | **ES module** |
 | `simulator.css` | Styles for both the 2D simulator and the 3D construction rail / viewport | — |
 
 **2D variant** (`#sim2dPanel`) is the received-power / path-loss tool. Its
@@ -43,6 +45,46 @@ palette coloured onto the map (legend ↔ pixels) and a real-world scale bar.
 It embeds in the dashboard's Simulation tab via the **"Full-Wave (SIM V3)"**
 toggle in `Frontend_Data_Display.html` (`#sim2dPanel`), which lazy-loads this page
 in an iframe — distinct from the legacy path-loss 2D tool below it.
+
+## SIM V3 outdoor full-wave (2D) — `fw_studio2d_outdoor.html`
+
+The outdoor sibling: pick a real **base station** on the NoMa DC map, choose a
+band + antenna, and generate the full-wave **coverage** over the real OSM city
+(penetrable **concrete cores + glass façades + foliage**, terrain-following). The
+map is **north-up / east-right** with a lon-lat readout, metre scale bar, material
+legend, and compass. Same solver switch + **"TIME TO CALCULATE GRID"** confirm,
+same colour scales (Viridis / Rainbow / Red-White-Blue) and adjustable field range
+(default `0 / −40 dB` relative), same heatmap / wavefront views.
+
+Two solvers behind the switch (`fw_solve2d_bs.js`):
+
+- **ONNX** — `fw_bs.onnx` (the **10-channel** base-station surrogate: the 9
+  `dataset_3d` channels + a **directivity** channel synthesized from the Tx
+  boresight & antenna family, a JS port of `fw_bs_catalog.featurize_bs` /
+  `antenna_patterns.pattern_gain`). A **region** is extracted around the Tx and
+  resampled to the surrogate's fine grid (`cell = λ/npw`, mirror of
+  `fw_bs_catalog.bs_region`), then tiled + Hann-feathered like the indoor path.
+- **penetrable FDTD** — a damped-leapfrog scalar solve whose per-cell **speed
+  `c/n`** and **damping `γ = gPerF·f`** come from the baked material palette
+  (`window.NOMA_CITY_2D.physics`, computed from `physics_3d.speed_field` /
+  `fullwave2d.damping_by_class`), so the fallback matches the *penetrable* physics
+  the surrogate trained on — mirror of `fullwave2d.FullWaveScene`.
+
+Data: `Data/noma_city2d.js` (`window.NOMA_CITY_2D`) — the baked penetrable NoMa
+grid + stations, produced by `scripts/bake_noma_city2d.py` from the OSM grid
+(`SIM V1 3D/city/NoMa_DC_osm`). The model + contract live in `SIM V1 3D/web/`
+(`fw_bs.onnx` + `fw_bs.json`); **`fw_bs.onnx` is git-ignored** (30 MB) — export it
+with `fw_export.py --model bs` (see `EXPORT_ONNX.md`). Without it, **Auto → FDTD**
+and **ONNX → a clear error** (no silent fallback).
+
+It embeds in the dashboard via the **"Outdoor Full-Wave (SIM V3)"** toggle in
+`Frontend_Data_Display.html` (`#sim2dPanel`), revealed by `Frontend/landing/landing.js`
+whenever the workspace is entered in **outdoor + 2D** mode. The legacy path-loss
+"Simulate 2D PL" city view (`Frontend/osm3d/outdoor_view.html`) is unchanged.
+
+**Auto = which engine?** In *this* new studio, **Auto = SIM V3** (ONNX → FDTD),
+clearly labelled. The dashboard's other outdoor/3D sims (`outdoor_view.html`,
+`simulation3d.js`) still use the pre-SIM-V3 **legacy path-loss** engine (`marchPL`).
 
 **WebGPU note:** the page renders on the three.js WebGPU backend, which does *not*
 size `THREE.Points` or draw `wireframe`. Volumetric visuals here use

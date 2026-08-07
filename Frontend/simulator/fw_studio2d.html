@@ -308,8 +308,11 @@
       const mags = [];
       for (let g = 0; g < H * W; g++) if (!SOLID(GRID[g])) { const a = Math.hypot(re[g], im[g]); if (a > 0) mags.push(a); }
       mags.sort((a, b) => a - b);
+      const m50 = mags[Math.floor(mags.length * 0.5)] || 1e-9;
       const m99 = mags[Math.floor(mags.length * 0.99)] || 1e-9;
-      const eps = Math.max(m99 / 300, 1e-12), vlim = Math.asinh(m99 / eps) || 1;
+      // compress about the MEDIAN (not the 99th pct) so the wavefront stays visible
+      // across the whole floor instead of washing out beyond the near field.
+      const eps = Math.max(m50 * 0.3, m99 / 1500, 1e-12), vlim = Math.asinh(m99 / eps) || 1;
       const img = cx.createImageData(W, H);
       let phase = 0;
       function frame() {
@@ -332,8 +335,8 @@
         const [r, g, b] = wave ? S.cmapSigned(cmapName, 2 * t - 1) : S.cmap(cmapName, t);
         c.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`; c.fillRect(x, 0, 1, cb.height);
       }
-      $('cbLo').textContent = wave ? '− trough' : `${rangeLo} dB · weak`;
-      $('cbHi').textContent = wave ? 'crest +' : `strong · ${rangeHi} dB`;
+      $('cbLo').textContent = wave ? '− trough' : `weak · ${rangeLo} dB`;
+      $('cbHi').textContent = wave ? 'crest +' : `${rangeHi} dB · strong`;
     }
     function updateDesc() {
       const b = field ? `${field.fMHz} MHz` : 'the selected band';

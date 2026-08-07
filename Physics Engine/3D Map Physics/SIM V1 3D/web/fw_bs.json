@@ -1,0 +1,176 @@
+{
+  "spec_version": "fw-unet2d-v1",
+  "model_file": "fw_bs.onnx",
+  "predicts": "complex full-wave field, phase-reduced",
+  "input": {
+    "name": "x",
+    "layout": "N,C,H,W",
+    "dtype": "float32",
+    "channels": [
+      "material_onehot_0",
+      "material_onehot_1",
+      "material_onehot_2",
+      "material_onehot_3",
+      "material_onehot_4",
+      "material_onehot_5",
+      "tx_blob",
+      "freq_feat",
+      "log_distance",
+      "directivity"
+    ],
+    "in_channels": 10,
+    "material_classes": 6,
+    "tx_blob_sigma_cells": 2.0,
+    "logdist_divisor": 3.0,
+    "freq_log_lo_mhz": 600.0,
+    "freq_log_hi_mhz": 6200.0,
+    "size_multiple": 16,
+    "directivity": {
+      "channel": 9,
+      "name": "directivity",
+      "default_kind": "panel",
+      "hpbw_deg": 65.0,
+      "am_db": 25.0,
+      "families": {
+        "dish": {
+          "hpbw_deg": 10.0,
+          "am_db": 30.0
+        },
+        "phased_array": {
+          "hpbw_deg": 20.0,
+          "am_db": 25.0
+        },
+        "horn": {
+          "hpbw_deg": 40.0,
+          "am_db": 25.0
+        },
+        "yagi": {
+          "hpbw_deg": 50.0,
+          "am_db": 20.0
+        },
+        "quad": {
+          "hpbw_deg": 55.0,
+          "am_db": 18.0
+        },
+        "lpda": {
+          "hpbw_deg": 60.0,
+          "am_db": 18.0
+        },
+        "panel": {
+          "hpbw_deg": 65.0,
+          "am_db": 25.0
+        },
+        "patch": {
+          "hpbw_deg": 65.0,
+          "am_db": 20.0
+        },
+        "slot": {
+          "hpbw_deg": 70.0,
+          "am_db": 18.0
+        },
+        "pifa": {
+          "hpbw_deg": 110.0,
+          "am_db": 6.0
+        },
+        "inverted_f": {
+          "hpbw_deg": 120.0,
+          "am_db": 5.0
+        },
+        "loop": {
+          "hpbw_deg": 150.0,
+          "am_db": 3.0
+        },
+        "fractal": {
+          "hpbw_deg": 160.0,
+          "am_db": 2.0
+        },
+        "helical": {
+          "hpbw_deg": 140.0,
+          "am_db": 4.0
+        },
+        "metamaterial": {
+          "hpbw_deg": 160.0,
+          "am_db": 3.0
+        },
+        "omni": {
+          "hpbw_deg": 360.0,
+          "am_db": 0.0
+        },
+        "monopole": {
+          "hpbw_deg": 360.0,
+          "am_db": 0.0
+        },
+        "whip": {
+          "hpbw_deg": 360.0,
+          "am_db": 0.0
+        },
+        "handheld": {
+          "hpbw_deg": 360.0,
+          "am_db": 0.0
+        },
+        "dipole": {
+          "hpbw_deg": 360.0,
+          "am_db": 0.0
+        },
+        "discone": {
+          "hpbw_deg": 360.0,
+          "am_db": 0.0
+        },
+        "biconical": {
+          "hpbw_deg": 360.0,
+          "am_db": 0.0
+        }
+      },
+      "formula": "bearing = atan2(-(i - tx_i), (j - tx_j)) deg;  d = wrap180(bearing - boresight_deg);  atten_db = min(12*(d/hpbw_deg)^2, am_db);  gain = 10^(-atten_db/20)  (0..1)"
+    }
+  },
+  "output": {
+    "name": "y",
+    "layout": "N,C,H,W",
+    "channels": [
+      "field_re",
+      "field_im"
+    ],
+    "phase_reduced": true,
+    "reconstruct": "U(x) = (re + j*im) * exp(-j*k*d),  k=2*pi/lambda,  d = |x - tx| metres;  envelope |U|, animation Re{U e^{jwt}}",
+    "normalized_by": "per-field 99th-percentile |U| (relative; re-anchor to FSPL for absolute dB)"
+  },
+  "bands_mhz": [
+    "TMO_B71_617",
+    "ATT/TMO/VZW_B12/B13/B14_746",
+    "VZW_B5/B26_885",
+    "ATT/TMO/VZW_B2_1965",
+    "ATT/TMO/VZW_B4/B65/B66_2160",
+    "ATT_B30_2355",
+    "WLAN_WiFi_2442",
+    "TMO_n41_2508",
+    "VZW_n77/n78_3710",
+    "VZW_n77_3809"
+  ],
+  "trained_mhz": [
+    617,
+    746,
+    885,
+    1965,
+    2160,
+    2355,
+    2442,
+    2508,
+    3710,
+    3809
+  ],
+  "box_train": 128,
+  "architecture": "UNet2D(base, cin=10, cout=2)",
+  "trained": true,
+  "exported_at": "2026-08-07T04:28:41Z",
+  "smoke_check": {
+    "onnxruntime": "ok",
+    "in_channels": 10,
+    "out_shape": [
+      1,
+      2,
+      128,
+      128
+    ]
+  }
+}

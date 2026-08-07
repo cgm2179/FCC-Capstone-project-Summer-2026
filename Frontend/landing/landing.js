@@ -367,6 +367,23 @@
     if (p2) p2.hidden = (dim === '3d');
     if (p3) p3.hidden = (dim !== '3d');
 
+    // Simulation 2D: swap the indoor vs OUTDOOR SIM V3 full-wave studio by environment.
+    // Indoor = the 7th-floor plan (fw_studio2d); outdoor = base-station coverage over the
+    // NoMa OSM city (fw_studio2d_outdoor). Lazy-load the outdoor iframe on first entry.
+    const isOutdoor2d = window.appMode.environment === 'outdoor' && dim !== '3d';
+    const inBar = document.getElementById('simFwBar'), inWrap = document.getElementById('simFwWrap');
+    const outBar = document.getElementById('simFwBarOut'), outWrap = document.getElementById('simFwWrapOut');
+    const outFrame = document.getElementById('simFwFrameOut'), outToggle = document.getElementById('simFwToggleOut');
+    if (inBar) inBar.style.display = isOutdoor2d ? 'none' : '';
+    if (inWrap && isOutdoor2d) inWrap.style.display = 'none';
+    if (outBar) outBar.style.display = isOutdoor2d ? '' : 'none';
+    if (!isOutdoor2d && outWrap) outWrap.style.display = 'none';
+    if (isOutdoor2d && outFrame && !outFrame.getAttribute('src')) {   // auto-open on first outdoor entry
+      outFrame.setAttribute('src', 'Frontend/simulator/fw_studio2d_outdoor.html');
+      if (outWrap) outWrap.style.display = 'block';
+      if (outToggle) outToggle.innerHTML = '▼ Outdoor Full-Wave (SIM V3 · base-station coverage)';
+    }
+
     // Map Coverage: match the dimension (viewer3d wires these buttons).
     const btn = document.getElementById(dim === '3d' ? 'mapMode3dBtn' : 'mapMode2dBtn');
     if (btn) btn.click();
