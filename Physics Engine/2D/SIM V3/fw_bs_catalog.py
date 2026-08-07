@@ -147,7 +147,12 @@ def bs_region(grid, man, st, npw=8.0, region_m=None, max_cells=2_500_000):
     inference/coverage. `bs_field` = this + a solve."""
     from scipy import ndimage
     cs = float(man["cell_size_m"]); NX, NZ = grid.shape[0], grid.shape[2]
-    plane = grid[:, 2, :]
+    tv = man.get("_terrain_v")                               # terrain-following if a DEM was applied
+    if tv is not None:
+        yy = np.clip(np.asarray(tv, np.int64) + 2, 0, grid.shape[1] - 1)   # 2 m above terrain per (x,z)
+        plane = np.take_along_axis(grid, yy[:, None, :], axis=1)[:, 0, :]
+    else:
+        plane = grid[:, 2, :]                                # flat ground: fixed 2 m slice
     band = get(st["band"]); h = band.cell_size_m(npw); zoom = cs / h
     if region_m is None:                                 # band-adaptive default
         region_m = band_region_m(band.f_mhz)

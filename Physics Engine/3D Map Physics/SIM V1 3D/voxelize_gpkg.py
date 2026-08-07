@@ -117,10 +117,17 @@ def rasterize_heightmap(gdf, heights, nx, nz, merc_scale, anchor, ox, oz, cell):
     return hm
 
 
-def columns_to_grid(hm, ny, cls):
+def columns_to_grid(hm, ny, model="penetrable", core=2, facade=5, barrier=3,
+                    terrain_v=None):
     """2.5-D column fill (voxelize_city.build_25d logic): footprints solid
-    ground→roof; ring-only footprints and interior courtyards filled to the
-    building roof so the eikonal barrier can't leak through."""
+    ground→roof; ring-only footprints and courtyards filled so nothing leaks.
+
+    model='penetrable' paints a 1-cell GLASS `facade` skin + CONCRETE `core`
+    interior — both lossy dielectrics, so the wave penetrates/attenuates (real
+    O2I) and reflects off facades, instead of the old rigid `barrier` (perfect
+    reflector). model='barrier' keeps the single rigid class (old behaviour).
+    terrain_v (nx,nz) voxel ground heights: columns extrude from the terrain
+    surface instead of a flat y=0."""
     foot = hm >= 0.0
     filled = ndimage.binary_fill_holes(foot)
     need = filled & ~foot
@@ -130,11 +137,39 @@ def columns_to_grid(hm, ny, cls):
         hm = hm.copy()
         hm[need] = cmax[lbl[need] - 1]
         foot = filled
-    hcol = np.floor(np.clip(hm, 0, ny - 1)).astype(np.int32)
     nx, nz = hm.shape
+    gnd = (np.clip(terrain_v, 0, ny - 1).astype(np.int32) if terrain_v is not None
+           else np.zeros((nx, nz), np.int32))
+    top = np.clip(gnd + np.floor(np.clip(hm, 0, ny - 1)).astype(np.int32), 0, ny - 1)
     M = np.zeros((nx, ny, nz), np.int8)
-    for iy in range(ny):                                     # y-loop keeps RAM at one slice
-        M[:, iy, :][foot & (hcol >= iy)] = cls
+    if model == "barrier":
+        for iy in range(ny):
+            M[:, iy, :][foot & (top >= iy) & (gnd <= iy)] = barrier
+        return M
+    interior = ndimage.binary_erosion(foot, iterations=1)     # concrete core
+    skin = foot & ~interior                                   # 1-cell glass facade
+    for iy in range(ny):
+        col = (top >= iy) & (gnd <= iy)
+        M[:, iy, :][interior & col] = core
+        M[:, iy, :][skin & col] = facade
+    return M
+
+
+def foliage_to_grid(M, hm_fol, ny, foliage=4, terrain_v=None):
+    """Overlay foliage/tree columns (class `foliage`, a dilute lossy medium) onto
+    an existing grid wherever there's no building. hm_fol = per-(x,z) canopy top
+    (voxel height, -1 = none)."""
+    foot = hm_fol >= 0.0
+    if not foot.any():
+        return M
+    nx, nz = hm_fol.shape
+    gnd = (np.clip(terrain_v, 0, ny - 1).astype(np.int32) if terrain_v is not None
+           else np.zeros((nx, nz), np.int32))
+    top = np.clip(gnd + np.floor(np.clip(hm_fol, 0, ny - 1)).astype(np.int32), 0, ny - 1)
+    for iy in range(ny):
+        col = foot & (top >= iy) & (gnd <= iy)
+        sl = M[:, iy, :]
+        sl[col & (sl == 0)] = foliage                        # only fill air (buildings win)
     return M
 
 
@@ -177,6 +212,50 @@ def bbox_lonlat_of_frame(fr, anchor):
     return min(lons), min(lats), max(lons), max(lats)
 
 
+def fetch_foliage(read_bbox, fr, anchor, foliage_height, cell):
+    """Per-(x,z) canopy-top heightmap from OSM vegetation (Overpass): park /
+    wood / forest polygons at `foliage_height`, plus individual tree nodes.
+    Returns None if nothing found / the query fails."""
+    import ssl, json as _json, urllib.request, urllib.parse
+    import shapely
+    lon0, lat0, lon1, lat1 = read_bbox
+    q = (f'[out:json][timeout:90];('
+         f'way["leisure"="park"]({lat0},{lon0},{lat1},{lon1});'
+         f'way["natural"="wood"]({lat0},{lon0},{lat1},{lon1});'
+         f'way["landuse"="forest"]({lat0},{lon0},{lat1},{lon1});'
+         f'node["natural"="tree"]({lat0},{lon0},{lat1},{lon1}););out geom;')
+    ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+    req = urllib.request.Request("https://overpass-api.de/api/interpreter",
+                                 data=urllib.parse.urlencode({"data": q}).encode(),
+                                 headers={"User-Agent": "rf-sim-voxelizer/1.0"})
+    with urllib.request.urlopen(req, timeout=120, context=ctx) as r:
+        els = _json.load(r)["elements"]
+    nx, nz, ms, ox, oz = fr["nx"], fr["nz"], fr["merc_scale"], fr["ox"], fr["oz"]
+    hm = np.full((nx, nz), -1.0); hy = foliage_height / cell
+    npoly = ntree = 0
+    for e in els:
+        if e["type"] == "way" and e.get("geometry") and len(e["geometry"]) >= 3:
+            lon = np.array([p["lon"] for p in e["geometry"]])
+            lat = np.array([p["lat"] for p in e["geometry"]])
+            vx, vz = lonlat_to_vox_xz(lon, lat, ms, anchor, ox, oz, cell)
+            x0, x1 = max(0, int(vx.min())), min(nx, int(vx.max()) + 1)
+            z0, z1 = max(0, int(vz.min())), min(nz, int(vz.max()) + 1)
+            if x0 >= x1 or z0 >= z1:
+                continue
+            polyv = shapely.Polygon(np.column_stack([vx, vz]))
+            gx, gz = np.meshgrid(np.arange(x0, x1) + .5, np.arange(z0, z1) + .5, indexing="ij")
+            ins = shapely.contains_xy(polyv, gx.ravel(), gz.ravel()).reshape(gx.shape)
+            sub = hm[x0:x1, z0:z1]; np.maximum(sub, np.where(ins, hy, -1.0), out=sub); npoly += 1
+        elif e["type"] == "node":
+            vx, vz = lonlat_to_vox_xz(np.array([e["lon"]]), np.array([e["lat"]]),
+                                      ms, anchor, ox, oz, cell)
+            ix, iz = int(vx[0]), int(vz[0])
+            if 0 <= ix < nx and 0 <= iz < nz:
+                hm[max(0, ix - 1):ix + 2, max(0, iz - 1):iz + 2] = hy; ntree += 1
+    print(f"  foliage: {npoly} veg polygons + {ntree} trees from OSM Overpass")
+    return hm if (npoly or ntree) else None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -196,6 +275,18 @@ def main():
     ap.add_argument("--floor-height", type=float, default=3.0,
                     help="metres per storey for H:/HBET: storey-count heights (default 3.0)")
     ap.add_argument("--building-class", type=int, default=BUILDING_CLASS)
+    ap.add_argument("--material-model", choices=["penetrable", "barrier"], default="penetrable",
+                    help="penetrable = concrete core (2) + glass facade (5) lossy dielectrics "
+                         "(real O2I); barrier = single rigid class 3 (old perfect reflector)")
+    ap.add_argument("--core-class", type=int, default=2, help="concrete core class (penetrable)")
+    ap.add_argument("--facade-class", type=int, default=5, help="glass facade class (penetrable)")
+    ap.add_argument("--foliage-class", type=int, default=4, help="foliage/tree class")
+    ap.add_argument("--foliage", action="store_true",
+                    help="fetch OSM vegetation (parks/wood/trees, Overpass) and add as foliage")
+    ap.add_argument("--foliage-height", type=float, default=8.0, help="canopy height m")
+    ap.add_argument("--terrain", default=None, help="DEM .npy (metres) — ground follows terrain")
+    ap.add_argument("--ground", action="store_true",
+                    help="lay a 1-cell ground sheet (concrete/asphalt = core class) at the surface")
     ap.add_argument("--out", default=None, help="output dir (default city/NoMa_DC_osm)")
     ap.add_argument("--tx-band", type=float, nargs=2, default=(4.0, 12.0))
     ap.add_argument("--no-preview", action="store_true")
@@ -233,39 +324,73 @@ def main():
     print(f"  height: {100*valid.mean():.1f}% real · median {np.nanmedian(raw[valid]):.1f} m · "
           f"default {dflt:.1f} m · max {heights.max():.1f} m")
 
-    ny = int(math.ceil(heights.max() / cell)) + 2
+    # optional real terrain (DEM): ground follows it, buildings extrude from it
+    terrain_v = None
+    if args.terrain:
+        terrain_v = VC.load_terrain(Path(args.terrain), nx, nz, cell)
+        relief = int(terrain_v.max())
+        print(f"  terrain: DEM applied · +{relief} voxels ({relief*cell:.0f} m relief)")
+    ny = int(math.ceil(heights.max() / cell)) + (int(terrain_v.max()) if terrain_v is not None else 0) + 2
+
     t0 = time.time()
     hm = rasterize_heightmap(gdf, heights, nx, nz, merc_scale, anchor, ox, oz, cell)
-    M = columns_to_grid(hm, ny, cls)
+    M = columns_to_grid(hm, ny, model=args.material_model, core=args.core_class,
+                        facade=args.facade_class, barrier=cls, terrain_v=terrain_v)
+
+    # optional foliage/trees from OSM (Overpass): parks/wood/forest polygons + tree nodes
+    n_fol = 0
+    if args.foliage:
+        try:
+            hm_fol = fetch_foliage(read_bbox, fr, anchor, args.foliage_height, cell)
+            if hm_fol is not None:
+                M = foliage_to_grid(M, hm_fol, ny, foliage=args.foliage_class, terrain_v=terrain_v)
+                n_fol = int((M == args.foliage_class).any(0).sum())
+        except Exception as e:
+            print(f"  (foliage skipped: {e})")
+
+    # optional ground sheet (concrete/asphalt) at the surface — below the 2-D slice,
+    # matters for a 3-D solve / ground reflection, not the current 2-D surrogate.
+    if args.ground:
+        gnd = (np.clip(terrain_v, 0, ny - 1) if terrain_v is not None
+               else np.zeros((nx, nz), int))
+        for iy in range(ny):
+            sl = M[:, iy, :]; sl[(gnd == iy) & (sl == 0)] = args.core_class
+
     inside, valid_tx = VC.make_masks(M, cls, tuple(args.tx_band), cell)
-    print(f"  rasterize + 2.5d fill + masks in {time.time()-t0:.1f}s · grid {nx}x{ny}x{nz}")
+    print(f"  {args.material_model} fill + masks in {time.time()-t0:.1f}s · grid {nx}x{ny}x{nz}")
 
     out = Path(args.out) if args.out else HERE / "city" / "NoMa_DC_osm"
     out.mkdir(parents=True, exist_ok=True)
     np.save(out / "material_grid.npy", M)
     np.save(out / "inside_mask.npy", inside)
     np.save(out / "valid_tx_mask.npy", valid_tx)
+    if terrain_v is not None:                                 # per-(x,z) ground voxel height
+        np.save(out / "terrain_v.npy", terrain_v.astype(np.int16))
 
+    classes_present = sorted(int(c) for c in np.unique(M))
     template = json.loads((HERE / "manifest_3d.json").read_text())
     man = VC.city_manifest(
         template, source_gpkg=str(args.gpkg), source_layer=args.layer,
-        domain="city_outdoor", mode="2.5d-gpkg", building_class=cls,
-        cell_size_m=round(cell, 6), m_per_unit=1.0, merc_lat=fr["merc_lat"],
+        domain="city_outdoor", mode="2.5d-gpkg",
+        material_model=args.material_model, classes_present=classes_present,
+        core_class=args.core_class, facade_class=args.facade_class,
+        foliage_class=(args.foliage_class if args.foliage else None),
+        building_class=cls, cell_size_m=round(cell, 6), m_per_unit=1.0, merc_lat=fr["merc_lat"],
         merc_scale=round(merc_scale, 6), epsg=3857,
         merc_anchor=[round(anchor[0], 3), round(anchor[1], 3)],
         anchor_lonlat=list(FCC_LONLAT),
         origin_units=[round(ox, 4), 0.0, round(oz, 4)],
         grid_shape=[nx, ny, nz],
         ceiling_height_m=round(float(heights.max()), 3),
-        room_band=[1, ny - 1],
+        room_band=[1, ny - 1], terrain=bool(args.terrain),
         bbox_lonlat=[round(x, 7) for x in read_bbox],
         overlay_of=fr["matched"], n_buildings=int(len(gdf)),
     )
     (out / "manifest_3d.json").write_text(json.dumps(man, indent=2))
 
     nvox = nx * ny * nz
-    print(f"  buildings: {100*(M==cls).sum()/nvox:.1f}% solid · "
-          f"inside(air) {inside.sum():,} · valid_tx {int(valid_tx.sum()):,}")
+    print(f"  classes present {classes_present} · solid {100*(M>0).sum()/nvox:.1f}% · "
+          f"foliage cols {n_fol:,} · inside(air) {inside.sum():,} · valid_tx {int(valid_tx.sum()):,}")
     print(f"saved material_grid.npy, inside_mask.npy, valid_tx_mask.npy, "
           f"manifest_3d.json → {out}")
 
