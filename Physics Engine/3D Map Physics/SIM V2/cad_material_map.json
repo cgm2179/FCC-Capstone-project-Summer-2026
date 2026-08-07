@@ -1,0 +1,1771 @@
+{
+  "band": "LTE_B71_617",
+  "f_mhz": 617.0,
+  "materials": {
+    "FrontColor": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Glass_Basic_01": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "Steel_Brushed_Stainless": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Formica_Graystone": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material11": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "ceramic": {
+      "p2040": "marble",
+      "cls": 2,
+      "eps_re": 7.074,
+      "eps_im": -0.1024,
+      "sigma": 0.003516614871936945,
+      "is_metal": false
+    },
+    "brushed_metal": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Color_M09": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_auto_5": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_auto_3": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_auto_4": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Ty_Gray2": null,
+    "Ty_Skin": null,
+    "Ty_Brown1": null,
+    "Ty_Brown2": null,
+    "Ty_Gray1": null,
+    "Ty_Blue4": null,
+    "Ty_Green": null,
+    "Ty_Blue3": null,
+    "Ty_Yellow": null,
+    "Ty_Blue2": null,
+    "Ty_Blue1": null,
+    "Ty_Red": null,
+    "Ty_Orange": null,
+    "_LC_Office_Cubicle_Material10": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material15": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material14": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material17": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material9": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material12": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material16": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material5": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material4": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material7": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material2": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material6": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material3": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Metal_Corrogated_Shiny": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Translucent_Glass_Gray": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "Color_000": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_I13": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Metal_Steel_Textured_White": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Translucent_Glass_Gold": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "Color_008": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "M_96_96_96": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_009": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Metal_Corrogated_Shiny_1": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Color_007": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "ianmac_hp_logo": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "M_0135_DarkGray": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "M_0133_Gray": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "M_0072_DarkSeaGreen": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Low_E_Glass_": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_Tomato_": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_WhiteSmoke_": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "___portalapis": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Gray_Glass_1": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_Blue_": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Black_4": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Beige_1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_10": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "HMI_Polished_Alu1": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "HMI__BK__Black__1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "HMI__3P14__Vinyl1": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material32": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material33": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material36": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material34": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material37": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material35": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material38": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_LC_Office_Cubicle_Material39": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Wood_Cherry_Original": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "Color_G07": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_C05": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "CP_B": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_K07": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_K02": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "casters": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_M08": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_2": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_3": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Oak_Cognac_Vert": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "_Color_M09_1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "F_RENDER_DESIGNS_WHITE": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "KMF_WORKSTATION_WOOD_TOPS": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "KMF_WORKSTATION_METALS_STANDARD": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Platinum": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Tides_Pool": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Wood_Veneer_01": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "Wood_26": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "Aluminum_01__Stainless": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "M_0137_Black": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Translucent_Glass_Gray1_": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "keyboard1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "blackmouse2": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Carpet_Plush_Forest": {
+      "p2040": "carpet",
+      "cls": 2,
+      "eps_re": 1.2,
+      "eps_im": -0.036,
+      "sigma": 0.001234,
+      "is_metal": false
+    },
+    "Color_006": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Color_005_1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_6": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Metal_Corrogated_Shiny_3": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "_Metal_Corrogated_Shiny_2": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "_7": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_8": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_I04": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_9": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_5": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Metal_Corrogated_Shiny_4": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "google": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Metal_Aluminum_Anodized": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Translucent_Block_Swirl": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Metal_Rough": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Color_004": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "M_0136_Charcoal": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_0135_DarkGray_1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_F07": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Fencing_Diamond_Mesh": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Wood_Bamboo_Dark": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "Metal_Embossed": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "_LC_Double_Glass_Door_Material6": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Double_Glass_Door_Material7": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Double_Glass_Door_Material8": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Double_Glass_Door_Material": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Double_Glass_Door_Material2": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Double_Glass_Door_Material1": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Double_Glass_Door_Material3": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Double_Glass_Door_Material4": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Double_Glass_Door_Material5": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "Color_002": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Sophie_Skirt": null,
+    "Color_A01": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_H10": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_White_": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_CorrogateRust_": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "_LC_Single_Glass_Door_Material": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Single_Glass_Door_Material1": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Single_Glass_Door_Material2": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Single_Glass_Door_Material6": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Single_Glass_Door_Material8": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Single_Glass_Door_Material7": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "Bukva_natur_EG": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "Bukva_natur_EG1": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "_LightGray_": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Ivory_1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "download": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "PEPE": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_16": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Black_Walnut_Hard_wood_Flooring": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "_15": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Paint_Gloss_09_80__Gray": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Metal_Brushed_03_20__Gray": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Paint_Gloss_02_10__Gray": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Color_003_1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Metal_Corrogated_Shiny_7": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Color_H15": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "BASI_COLONNE": {
+      "p2040": "concrete",
+      "cls": 2,
+      "eps_re": 5.24,
+      "eps_im": -0.9225,
+      "sigma": 0.03166671627045609,
+      "is_metal": false
+    },
+    "Stainless_Steel_Appliance": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Charcoal_Appliance": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "_Black_1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "INOX": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "_31": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "INOX1_": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "_CorrogateShiny_1": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Metal_Corrogated_Shiny1_": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "_18": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_19": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_B24": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "jean_blue": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Charcoal_": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Metal_Aluminum_Anodized_2": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "_Metal_Steel_Textured_White_1": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Concrete_Aggregate_Smoke": {
+      "p2040": "concrete",
+      "cls": 2,
+      "eps_re": 5.24,
+      "eps_im": -0.9225,
+      "sigma": 0.03166671627045609,
+      "is_metal": false
+    },
+    "_Metal_Corrogated_Shiny_10": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "_Metal_Rough_3": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Stone_Pavers_Walk": {
+      "p2040": "marble",
+      "cls": 2,
+      "eps_re": 7.074,
+      "eps_im": -0.1024,
+      "sigma": 0.003516614871936945,
+      "is_metal": false
+    },
+    "_22": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_D05": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_D05_1_": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "stem3": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "flowers3": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Color_M00_1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Lisanne_Tools": null,
+    "Lisanne_Caulk": null,
+    "Lisanne_Bandana": null,
+    "Lisanne_Skin": null,
+    "Lisanne_Hair": null,
+    "Lisanne_Metal": null,
+    "Lisanne_Boots": null,
+    "Lisanne_Overalls": null,
+    "Lisanne_Bracelet": null,
+    "Lisanne_Boot_Sole_01": null,
+    "Lisanne_Tool_Bag_01": null,
+    "Lisanne_Tool_Bag_03": null,
+    "Lisanne_Eraser": null,
+    "Lisanne_Caulkgun": null,
+    "Lisanne_Brush_Metal": null,
+    "Lisanne_Brush1": null,
+    "Lisanne_Shirt_Blue": null,
+    "Lisanne_Hammer": null,
+    "Lisanne_Boot_Sole_02": null,
+    "Lisanne_Tool_Bag_02": null,
+    "Lisanne_Watch": null,
+    "Lisanne_Brush_Handle": null,
+    "Lisanne_Necklace": null,
+    "_Color_C05_1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_M03": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_M00": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_M": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Wood_Veneer__2": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "_LC_Single_Glass_Door_Material9": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Single_Glass_Door_Material11": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Single_Glass_Door_Material10": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Single_Glass_Door_Material13": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Single_Glass_Door_Material12": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "_LC_Single_Glass_Door_Material14": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "MJK25300_L6V6_Material_03": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "MJK25300_L6V6_Material_01": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Carpet_Loop_Pattern": {
+      "p2040": "carpet",
+      "cls": 2,
+      "eps_re": 1.2,
+      "eps_im": -0.036,
+      "sigma": 0.001234,
+      "is_metal": false
+    },
+    "_Color_008_1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_003": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Color_002_2": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Color_003_4": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Color_003_3": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Color_002_3": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_F06": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "entradas_macbook": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Leather_A02_Brown_25cm": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "Laminate_D01_120cm": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "Material_1": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Leather_L01_Brown_28cm": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "Aluminum_Blurry": {
+      "p2040": "metal",
+      "cls": 3,
+      "eps_re": 1.0,
+      "eps_im": -291330690.1867,
+      "sigma": 10000000.0,
+      "is_metal": true
+    },
+    "Material_5": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Material_6": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Material_7": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_001": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Color_008_2": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_24": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_25": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_26": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_L06": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Notebook_Cover": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Pages_side": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Notepaper_white_blank": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "Cardboard_Texture": {
+      "p2040": "wood",
+      "cls": 4,
+      "eps_re": 1.99,
+      "eps_im": -0.0816,
+      "sigma": 0.0028010798975547386,
+      "is_metal": false
+    },
+    "_________RAL_9016_": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Starbucks_ring": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "M_001_effectsResult": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "Color_M07": {
+      "p2040": "plasterboard",
+      "cls": 1,
+      "eps_re": 2.73,
+      "eps_im": -0.1573,
+      "sigma": 0.005399976095772665,
+      "is_metal": false
+    },
+    "_Translucent_Glass_Blue_1": {
+      "p2040": "glass",
+      "cls": 5,
+      "eps_re": 6.31,
+      "eps_im": -0.0549,
+      "sigma": 0.0018854301580293541,
+      "is_metal": false
+    },
+    "Blacktop_Old_01": {
+      "p2040": "concrete",
+      "cls": 2,
+      "eps_re": 5.24,
+      "eps_im": -0.9225,
+      "sigma": 0.03166671627045609,
+      "is_metal": false
+    }
+  }
+}

@@ -22,8 +22,10 @@ import bootstrap  # noqa: F401  (side effect: sys.path → engine)
 import fullwave2d as FW
 from fullwave2d import FullWaveScene
 from fw_fdtd_jax import simulate_jax
+from Time_Domain_Physics import WaveSim
 
 C0 = 299_792_458.0
+EPS0 = 8.854_187_8128e-12
 
 
 def steps_for(extent_m, dt, crossings=1.5) -> int:
@@ -67,6 +69,48 @@ def solve_band(band_label="LTE_B71_617", npw=8.0, crop_m=None, tx_m=None,
                       tx_m=tx_m, max_cells=max_cells)
     res = solve3d(s.classes, s.h_m, get(band_label).f_mhz, s.tx_idx, **kw)
     res["solid"] = s
+    return res
+
+
+class EffectiveMediumScene(WaveSim):
+    """Continuous effective-medium FDTD scene: builds c(x) and γ(x) from per-cell
+    εr_eff/σ_eff (the conformal voxelizer) instead of an integer class grid. Reuses
+    FullWaveScene.step verbatim — only the medium construction differs."""
+    step = FullWaveScene.step
+    cfl = FullWaveScene.cfl
+
+    @classmethod
+    def from_effective_medium(cls, epsr_eff, sigma_eff, metal_frac, h_m, f_mhz,
+                              source_xy, source="cw", metal_threshold=0.5,
+                              sponge_width=None):
+        eps = np.asarray(epsr_eff, float)
+        c = C0 / np.maximum(np.sqrt(np.maximum(eps, 1e-6)), 1e-3)   # c = C0/Re(√εr)
+        rigid = np.asarray(metal_frac, float) > metal_threshold      # metal → reflector
+        if sponge_width is None:
+            sponge_width = max(20, int(0.06 * min(eps.shape)))
+        self = cls(c, h_m, source_xy, float(f_mhz) * 1e6, source=source,
+                   rigid=rigid, sponge_width=sponge_width)           # WaveSim sets dt/cdt2/…
+        gamma = np.asarray(sigma_eff, float) / (2.0 * EPS0 * np.maximum(eps, 1e-6))
+        gamma[rigid] = 0.0                        # metal → rigid reflector, no bulk loss (u=0)
+        gamma = np.minimum(gamma, 0.5 / max(self.dt, 1e-30))         # cap a≤0.5 (stability)
+        self.a = (gamma * self.dt).astype(np.float64)                # γ·dt (needs self.dt)
+        self._inv1pa = 1.0 / (1.0 + self.a)
+        self._1ma = 1.0 - self.a
+        self.f_mhz = float(f_mhz); self.classes = None
+        return self
+
+
+def solve3d_em(epsr_eff, sigma_eff, metal_frac, h_m, f_mhz, tx, source="cw",
+               crossings=1.5, warmup_frac=0.5, dtype="float32", extract_phasor=True,
+               steps=None):
+    """Solve the continuous effective-medium 3-D field on the JAX teacher."""
+    sim = EffectiveMediumScene.from_effective_medium(epsr_eff, sigma_eff, metal_frac,
+                                                     h_m, f_mhz, tx, source=source)
+    extent = tuple(s * h_m for s in epsr_eff.shape)
+    n_steps = int(steps) if steps else steps_for(extent, sim.dt, crossings)
+    res = simulate_jax(sim, n_steps, warmup_frac=warmup_frac,
+                       extract_phasor=extract_phasor, dtype=dtype)
+    res.update(steps=n_steps, dt=sim.dt, cfl=sim.cfl(), h_m=h_m, extent_m=extent, sim=sim)
     return res
 
 
