@@ -247,12 +247,16 @@ def generate3d_em(band_label="LTE_B71_617", n_tx=2, boxes_per=20, box=24, npw=10
                  np.load(gd / "metal_frac.npy"), np.load(gd / "material_grid.npy"),
                  np.load(gd / "sdf.npy"))
     txc = np.argwhere(np.load(B.VALID_TX_MASK).any(axis=1))
-    sid = 0
-    for _ in range(n_tx):
-        tc = txc[rng.integers(len(txc))]
-        directional = antenna and (rng.random() < directional_frac)
+    tx_idx = rng.integers(len(txc), size=n_tx)             # deterministic Tx picks (resume-stable)
+    for sid in range(n_tx):
+        shard_path = out / f"shard_{sid:03d}.npz"
+        if shard_path.exists():                            # PER-Tx resume: a Tx already on disk is skipped
+            print(f"  [skip] shard {sid:03d} already done"); continue
+        trng = np.random.default_rng([seed, sid])          # independent per-Tx stream → skip-invariant
+        tc = txc[tx_idx[sid]]
+        directional = antenna and (trng.random() < directional_frac)
         if directional:                                    # random panel boresight (az, downtilt)
-            az = float(rng.uniform(0, 360)); tilt = float(rng.uniform(-15, 5)); kind = "panel"
+            az = float(trng.uniform(0, 360)); tilt = float(trng.uniform(-15, 5)); kind = "panel"
             bore = AP3.boresight_vec_from_angles(az, tilt)
         else:                                              # ~isotropic source (no directivity mask)
             az = None; tilt = 0.0; kind = "iso"; bore = np.ones(3) / np.sqrt(3.0)
@@ -270,7 +274,7 @@ def generate3d_em(band_label="LTE_B71_617", n_tx=2, boxes_per=20, box=24, npw=10
             blob = np.exp(-(((ii - txf[0]) ** 2 + (jj - txf[1]) ** 2 + (kk - txf[2]) ** 2) / s2))
             Jfull = (np.abs(bore)[:, None, None, None] * blob[None]).astype(np.float32)  # (3,Dx,Dy,Dz)
         xs, ys = [], []
-        for x0, y0, z0 in _stratified_origins(rng, (Dx, Dy, Dz), box, boxes_per):
+        for x0, y0, z0 in _stratified_origins(trng, (Dx, Dy, Dz), box, boxes_per):
             x0, y0, z0 = int(x0), int(y0), int(z0)
             sl = (slice(x0, x0 + box), slice(y0, y0 + box), slice(z0, z0 + box))
             ii, jj, kk = np.mgrid[x0:x0 + box, y0:y0 + box, z0:z0 + box]
@@ -281,19 +285,21 @@ def generate3d_em(band_label="LTE_B71_617", n_tx=2, boxes_per=20, box=24, npw=10
                                   epsr=epsr[sl], sigma=sigma[sl], sdf=sdf[sl],
                                   normals=normals[(slice(None),) + sl],
                                   antenna=(Jfull[(slice(None),) + sl] if Jfull is not None else None)))
-        np.savez_compressed(out / f"shard_{sid:03d}.npz", x=np.stack(xs), y=np.stack(ys),
+        tmp = out / f".shard_{sid:03d}.tmp.npz"            # atomic: a timeout mid-write can't leave a half shard
+        np.savez_compressed(tmp, x=np.stack(xs), y=np.stack(ys),
                             h_m=h, ref=ref, band=band.label, directional=bool(directional))
+        tmp.replace(shard_path)
         print(f"  shard {sid:03d} boxes={len(xs)} x{xs[0].shape} "
               f"[{'directional' if directional else 'iso'} {xs[0].shape[0]}-ch]")
-        sid += 1
+    n_done = len(list(out.glob("shard_*.npz")))            # done-marker only after every Tx is on disk
     spec = "fw-unet3d-v4" if antenna else "fw-unet3d-v3"
     chans = INPUT_CHANNELS_V4 if antenna else INPUT_CHANNELS_V3
     (out / "dataset_meta.json").write_text(json.dumps(dict(
-        spec=spec, box=box, bands=[band_label], n_shards=sid,
+        spec=spec, box=box, bands=[band_label], n_shards=n_done,
         in_channels=list(chans), out_channels=["field_re", "field_im"],
         phase_reduced=True, npw=npw, conformal=True, antenna=antenna,
         directional_frac=directional_frac), indent=2))
-    print(f"wrote {sid} conformal shards -> {out}")
+    print(f"wrote/verified {n_done} conformal shards -> {out}")
     return out
 
 
