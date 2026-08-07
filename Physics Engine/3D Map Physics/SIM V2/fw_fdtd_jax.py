@@ -34,6 +34,11 @@ envelope accumulation match fw_solver/fullwave2d.simulate() step-for-step, so
 """
 from __future__ import annotations
 
+try:  # SIM V2: put the shared SIM V3 engine on sys.path (harmless if absent)
+    import bootstrap  # noqa: F401
+except Exception:
+    pass
+
 import argparse
 import time
 
