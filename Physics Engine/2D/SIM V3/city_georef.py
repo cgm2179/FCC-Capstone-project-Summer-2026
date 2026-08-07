@@ -59,6 +59,9 @@ def load_georef_city(city_dir=None):
     cdir = Path(city_dir) if city_dir else B.CITY_DIR
     man = georef_manifest(json.loads((cdir / "manifest_3d.json").read_text()))
     grid = np.load(B.require(cdir / "material_grid.npy"))
+    tvp = cdir / "terrain_v.npy"        # per-(x,z) ground voxel height for terrain-following
+    if tvp.exists():
+        man["_terrain_v"] = np.load(tvp)
     return grid, man
 
 
