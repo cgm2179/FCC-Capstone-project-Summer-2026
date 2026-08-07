@@ -41,13 +41,24 @@ HPBW_DEG = 65.0          # 3GPP macro sector azimuth HPBW
 AM_DB = 25.0             # front-to-back (max off-boresight attenuation)
 CATALOG = B._PHYS / "Cross_Validation" / "base_station_catalog" / "base_stations.csv"
 
-# Map catalog band → a SIM V3 real band label (cellular LTE + NR).
+# Map each walk-test frequency → its SIM band, named Network_Band(s)_Freq. Bands
+# are grouped only when within 30 MHz on the spectrum (then lumped, slashes in the
+# name); anything farther gets its own label = its own FDTD. Keys are both forms
+# load_stations tries (freq_mhz.rstrip("0").rstrip(".") and str(int(freq))).
 BAND_TO_LABEL = {
-    "617": "LTE_B71_617", "619": "LTE_B71_617", "627": "LTE_B71_617",
-    "731.5": "LTE_B13_751", "739": "LTE_B13_751", "751": "LTE_B13_751",
-    "763": "LTE_B13_751", "884.55": "LTE_B13_751",
-    "1970": "LTE_B2_1960", "1960": "LTE_B2_1960", "2145": "LTE_B2_1960",
-    "2510.55": "NR_n41_2506", "2506": "NR_n41_2506", "2355": "NR_n41_2506",
+    "617": "TMO_B71_617",
+    "731": "ATT/TMO/VZW_B12/B13/B14_746", "731.5": "ATT/TMO/VZW_B12/B13/B14_746",
+    "739": "ATT/TMO/VZW_B12/B13/B14_746", "751": "ATT/TMO/VZW_B12/B13/B14_746",
+    "763": "ATT/TMO/VZW_B12/B13/B14_746",
+    "884": "VZW_B5/B26_885", "884.55": "VZW_B5/B26_885",
+    "196": "ATT/TMO/VZW_B2_1965", "1960": "ATT/TMO/VZW_B2_1965", "1970": "ATT/TMO/VZW_B2_1965",
+    "2145": "ATT/TMO/VZW_B4/B65/B66_2160", "2174": "ATT/TMO/VZW_B4/B65/B66_2160",
+    "2174.55": "ATT/TMO/VZW_B4/B65/B66_2160",
+    "2355": "ATT_B30_2355",
+    "2442": "WLAN_WiFi_2442",
+    "2506": "TMO_n41_2508", "2510": "TMO_n41_2508", "2510.55": "TMO_n41_2508",
+    "3709": "VZW_n77/n78_3710", "3709.92": "VZW_n77/n78_3710",
+    "3809": "VZW_n77_3809", "3809.28": "VZW_n77_3809",
 }
 
 
@@ -188,10 +199,16 @@ def _dedupe_by_site(stations):
 
 def generate_bs(band_labels, holdout_site="BS7_forte_hall", boxes_per_station=48,
                 box=128, npw=8.0, region_m=None, max_cells=1_600_000,
-                out_dir=None, seed=1, city_dir=None):
+                out_dir=None, seed=1, city_dir=None, antenna_kinds=None):
     """Dataset from REAL stations: train on known sites, hold out one for test.
 
-    city_dir: alternate city grid (e.g. city/NoMa_DC_osm real OSM buildings)."""
+    city_dir: alternate city grid (e.g. city/NoMa_DC_osm real OSM buildings).
+    holdout_site: None trains on ALL stations (no held-out g2 split).
+    antenna_kinds: waveform diversity. When a list, generate ONE omni FDTD per
+      (site, band) and emit a shard per family, imposing that family's azimuth
+      pattern on the field (far-field pattern x propagation) — every antenna
+      waveform without an extra solve. None = one directional field per (site,
+      band) using the station's own antenna_type (the backplane source)."""
     import json
     from pathlib import Path
     rng = np.random.default_rng(seed)
@@ -200,33 +217,41 @@ def generate_bs(band_labels, holdout_site="BS7_forte_hall", boxes_per_station=48
     norm = D3.load_norm(json.loads(B.MANIFEST.read_text()))
     grid, man, sts = load_stations(band_labels, city_dir=city_dir)
     train = _dedupe_by_site([s for s in sts if s["site"] != holdout_site])
-    print(f"train sites: {[s['site'] for s in train]}  (holdout {holdout_site})")
+    print(f"train sites: {[s['site'] for s in train]}  (holdout {holdout_site})"
+          + (f"  x {len(antenna_kinds)} antennas {antenna_kinds}" if antenna_kinds else ""))
     sid = 0
     for st in train:
         band = get(st["band"]); k = 2 * np.pi / band.wavelength_m
         ff = norm.freq_feature(band.f_mhz)
-        p, U = bs_field(grid, man, st, npw=npw, region_m=region_m, max_cells=max_cells)
+        kinds = antenna_kinds or [st.get("kind", "panel")]
+        # When augmenting antennas, solve ONE omni field and impose each pattern
+        # analytically; otherwise the station's own directional (backplane) field.
+        src = {**st, "kind": "omni"} if antenna_kinds else st
+        p, U = bs_field(grid, man, src, npw=npw, region_m=region_m, max_cells=max_cells)
         H, W = U.shape; h = p.h_m; txf = np.array(p.tx_idx, float)
-        ref = np.percentile(np.abs(U), 99.0) or 1.0
-        xs, ys = [], []
-        for _ in range(boxes_per_station):
-            x0 = int(rng.integers(0, max(1, H - box))); y0 = int(rng.integers(0, max(1, W - box)))
-            b = min(box, H, W)
-            ii, jj = np.mgrid[x0:x0 + b, y0:y0 + b]
-            d_m = np.hypot(ii - txf[0], jj - txf[1]) * h
-            Ut = U[x0:x0 + b, y0:y0 + b] * np.exp(1j * k * d_m)
-            ys.append((np.stack([Ut.real, Ut.imag]) / ref).astype(np.float32))
-            xs.append(featurize_bs(p.classes[x0:x0 + b, y0:y0 + b],
-                                   (txf[0] - x0, txf[1] - y0), d_m, ff, st["boresight"],
-                                   st.get("kind", "panel")))
-        np.savez_compressed(out / f"shard_{sid:03d}.npz", x=np.stack(xs), y=np.stack(ys),
-                            site=st["site"], band=st["band"], h_m=h, ref=ref,
-                            boresight=st["boresight"], kind=st.get("kind", "panel"))
-        print(f"  shard {sid:03d} {st['site']} {st['band']} boxes={len(xs)}")
-        sid += 1
+        ii0, jj0 = np.mgrid[0:H, 0:W]
+        bear = np.degrees(np.arctan2(-(ii0 - txf[0]), (jj0 - txf[1])))   # Tx->cell bearing
+        for kind in kinds:
+            Uk = U * AP.pattern_gain(kind, bear, st["boresight"]) if antenna_kinds else U
+            ref = np.percentile(np.abs(Uk), 99.0) or 1.0
+            xs, ys = [], []
+            for _ in range(boxes_per_station):
+                x0 = int(rng.integers(0, max(1, H - box))); y0 = int(rng.integers(0, max(1, W - box)))
+                b = min(box, H, W)
+                ii, jj = np.mgrid[x0:x0 + b, y0:y0 + b]
+                d_m = np.hypot(ii - txf[0], jj - txf[1]) * h
+                Ut = Uk[x0:x0 + b, y0:y0 + b] * np.exp(1j * k * d_m)
+                ys.append((np.stack([Ut.real, Ut.imag]) / ref).astype(np.float32))
+                xs.append(featurize_bs(p.classes[x0:x0 + b, y0:y0 + b],
+                                       (txf[0] - x0, txf[1] - y0), d_m, ff, st["boresight"], kind))
+            np.savez_compressed(out / f"shard_{sid:03d}.npz", x=np.stack(xs), y=np.stack(ys),
+                                site=st["site"], band=st["band"], h_m=h, ref=ref,
+                                boresight=st["boresight"], kind=kind)
+            print(f"  shard {sid:03d} {st['site']} {st['band']} kind={kind} boxes={len(xs)}")
+            sid += 1
     (out / "dataset_meta.json").write_text(json.dumps(dict(
         spec="fw-bs-v1", in_channels=IN_CH_BS, holdout=holdout_site,
-        bands=list(band_labels), box=box, region_m=region_m), indent=2))
+        bands=list(band_labels), antenna_kinds=antenna_kinds, box=box, region_m=region_m), indent=2))
     print(f"wrote {sid} shards -> {out}")
     return out
 
@@ -299,9 +324,13 @@ def main():
     ap.add_argument("--city-dir", default=None,
                     help="alternate city grid dir (e.g. the real-OSM "
                          "'3D Map Physics/SIM V1 3D/city/NoMa_DC_osm')")
+    ap.add_argument("--antenna-kinds", nargs="+", default=None,
+                    help="antenna families to augment each (site,band) with "
+                         "(e.g. panel dish yagi patch loop); default = station's own type")
     a = ap.parse_args()
     if a.gen:
-        generate_bs(a.bands, holdout_site=a.holdout, out_dir=a.out, city_dir=a.city_dir)
+        generate_bs(a.bands, holdout_site=a.holdout, out_dir=a.out, city_dir=a.city_dir,
+                    antenna_kinds=a.antenna_kinds)
     if a.validate:
         from fw_unet2d import load_model
         validate_bs(load_model(a.ckpt), a.bands, holdout_site=a.holdout, city_dir=a.city_dir)
