@@ -163,9 +163,10 @@ def _plot(out, et, ep, m, p, band, rmse, rho, coh):
         a.set_title(t); fig.colorbar(im, ax=a, shrink=0.7)
     ax[1].set_xlabel(f"RMSE {rmse:.1f} dB · ρ {rho:+.2f} · coherence {coh:.2f}")
     fig.suptitle(f"Full-wave surrogate vs FDTD — {band.label}")
-    fig.savefig(out / f"g2_{band.label}.png", dpi=120, bbox_inches="tight")
+    safe = band.label.replace("/", "-")        # band labels can contain '/' (e.g. B12/B13/B14)
+    fig.savefig(out / f"g2_{safe}.png", dpi=120, bbox_inches="tight")
     plt.close(fig)
-    print(f"   wrote {out / f'g2_{band.label}.png'}")
+    print(f"   wrote {out / f'g2_{safe}.png'}")
 
 
 def render_prediction(model, band_label="LTE_B71_617", n_per_wavelength=8.0,
