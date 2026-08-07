@@ -49,7 +49,12 @@ import voxelize_city as VC  # noqa: E402  (projection + masks + manifest, reused
 
 FCC_LONLAT = (-77.0074055, 38.90358466666667)   # 45 L St NE — the SIM V3 anchor origin
 BUILDING_CLASS = 3
-DEFAULT_GPKG = Path.home() / "Downloads" / "building.032010.gpkg"
+# Default = the small NoMa clip committed to the repo (~3 MB, ~10k buildings) so this
+# runs on Colab with no 4 GB upload. Pass --gpkg <full building.032010.gpkg> for a
+# different bbox (the full VIDA/OSM file lives on local disk / Drive).
+DEFAULT_GPKG = next((p for p in (HERE / "city_src" / "NoMa_DC_buildings.gpkg",
+                                 Path.home() / "Downloads" / "building.032010.gpkg")
+                     if p.exists()), HERE / "city_src" / "NoMa_DC_buildings.gpkg")
 DEFAULT_MATCH = HERE / "city" / "NoMa_DC_buildings"   # overlay this grid by default
 
 
