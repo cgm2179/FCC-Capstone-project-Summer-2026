@@ -191,10 +191,11 @@ def subvol_field_em(band, tx_m, npw=10.0, region_m=7.0, crossings=2.0, super="au
     else:
         import voxelize_conformal as VC
         man = json.loads(B.MANIFEST.read_text()); ceil_m = float(man["ceiling_height_m"])
-        crop = (tx_m[0] - region_m, tx_m[0] + region_m, 0.0, ceil_m,
-                tx_m[1] - region_m, tx_m[1] + region_m)
+        r = region_m / 2.0                                    # region_m = full extent (matches baked mode)
+        crop = (tx_m[0] - r, tx_m[0] + r, 0.0, ceil_m, tx_m[1] - r, tx_m[1] + r)
         o = VC.bake(band.label, crop_m=crop, cell_m=h, super=super)
         epsr, sigma, mf, cg, sdf = o["epsr_eff"], o["sigma_eff"], o["metal_frac"], o["material_grid"], o["sdf"]
+        h = float(o["cell_m"])                                # bake may have coarsened the cell to fit memory
     tx = tuple(int(s // 2) for s in epsr.shape)
     if epsr[tx] >= 1.05:                                       # snap to nearest air
         air = np.argwhere(epsr < 1.05)
