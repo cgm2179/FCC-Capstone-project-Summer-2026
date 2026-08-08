@@ -369,13 +369,110 @@ def validate(params="unet3d_jax.npz", band_label="LTE_B71_617", npw=6.0,
     return dict(rmse_db=rmse, spearman=float(rho), coherence=coh)
 
 
+def validate_conformal(params="unet3d_jax.npz", band_label="LTE_B71_617", n_tx=3, boxes_per=48,
+                       npw=10.0, region_m=None, super="auto", seed=999, grids_dir=None,
+                       directional_frac=0.5, out_png=None):
+    """Phase D for the 18-channel conformal surrogate. Builds a HELD-OUT set with a fresh `seed`
+    (transmitters + antennas the model never trained on), runs the trained net, and reports
+    envelope-dB RMSE, Spearman rank-corr, and complex coherence vs the FDTD ground truth. Uses the
+    SAME pipeline as training (subvol_field_em → featurize3d). `grids_dir` = frozen-geometry grids
+    (fast, no OBJ); else per-Tx mesh bake (matches a mesh-baked training set). Optional pred-vs-truth
+    slice PNG at `out_png`."""
+    import jax, jax.numpy as jnp
+    from jax import lax
+    from scipy.stats import spearmanr
+    from bands_v3 import get
+    import fw_dataset3d as FD
+
+    band = get(band_label); k = 2 * np.pi / band.wavelength_m
+    reg = region_m if region_m is not None else FD.BAND_PLAN.get(band_label, (4.0, 10.0))[0]
+    cs = float(json.loads(bootstrap.MANIFEST.read_text())["cell_size_m"])
+    ff = FD.D3.load_norm(json.loads(bootstrap.MANIFEST.read_text())).freq_feature(band.f_mhz)
+    baked = None
+    if grids_dir:
+        gd = Path(grids_dir)
+        baked = (np.load(gd / "epsr_eff.npy"), np.load(gd / "sigma_eff.npy"),
+                 np.load(gd / "metal_frac.npy"), np.load(gd / "material_grid.npy"), np.load(gd / "sdf.npy"))
+    P, meta = load_params(HERE / params if not Path(params).is_absolute() else params)
+    forward = jax.jit(_make_net(jax, jnp, lax))
+    print(f"model: cin={meta['cin']} base={meta['base']}  ·  device={jax.default_backend()}")
+
+    rng = np.random.default_rng(seed)
+    txc = np.argwhere(np.load(bootstrap.VALID_TX_MASK).any(axis=1))
+    xs, ys = [], []
+    for _ in range(n_tx):
+        tc = txc[rng.integers(len(txc))]
+        directional = directional_frac > 0 and rng.random() < directional_frac
+        az = float(rng.uniform(0, 360)) if directional else None
+        tilt = float(rng.uniform(-15, 5)) if directional else 0.0
+        kind = "panel" if directional else "iso"
+        bore = FD.AP3.boresight_vec_from_angles(az, tilt) if directional else np.ones(3) / np.sqrt(3.0)
+        try:
+            cg, epsr, sigma, sdf, normals, U, tx, h = FD.subvol_field_em(
+                band, (tc[0] * cs, tc[1] * cs), npw=npw, region_m=reg, super=super, baked=baked,
+                base_cell=cs, az_deg=az, tilt_deg=tilt, kind=kind)
+        except Exception as e:
+            print(f"  [skip] held-out Tx: {type(e).__name__}: {e}"); continue
+        Dx, Dy, Dz = U.shape
+        if min(Dx, Dy, Dz) < 24:
+            continue
+        txf = np.array(tx, float); ref = np.percentile(np.abs(U), 99.0) or 1.0
+        ii, jj, kk = np.mgrid[0:Dx, 0:Dy, 0:Dz]
+        blob = np.exp(-(((ii - txf[0]) ** 2 + (jj - txf[1]) ** 2 + (kk - txf[2]) ** 2)
+                        / (2.0 * FD.D3.TX_SIGMA_CELLS ** 2)))
+        Jfull = (np.abs(bore)[:, None, None, None] * blob[None]).astype(np.float32)
+        for x0, y0, z0 in FD._stratified_origins(rng, (Dx, Dy, Dz), 24, boxes_per):
+            x0, y0, z0 = int(x0), int(y0), int(z0)
+            sl = (slice(x0, x0 + 24), slice(y0, y0 + 24), slice(z0, z0 + 24))
+            ii2, jj2, kk2 = np.mgrid[x0:x0 + 24, y0:y0 + 24, z0:z0 + 24]
+            d_m = np.sqrt((ii2 - txf[0]) ** 2 + (jj2 - txf[1]) ** 2 + (kk2 - txf[2]) ** 2) * h
+            Ut = U[sl] * np.exp(1j * k * d_m)
+            ys.append((np.stack([Ut.real, Ut.imag]) / ref).astype(np.float32))
+            xs.append(FD.featurize3d(cg[sl], (txf[0] - x0, txf[1] - y0, txf[2] - z0), d_m, ff,
+                                     epsr=epsr[sl], sigma=sigma[sl], sdf=sdf[sl],
+                                     normals=normals[(slice(None),) + sl],
+                                     antenna=Jfull[(slice(None),) + sl]))
+    if not xs:
+        print("no held-out boxes produced"); return None
+    X, Yt = np.stack(xs), np.stack(ys)
+
+    Yp = np.concatenate([np.asarray(forward(P, jnp.asarray(X[i:i + 16]))) for i in range(0, len(X), 16)])
+    mse = float(np.mean((Yp - Yt) ** 2))
+    pr, tr = Yp[:, 0] + 1j * Yp[:, 1], Yt[:, 0] + 1j * Yt[:, 1]
+    ap, at = np.abs(pr).ravel(), np.abs(tr).ravel()
+    r = np.percentile(at[at > 0], 99.0) or 1.0
+    dbp = 20 * np.log10(np.maximum(ap, r * 1e-6) / r); dbt = 20 * np.log10(np.maximum(at, r * 1e-6) / r)
+    m = dbt > -60
+    rmse = float(np.sqrt(np.mean((dbp[m] - dbt[m]) ** 2)))
+    rho, _ = spearmanr(dbp[m], dbt[m])
+    coh = float(np.abs(np.vdot(pr.ravel(), tr.ravel())) / (np.linalg.norm(pr) * np.linalg.norm(tr) + 1e-12))
+    print(f"Phase D · {band.label} · {len(X)} held-out boxes (seed {seed})")
+    print(f"   MSE={mse:.5f}   envelope dB RMSE={rmse:.2f} dB   Spearman={rho:+.3f}   coherence={coh:.3f}")
+
+    if out_png:
+        import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+        ym = 12; ta = np.abs(tr[0, :, ym, :]); pa = np.abs(pr[0, :, ym, :])
+        dB = lambda a: 20 * np.log10(np.maximum(a, (a.max() or 1) * 1e-3) / (a.max() or 1))
+        fig, ax = plt.subplots(1, 2, figsize=(8, 4))
+        ax[0].imshow(dB(ta), cmap="turbo", vmin=-40, vmax=0); ax[0].set_title("FDTD truth  |U| dB")
+        ax[1].imshow(dB(pa), cmap="turbo", vmin=-40, vmax=0); ax[1].set_title("surrogate  |U| dB")
+        for a in ax: a.axis("off")
+        fig.suptitle(f"{band.label} · held-out box · dB RMSE {rmse:.1f} · ρ {rho:+.2f} · coh {coh:.2f}")
+        fig.tight_layout(); fig.savefig(out_png, dpi=110); plt.close(fig)
+        print(f"   wrote {out_png}")
+    return dict(mse=mse, rmse_db=rmse, spearman=float(rho), coherence=coh, n=len(X))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="fw_data3d/LTE_B71_617")
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--base", type=int, default=48)
     ap.add_argument("--bs", type=int, default=4)
-    ap.add_argument("--validate", action="store_true")
+    ap.add_argument("--validate", action="store_true", help="legacy 9-ch validate")
+    ap.add_argument("--test", action="store_true", help="Phase D held-out test for the 18-ch conformal model")
+    ap.add_argument("--grids-dir", default=None, help="frozen-geometry grids for --test (fast, no OBJ)")
+    ap.add_argument("--out-png", default=None, help="pred-vs-truth slice PNG for --test")
     ap.add_argument("--params", default="unet3d_jax.npz")
     ap.add_argument("--band", default="LTE_B71_617")
     ap.add_argument("--resume", action="store_true", help="checkpointed, timeout-safe training")
@@ -383,7 +480,9 @@ def main():
     ap.add_argument("--ckpt-every", type=int, default=5)
     ap.add_argument("--phys-weight", type=float, default=0.05, help="Helmholtz-residual loss weight")
     a = ap.parse_args()
-    if a.validate:
+    if a.test:
+        validate_conformal(a.params, a.band, grids_dir=a.grids_dir, out_png=a.out_png)
+    elif a.validate:
         validate(a.params, a.band)
     elif a.resume:
         train_resumable(a.data, total_epochs=a.epochs, base=a.base, bs=a.bs,
