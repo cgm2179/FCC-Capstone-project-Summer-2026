@@ -1,0 +1,373 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SIM V3 · Full-Wave Studio (3D)</title>
+  <style>
+    :root { --bg:#f4f6f3; --panel:#ffffff; --ink:#1f2a2a; --muted:#5b6662; --accent:#0a7f7a; --line:#d9e0dc; --warn:#b26a00; --err:#c0392b; }
+    * { box-sizing: border-box; }
+    body { margin:0; height:100vh; display:flex; background:var(--bg); color:var(--ink);
+           font:13px/1.5 "Avenir Next","Helvetica Neue",Helvetica,sans-serif; overflow:hidden; }
+    #side { width:310px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:18px; overflow-y:auto; }
+    #side h2 { margin:0 0 2px; font-size:1.15rem; } #side .sub { color:var(--muted); font-size:0.82rem; margin:0 0 16px; }
+    .grp { margin-bottom:13px; } .grp > label { display:block; font-weight:600; margin-bottom:5px; color:var(--muted); font-size:0.84rem; }
+    select, input[type=number] { width:100%; background:#fff; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:7px 10px; font:inherit; }
+    .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+    .seg button { flex:1; background:#fff; color:var(--muted); border:0; padding:7px; cursor:pointer; font:inherit; }
+    .seg button.on { background:var(--accent); color:#fff; }
+    .btn { width:100%; padding:9px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; margin-top:4px; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .btn.ghost { background:#eef2ef; color:var(--ink); border:1px solid var(--line); }
+    #engine { font-size:0.76rem; color:var(--muted); margin-top:6px; }
+    #warn { margin-top:10px; font-size:0.8rem; color:var(--warn); min-height:16px; white-space:pre-line; }
+    #status { margin-top:8px; font-size:0.8rem; color:var(--muted); min-height:16px; } #status.err { color:var(--err); font-weight:600; }
+    #bar { height:8px; background:rgba(10,127,122,.15); border-radius:4px; overflow:hidden; margin-top:8px; display:none; }
+    #barFill { height:100%; width:0%; background:var(--accent); transition:width .12s linear; }
+    #view { flex:1; display:flex; flex-direction:column; background:#0b0e14; overflow:hidden; }
+    #stage { flex:1; position:relative; min-height:0; }
+    #gl { display:block; width:100%; height:100%; }
+    #desc { flex:none; padding:9px 16px 11px; border-top:1px solid var(--line); background:var(--panel);
+            font-size:0.78rem; line-height:1.45; color:var(--muted); max-height:30%; overflow-y:auto; }
+    #desc b { color:var(--ink); } #desc sup { font-size:0.7em; }
+    .row { display:flex; gap:8px; } .row > label { flex:1; font-size:0.72rem; color:var(--muted); }
+    #hud { position:absolute; top:12px; left:14px; font-size:0.75rem; color:#cfe; pointer-events:none; text-shadow:0 1px 2px #000; }
+    #hud b { color:#5fd0c8; }
+    #cbar { position:absolute; right:16px; top:16px; width:150px; }
+    #cbar canvas { width:150px; height:12px; border-radius:3px; border:1px solid #2a3340; }
+    #cbar .lab { display:flex; justify-content:space-between; font-size:0.7rem; color:#9fb; }
+    #readout { position:absolute; bottom:12px; left:14px; font-size:0.74rem; color:#9fb; font-family:ui-monospace,monospace; text-shadow:0 1px 2px #000; }
+    #legend { width:100%; border-collapse:collapse; font-size:0.74rem; margin-top:4px; }
+    #legend td { padding:2px 5px; color:var(--muted); }
+    #legend .sw2 { display:inline-block; width:12px; height:12px; border-radius:3px; border:1px solid #999; vertical-align:middle; }
+    .note { font-size:0.74rem; color:var(--muted); margin:2px 0 0; }
+  </style>
+  <script type="importmap">
+  { "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }}
+  </script>
+</head>
+<body>
+  <div id="side">
+    <h2>Full-Wave Studio · 3D</h2>
+    <p class="sub">SIM V3 · place a Tx in the voxelized 7th floor, pick a band, generate the 3-D full-wave field — ONNX surrogate (whole-floor, fast) or the sub-volume FDTD solver.</p>
+
+    <div class="grp"><label>Solver</label>
+      <div class="seg" id="solverSeg">
+        <button class="on" data-v="auto">Auto</button><button data-v="onnx">ONNX</button><button data-v="fdtd">FDTD</button>
+      </div>
+      <div id="engine">loading model…</div>
+      <p class="note">Auto = ONNX surrogate (whole-floor) → FDTD. ONNX runs the whole floor tiled (slow, never crashes); <b>FDTD solves a sub-volume around the Tx</b> (whole-floor 3-D FDTD is infeasible in a browser).</p>
+    </div>
+    <div class="grp"><label>Band</label><select id="band"></select></div>
+    <div class="grp"><label>Tx power (dBm)</label><input id="txp" type="number" value="20" min="0" max="46" step="1"></div>
+    <div class="grp" id="fdtdResGrp"><label>FDTD sub-volume (half-width, m)</label>
+      <select id="region"><option value="3">±3 m (fast)</option><option value="4" selected>±4 m</option><option value="6">±6 m (slow)</option></select>
+      <p class="note">FDTD box around the Tx at λ/8, full ceiling height. Bigger = slower.</p></div>
+
+    <button class="btn ghost" id="place">＋ Place Tx (click the model)</button>
+    <button class="btn" id="run">▶ Generate field</button>
+    <div id="bar"><div id="barFill"></div></div>
+    <div id="warn"></div>
+    <div id="status">ready</div>
+
+    <div class="grp" style="margin-top:16px"><label>Model view</label>
+      <div class="seg" id="modelSeg"><button class="on" data-v="cad">Real CAD</button><button data-v="voxel">Voxels</button></div>
+      <p class="note">The solver always uses the voxel grid; this only changes what you see.</p></div>
+    <div class="grp"><label>Field view</label>
+      <div class="seg" id="viewSeg"><button class="on" data-v="heat">Heatmap |U|</button><button data-v="wave">Wavefront</button></div></div>
+    <div class="grp"><label>Field style</label>
+      <div class="seg" id="fstyleSeg"><button data-v="slice">Coverage slice</button><button class="on" data-v="cloud">Cloud</button><button data-v="voxel">Voxels</button></div>
+      <p class="note">Coverage slice = a smooth horizontal cut-plane at the Tx height (the iBwave/WinProp look).</p></div>
+    <div class="grp"><label>Colour scale</label>
+      <div class="seg" id="cmapSeg"><button data-v="viridis">Viridis</button><button class="on" data-v="rainbow">Rainbow</button><button data-v="rdbu">Red-White-Blue</button></div></div>
+    <div class="grp"><label>Field range (dB, relative)</label>
+      <div class="row"><label>strong<input id="rangeHi" type="number" value="0" step="5"></label>
+        <label>weak<input id="rangeLo" type="number" value="-40" step="5"></label></div></div>
+    <div class="grp"><label>Model opacity</label>
+      <input id="modelOpacity" type="range" min="0" max="100" value="65" style="width:100%"></div>
+    <div class="grp"><label>See inside — ceiling cut</label>
+      <input id="cutY" type="range" min="8" max="100" value="100" style="width:100%">
+      <p class="note">Slide down to slice off the ceiling / upper structure and look inside the floor.</p></div>
+
+    <div class="grp"><label>Materials (legend ↔ voxels)</label><table id="legend"></table>
+      <p class="note" id="scaleNote"></p></div>
+  </div>
+
+  <div id="view">
+    <div id="stage">
+      <canvas id="gl"></canvas>
+      <div id="hud">
+        <div><b>SIM V3 — full-wave · 7th-floor voxel grid (3D)</b></div>
+        <div id="hudMeta"></div>
+        <div style="opacity:.7">drag to orbit · scroll to zoom</div>
+      </div>
+      <div id="cbar"><canvas id="cbarCv" width="150" height="12"></canvas><div class="lab"><span id="cbLo">−40 dB</span><span id="cbHi">0 dB</span></div></div>
+      <div id="readout"></div>
+    </div>
+    <div id="desc"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+  <script src="../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/sim_assets_3d.js"></script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+    import * as S from './fw_solve3d.js';
+
+    const $ = id => document.getElementById(id);
+    const setStatus = (m, e) => { $('status').textContent = m; $('status').className = e ? 'err' : ''; };
+    const setWarn = m => { $('warn').textContent = m || ''; };
+    const setBar = f => { $('bar').style.display = f == null ? 'none' : 'block'; if (f != null) $('barFill').style.width = Math.round(f * 100) + '%'; };
+
+    const MODEL = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_unet3d.onnx';
+    const CONTRACT_URL = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_unet3d.json';
+    const BANDS = [['617', 'LTE 617'], ['751', 'LTE 751'], ['1960', 'LTE 1960'],
+                   ['2442', 'Wi-Fi 2.4 GHz'], ['2506', 'NR n41 2506'], ['3700', 'NR n77 3700'], ['5500', 'Wi-Fi 5 GHz']];
+    $('band').innerHTML = BANDS.map(([v, t]) => `<option value="${v}">${t} MHz</option>`).join('');
+
+    // ---- decode the 3-D voxel grid ----
+    if (!window.SIM3D_ASSETS) { setStatus('sim_assets_3d.js failed to load (serve from the repo root).', true); throw new Error('no SIM3D_ASSETS'); }
+    const A = window.SIM3D_ASSETS, M = A.manifest_3d;
+    const [X, Y, Z] = M.grid_shape, CELL = M.cell_size_m;
+    const idx = (x, y, z) => (x * Y + y) * Z + z;
+    function u8(b) { const s = atob(b), a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
+    const GRID = u8(A.grid_b64);
+    const SOLID = c => c !== 0;                       // everything but air is an object the model sees
+
+    const MATS = M.materials || [];
+    const hex2rgb = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+    const MATCOL = {}; MATS.forEach(m => { MATCOL[m.id] = m.color ? hex2rgb(m.color).map(v => v / 255) : [.55, .55, .55]; });
+    $('legend').innerHTML = MATS.map(m => `<tr><td><span class="sw2" style="background:${m.color}"></span></td><td>${m.name.replace(/_/g, ' ')}</td></tr>`).join('');
+    $('scaleNote').textContent = `Floor ${(X * CELL).toFixed(1)} × ${(Z * CELL).toFixed(1)} m · ${(Y * CELL).toFixed(1)} m tall · ${X}×${Y}×${Z} voxels @ ${(CELL * 100).toFixed(0)} cm`;
+    $('hudMeta').textContent = `${X}×${Y}×${Z} voxels · ${(X * CELL).toFixed(0)}×${(Z * CELL).toFixed(0)} m floor`;
+
+    // ---- three.js scene ----
+    const cv = $('gl');
+    const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+    renderer.setPixelRatio(devicePixelRatio);
+    renderer.localClippingEnabled = true;                 // for the "see inside" ceiling cut
+    const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0e14);
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 20000);
+    const cX = X / 2, cY = Y / 2, cZ = Z / 2;
+    camera.position.set(cX * 0.2, Y * 6, cZ * 2.4);
+    const controls = new OrbitControls(camera, cv); controls.target.set(0, 0, 0);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+    const dl = new THREE.DirectionalLight(0xffffff, 0.6); dl.position.set(1, 2, 1); scene.add(dl);
+    function resize() { const r = $('stage').getBoundingClientRect(); renderer.setSize(r.width, r.height, false); camera.aspect = r.width / r.height; camera.updateProjectionMatrix(); }
+    addEventListener('resize', resize); resize();
+
+    // solid voxels (the objects the surrogate sees), instanced + colored by material
+    const solids = [];
+    for (let x = 0; x < X; x++) for (let y = 0; y < Y; y++) for (let z = 0; z < Z; z++) { const c = GRID[idx(x, y, z)]; if (SOLID(c)) solids.push([x, y, z, c]); }
+    const boxG = new THREE.BoxGeometry(0.95, 0.95, 0.95);
+    const solidMat = new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.65 });
+    const solidMesh = new THREE.InstancedMesh(boxG, solidMat, solids.length);
+    const MM = new THREE.Matrix4(), COL = new THREE.Color();
+    solids.forEach(([x, y, z, c], k) => { MM.setPosition(x - cX, y - cY, z - cZ); solidMesh.setMatrixAt(k, MM); const rgb = MATCOL[c] || [.55, .55, .55]; COL.setRGB(rgb[0], rgb[1], rgb[2]); solidMesh.setColorAt(k, COL); });
+    solidMesh.instanceColor.needsUpdate = true; scene.add(solidMesh);
+    // "see inside": a horizontal clip plane — keeps voxels/mesh with world-y ≤ constant, so lowering
+    // the slider slices off the ceiling/upper structure. Applied to both the voxels and the CAD mesh.
+    const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), Y);
+    solidMat.clippingPlanes = [clipPlane];
+    $('cutY').addEventListener('input', () => { clipPlane.constant = -cY + (+$('cutY').value / 100) * (Y + 2); });
+
+    // real CAD mesh (the actual 7th-floor geometry). The SOLVER always uses the voxel GRID — this is
+    // only a nicer view. Fit its bbox to the voxel grid so the mesh, field, and Tx share one frame.
+    let cadRoot = null, modelView = 'cad';
+    function setOpacity(o) { solidMat.opacity = o; if (cadRoot) cadRoot.traverse(x => { if (x.isMesh && x.material) (Array.isArray(x.material) ? x.material : [x.material]).forEach(mm => { mm.transparent = true; mm.opacity = o; }); }); }
+    function applyModelView() { const cad = modelView === 'cad' && !!cadRoot; solidMesh.visible = !cad; if (cadRoot) cadRoot.visible = cad; }
+    $('modelOpacity').addEventListener('input', () => setOpacity((+$('modelOpacity').value) / 100));
+    const draco = new DRACOLoader(); draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+    const gltfLoader = new GLTFLoader(); gltfLoader.setDRACOLoader(draco);
+    gltfLoader.load('../../Data/models/7th_floor_full.glb', (gltf) => {
+      const root = gltf.scene, box = new THREE.Box3().setFromObject(root);
+      const size = box.getSize(new THREE.Vector3()), ctr = box.getCenter(new THREE.Vector3());
+      const sX = X / (size.x || 1), sY = Y / (size.y || 1), sZ = Z / (size.z || 1);
+      root.scale.set(sX, sY, sZ); root.position.set(-ctr.x * sX, -ctr.y * sY, -ctr.z * sZ);
+      root.traverse(o => { if (o.isMesh && o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(mm => { mm.transparent = true; mm.opacity = 0.9; mm.side = THREE.DoubleSide; mm.clippingPlanes = [clipPlane]; mm.needsUpdate = true; }); });
+      cadRoot = root; scene.add(root); setOpacity((+$('modelOpacity').value) / 100); applyModelView();
+    }, undefined, () => { modelView = 'voxel'; document.querySelector('#modelSeg [data-v=voxel]').classList.add('on'); document.querySelector('#modelSeg [data-v=cad]').classList.remove('on'); applyModelView(); });
+
+    // Tx marker
+    let tx = { x: (X / 2) | 0, y: (Y / 2) | 0, z: (Z / 2) | 0 };
+    const txMesh = new THREE.Mesh(new THREE.SphereGeometry(1.6, 16, 16), new THREE.MeshBasicMaterial({ color: 0x2fff6a }));
+    scene.add(txMesh);
+    function snapTx() { if (GRID[idx(tx.x, tx.y, tx.z)] === 0) return; for (let r = 1; r < 40; r++) for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) { const nx = tx.x + dx, nz = tx.z + dz; if (nx >= 0 && nz >= 0 && nx < X && nz < Z && GRID[idx(nx, tx.y, nz)] === 0) { tx.x = nx; tx.z = nz; return; } } }
+    function placeTxMarker() { txMesh.position.set(tx.x - cX, tx.y - cY, tx.z - cZ); $('readout').textContent = `Tx @ (${(tx.x * CELL).toFixed(1)}, ${(tx.y * CELL).toFixed(1)}, ${(tx.z * CELL).toFixed(1)}) m`; }
+    snapTx(); placeTxMarker();
+
+    // click-to-place: raycast the solid voxels, place Tx in air just above the hit (x,z)
+    const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+    let placing = false;
+    $('place').onclick = () => { placing = true; setStatus('click the model to place the Tx…'); };
+    cv.addEventListener('click', ev => {
+      if (!placing) return;
+      const r = cv.getBoundingClientRect();
+      mouse.x = ((ev.clientX - r.left) / r.width) * 2 - 1; mouse.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
+      ray.setFromCamera(mouse, camera);
+      const hit = ray.intersectObject(solidMesh, false)[0];
+      if (!hit) { setStatus('no voxel under the cursor — try again on the model.'); return; }
+      const p = hit.point; tx.x = Math.round(p.x + cX); tx.z = Math.round(p.z + cZ);
+      tx.x = Math.max(1, Math.min(X - 2, tx.x)); tx.z = Math.max(1, Math.min(Z - 2, tx.z));
+      snapTx(); placeTxMarker(); placing = false;
+      setStatus(`Tx at cell (${tx.x}, ${tx.y}, ${tx.z}). Press Generate.`);
+    });
+
+    // ---- segmented controls ----
+    function seg(id, cb) { const el = $(id); el.querySelectorAll('button').forEach(b => b.onclick = () => { el.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); cb(b.dataset.v); }); }
+    let solverSel = 'auto', viewMode = 'heat', cmapName = 'rainbow', rangeHi = 0, rangeLo = -40, fieldStyle = 'cloud';
+    seg('solverSeg', v => { solverSel = v; $('fdtdResGrp').style.display = (v === 'onnx') ? 'none' : 'block'; reflectEngine(); });
+    seg('modelSeg', v => { modelView = v; applyModelView(); });
+    seg('viewSeg', v => { viewMode = v; drawCbar(); if (field) recolorField(viewMode === 'wave' ? phase : null); });
+    seg('cmapSeg', v => { cmapName = v; drawCbar(); if (field) recolorField(viewMode === 'wave' ? phase : null); });
+    seg('fstyleSeg', v => { fieldStyle = v; if (field) buildFieldMesh(); });
+    ['rangeHi', 'rangeLo'].forEach(id => $(id).addEventListener('input', () => { rangeHi = +$('rangeHi').value; rangeLo = +$('rangeLo').value; if (field && isFinite(rangeHi) && isFinite(rangeLo)) buildFieldMesh(); }));
+
+    let onnxReady = false, onnxWhy = 'not loaded', session = null, contract = null;
+    function reflectEngine() {
+      const eff = solverSel === 'auto' ? (onnxReady ? 'ONNX surrogate (whole-floor)' : 'FDTD sub-volume (ONNX pending)') :
+                  solverSel === 'onnx' ? (onnxReady ? 'ONNX surrogate (whole-floor)' : 'ONNX PENDING — train + export fw_unet3d.onnx') : 'sub-volume FDTD (around Tx)';
+      $('engine').textContent = `engine: SIM V3 · ${eff}` + (onnxReady ? '' : `  ·  ${onnxWhy}`);
+    }
+
+    // ---- generate ----
+    let field = null, fieldObj = null, phase = 0;
+    // soft round sprite → the "cloud" (continuous) field render glows instead of showing hard cubes
+    const softSprite = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(255,255,255,0.5)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
+    $('run').onclick = generate;
+    async function generate() {
+      setWarn(''); const fMHz = parseFloat($('band').value);
+      let solver = solverSel; if (solver === 'auto') solver = onnxReady ? 'onnx' : 'fdtd';
+      if (solver === 'onnx' && !onnxReady) { setStatus(`ONNX pending — ${onnxWhy}. Switch to FDTD or train + drop in fw_unet3d.onnx.`, true); return; }
+
+      const half = parseInt($('region').value, 10);
+      const npw = 8.0;
+      const plan = S.planFdtd3d(CELL, fMHz, npw, Math.round(half / CELL), [X, Y, Z]);
+      const sv = S.extractSubvolume(GRID, X, Y, Z, tx, plan.halfCells);
+      const { cells, steps } = S.estimateFdtd3d(sv.dims, plan.up);
+
+      $('run').disabled = true;
+      let estS;
+      try { const mcps = S.calibrateFdtd3dMcps(); estS = S.estimateFdtdSeconds3d(sv.dims, plan.up, mcps);
+        const warnLine = `⏱ TIME TO CALCULATE GRID  ~${S.fmtEta(estS)}   [FDTD sub-volume]\n${(cells / 1e6).toFixed(2)} M cells (${sv.dims.map(d => d * plan.up).join('×')}) × ${steps} steps @ ${mcps.toFixed(0)} Mcell/s`;
+        setWarn(warnLine);
+        if (estS > 6 && !confirm(`${warnLine}\n\nRun the sub-volume FDTD now?`)) { setStatus('cancelled.'); $('run').disabled = false; return; }
+      } catch (e) { setStatus('estimate failed: ' + e.message, true); $('run').disabled = false; return; }
+
+      setStatus('solving (FDTD sub-volume)…'); setBar(0);
+      const t0 = performance.now();
+      let res;
+      try {
+        res = await S.fdtdSolve3d({ grid: sv.sub, X0: sv.dims[0], Y0: sv.dims[1], Z0: sv.dims[2], cell: CELL, fMHz, tx0: sv.txLocal, up: plan.up }, setBar);
+      } catch (e) { setBar(null); setStatus('solve failed: ' + e.message, true); $('run').disabled = false; return; }
+      const secs = (performance.now() - t0) / 1000; setBar(null); $('run').disabled = false;
+
+      const env = S.envelopeDb3d(res.re, res.im, sv.sub);
+      field = { re: res.re, im: res.im, db: env.db, dims: sv.dims, origin: sv.origin, sub: sv.sub, fMHz, txy: sv.txLocal.y };
+      $('hudMeta').textContent = `${sv.dims.join('×')} sub-volume · FDTD · ${fMHz} MHz · ${secs < 1 ? (secs * 1e3).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}`;
+      setStatus(`done — FDTD field in ${secs < 1 ? (secs * 1e3).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}.`);
+      setOpacity(0.3); $('modelOpacity').value = 30;
+      buildFieldMesh(); updateDesc();
+    }
+
+    // ---- field render (cloud = continuous glowing point cloud · voxel = discrete boxes) ----
+    function fieldCells() {
+      const [sx, sy, sz] = field.dims, db = field.db, sub = field.sub, cells = [];
+      for (let x = 0; x < sx; x++) for (let y = 0; y < sy; y++) for (let z = 0; z < sz; z++) { const li = (x * sy + y) * sz + z, c = sub[li]; if ((c === 0 || c === 4) && db[li] > rangeLo) cells.push(li); }
+      return cells;
+    }
+    function buildFieldMesh() {
+      if (fieldObj) { scene.remove(fieldObj); fieldObj.geometry.dispose(); if (fieldObj.userData && fieldObj.userData.tex) fieldObj.userData.tex.dispose(); if (fieldObj.material && fieldObj.material.dispose) fieldObj.material.dispose(); fieldObj = null; }
+      if (!field) return;
+      const [sx, sy, sz] = field.dims, [ox, , oz] = field.origin;
+      if (fieldStyle === 'slice') {                    // smooth horizontal cut-plane at the Tx height (iBwave look)
+        const yS = Math.max(0, Math.min(sy - 1, field.txy));
+        const canvas = document.createElement('canvas'); canvas.width = sz; canvas.height = sx;
+        const tex = new THREE.CanvasTexture(canvas); tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+        fieldObj = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.92, side: THREE.DoubleSide, depthWrite: false }));
+        fieldObj.rotation.x = -Math.PI / 2;
+        fieldObj.position.set(ox + sx / 2 - cX, yS - cY, oz + sz / 2 - cZ);
+        fieldObj.userData = { kind: 'slice', canvas, tex, sx, sy, sz, yS };
+        recolorField(viewMode === 'wave' ? phase : null); scene.add(fieldObj); return;
+      }
+      const cells = fieldCells();
+      const worldOf = li => { const z = li % sz, y = ((li - z) / sz) % sy, x = ((li - z) / sz - y) / sy; return [ox + x - cX, y - cY, oz + z - cZ]; };
+      if (fieldStyle === 'cloud') {
+        const g = new THREE.BufferGeometry(), pos = new Float32Array(cells.length * 3), col = new Float32Array(cells.length * 3);
+        cells.forEach((li, k) => { const w = worldOf(li); pos[k * 3] = w[0]; pos[k * 3 + 1] = w[1]; pos[k * 3 + 2] = w[2]; });
+        g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        fieldObj = new THREE.Points(g, new THREE.PointsMaterial({ size: 3.0, sizeAttenuation: true, vertexColors: true, map: softSprite, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false }));
+      } else {
+        fieldObj = new THREE.InstancedMesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.85 }), cells.length);
+        fieldObj.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cells.length * 3), 3);
+        cells.forEach((li, k) => { const w = worldOf(li); MM.setPosition(w[0], w[1], w[2]); fieldObj.setMatrixAt(k, MM); });
+      }
+      fieldObj.userData = { kind: fieldStyle, cells, sz, sy };
+      recolorField(viewMode === 'wave' ? phase : null); scene.add(fieldObj);
+    }
+    // draw the horizontal field slice at the Tx height into the plane's canvas (bilinear-filtered → smooth)
+    function drawSlice(ph) {
+      const { canvas, tex, sx, sy, sz, yS } = fieldObj.userData, ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(sz, sx), data = img.data, re = field.re, im = field.im, db = field.db;
+      const lo = rangeLo, span = (rangeHi - rangeLo) || 1;
+      let amax = 1e-9; if (viewMode === 'wave' && ph != null) for (let x = 0; x < sx; x++) for (let z = 0; z < sz; z++) { const li = (x * sy + yS) * sz + z, a = Math.hypot(re[li], im[li]); if (a > amax) amax = a; }
+      const c = ph != null ? Math.cos(ph) : 0, s = ph != null ? Math.sin(ph) : 0;
+      for (let x = 0; x < sx; x++) for (let z = 0; z < sz; z++) {
+        const li = (x * sy + yS) * sz + z;
+        const rgb = (viewMode === 'wave' && ph != null) ? S.cmapSigned(cmapName, Math.max(-1, Math.min(1, (re[li] * c - im[li] * s) / amax * 3))) : S.cmap(cmapName, (db[li] - lo) / span);
+        const p = (x * sz + z) * 4; data[p] = rgb[0]; data[p + 1] = rgb[1]; data[p + 2] = rgb[2]; data[p + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0); tex.needsUpdate = true;
+    }
+    // recolor by |U| dB (heat) or Re{U e^{jωt}} (wave); the cloud fades continuously with amplitude
+    function recolorField(ph) {
+      if (!fieldObj || !field) return;
+      if (fieldObj.userData.kind === 'slice') { drawSlice(ph); return; }
+      const cells = fieldObj.userData.cells, db = field.db, re = field.re, im = field.im;
+      const lo = rangeLo, span = (rangeHi - rangeLo) || 1, isCloud = fieldObj.isPoints;
+      let amax = 1e-9; for (const li of cells) { const a = Math.hypot(re[li], im[li]); if (a > amax) amax = a; }
+      const carr = isCloud ? fieldObj.geometry.attributes.color.array : null;
+      const c = ph != null ? Math.cos(ph) : 0, s = ph != null ? Math.sin(ph) : 0;
+      cells.forEach((li, k) => {
+        const rgb = (viewMode === 'wave' && ph != null)
+          ? S.cmapSigned(cmapName, Math.max(-1, Math.min(1, (re[li] * c - im[li] * s) / amax * 3)))
+          : S.cmap(cmapName, (db[li] - lo) / span);
+        if (isCloud) { const amp = Math.min(1, Math.hypot(re[li], im[li]) / amax * 1.7 + 0.04); carr[k * 3] = rgb[0] / 255 * amp; carr[k * 3 + 1] = rgb[1] / 255 * amp; carr[k * 3 + 2] = rgb[2] / 255 * amp; }
+        else { COL.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255); fieldObj.setColorAt(k, COL); }
+      });
+      if (isCloud) fieldObj.geometry.attributes.color.needsUpdate = true; else fieldObj.instanceColor.needsUpdate = true;
+    }
+
+    function drawCbar() {
+      const cb = $('cbarCv'), c = cb.getContext('2d'), wave = viewMode === 'wave';
+      for (let x = 0; x < cb.width; x++) { const t = x / (cb.width - 1); const [r, g, b] = wave ? S.cmapSigned(cmapName, 2 * t - 1) : S.cmap(cmapName, t); c.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`; c.fillRect(x, 0, 1, cb.height); }
+      $('cbLo').textContent = wave ? '− trough' : `${rangeLo} dB`; $('cbHi').textContent = wave ? 'crest +' : `${rangeHi} dB`;
+    }
+    function updateDesc() {
+      $('desc').innerHTML = `<b>What this shows.</b> The 3-D voxelized 7th floor — every wall, floor, ceiling, glass and metal object the surrogate sees, colored by ITU material. Place a Tx and <b>Generate</b> to solve the steady-state complex full-wave field U(x,y,z): the <b>ONNX surrogate</b> tiles the whole floor (fast, once trained), or the <b>FDTD</b> solves a sub-volume around the Tx at λ/8. <b>Heatmap</b> = |U| in dB; <b>Wavefront</b> = the animated Re{U·e<sup>jωt</sup>} snapshot. Whole-floor 3-D FDTD is infeasible in a browser, so FDTD is scoped to the box the surrogate is trained on.`;
+    }
+
+    // ---- render loop ----
+    let waveTick = 0;
+    function loop() { controls.update(); if (viewMode === 'wave' && field) { if ((waveTick++ % 2) === 0) { phase += 0.12; recolorField(phase); } } renderer.render(scene, camera); requestAnimationFrame(loop); }
+    drawCbar(); updateDesc(); requestAnimationFrame(loop);
+
+    // ---- init ONNX (pending until trained) ----
+    (async function init() {
+      try { contract = await S.loadContract3d(CONTRACT_URL); } catch (e) { onnxWhy = 'contract not found (train + export first)'; }
+      if (location.protocol === 'file:') { onnxWhy = 'needs http (file:// blocks model fetch)'; reflectEngine(); setStatus('ready — serve over http; FDTD works now'); return; }
+      if (!window.ort) { onnxWhy = 'onnxruntime-web not loaded'; reflectEngine(); setStatus('ready — FDTD only (ort missing)'); return; }
+      try { const head = await fetch(MODEL, { method: 'HEAD' }); if (!head.ok) throw new Error('not found'); session = await ort.InferenceSession.create(MODEL, { executionProviders: [['webgpu'], ['wasm']].flat() }); onnxReady = true; onnxWhy = 'onnx ready'; }
+      catch (e) { onnxWhy = 'fw_unet3d.onnx not trained yet — run the Colab notebook, export, drop it in SIM V1 3D/web/'; }
+      reflectEngine();
+      setStatus(onnxReady ? 'ready — place a Tx, pick a band, Generate.' : 'ready — FDTD sub-volume solver (ONNX pending training).');
+    })();
+    reflectEngine();
+  </script>
+</body>
+</html>
