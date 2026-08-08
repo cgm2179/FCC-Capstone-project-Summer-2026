@@ -191,10 +191,11 @@ def subvol_field_em(band, tx_m, npw=10.0, region_m=7.0, crossings=2.0, super="au
     else:
         import voxelize_conformal as VC
         man = json.loads(B.MANIFEST.read_text()); ceil_m = float(man["ceiling_height_m"])
-        crop = (tx_m[0] - region_m, tx_m[0] + region_m, 0.0, ceil_m,
-                tx_m[1] - region_m, tx_m[1] + region_m)
+        r = region_m / 2.0                                    # region_m = full extent (matches baked mode)
+        crop = (tx_m[0] - r, tx_m[0] + r, 0.0, ceil_m, tx_m[1] - r, tx_m[1] + r)
         o = VC.bake(band.label, crop_m=crop, cell_m=h, super=super)
         epsr, sigma, mf, cg, sdf = o["epsr_eff"], o["sigma_eff"], o["metal_frac"], o["material_grid"], o["sdf"]
+        h = float(o["cell_m"])                                # bake may have coarsened the cell to fit memory
     tx = tuple(int(s // 2) for s in epsr.shape)
     if epsr[tx] >= 1.05:                                       # snap to nearest air
         air = np.argwhere(epsr < 1.05)
@@ -260,9 +261,12 @@ def generate3d_em(band_label="LTE_B71_617", n_tx=2, boxes_per=20, box=24, npw=10
             bore = AP3.boresight_vec_from_angles(az, tilt)
         else:                                              # ~isotropic source (no directivity mask)
             az = None; tilt = 0.0; kind = "iso"; bore = np.ones(3) / np.sqrt(3.0)
-        cg, epsr, sigma, sdf, normals, U, tx, h = subvol_field_em(
-            band, (tc[0] * cs, tc[1] * cs), npw=npw, region_m=region_m, crossings=crossings,
-            super=super, baked=baked, base_cell=cs, az_deg=az, tilt_deg=tilt, kind=kind)
+        try:
+            cg, epsr, sigma, sdf, normals, U, tx, h = subvol_field_em(
+                band, (tc[0] * cs, tc[1] * cs), npw=npw, region_m=region_m, crossings=crossings,
+                super=super, baked=baked, base_cell=cs, az_deg=az, tilt_deg=tilt, kind=kind)
+        except Exception as e:                             # skip a bad Tx (blown-up solve, OOM, …) — don't kill the run
+            print(f"  [skip] shard {sid:03d}: solve failed ({type(e).__name__}: {e})"); continue
         Dx, Dy, Dz = U.shape
         if min(Dx, Dy, Dz) < box:
             print(f"  [skip] tx {tuple(tc)}: fine {U.shape} < box {box}"); continue

@@ -93,6 +93,8 @@ MIN_STRUCT_VERTS = 20        # connected solids smaller than this = sub-waveleng
 _CLUTTER_CACHE = {}
 
 ADAPTIVE_SUBCELL_M = 0.005   # ~5 mm geometry-sampling floor (the finest useful wave cell, 5.5 GHz λ/10)
+MAX_SUBVOX = 3.0e8           # cap on prod(dims)·super³ — the supersampled bake (rasterize + EDT, esp.
+#                             CuPy's PBA distance-transform) must fit GPU/host RAM (sized for A100-40)
 
 
 def auto_super(cell_m, subcell_m=ADAPTIVE_SUBCELL_M, lo=2, hi=8):
@@ -245,6 +247,13 @@ def bake(band_label="LTE_B71_617", crop_m=None, cell_m=None, super=3, out_dir=No
     else:
         org = np.zeros(3); ext = Vm.max(0)
     dims = np.maximum(np.ceil(ext / cell_m).astype(int), 1)
+    # memory cap: rasterize + distance-transform allocate ~ prod(dims)·super³ int32 (CuPy's PBA EDT
+    # especially) — reduce super, then coarsen the cell, so a large crop degrades gracefully instead of
+    # OOMing. bake returns the actual cell_m/super it used; the caller solves at that resolution.
+    while super > 2 and int(np.prod(dims)) * super ** 3 > MAX_SUBVOX:
+        super -= 1
+    while int(np.prod(dims)) * super ** 3 > MAX_SUBVOX:
+        cell_m *= 1.25; dims = np.maximum(np.ceil(ext / cell_m).astype(int), 1)
     sdims = tuple((dims * super).tolist())
     Vs = (Vm - org) / (cell_m / super)                         # SUBCELL coords
 
@@ -300,6 +309,8 @@ def bake(band_label="LTE_B71_617", crop_m=None, cell_m=None, super=3, out_dir=No
             dims=list(map(int, dims)), keys=keys, crop_m=crop_m,
             min_struct_verts=MIN_STRUCT_VERTS,
             channels="epsr_eff,sigma_eff,metal_frac,sdf,normals(3)"), indent=2))
+    if USE_GPU and _cp is not None:
+        _cp.get_default_memory_pool().free_all_blocks()        # release sub-grid GPU mem before the JAX solve
     return out
 
 
