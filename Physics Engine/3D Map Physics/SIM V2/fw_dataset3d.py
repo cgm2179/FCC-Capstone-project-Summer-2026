@@ -261,9 +261,12 @@ def generate3d_em(band_label="LTE_B71_617", n_tx=2, boxes_per=20, box=24, npw=10
             bore = AP3.boresight_vec_from_angles(az, tilt)
         else:                                              # ~isotropic source (no directivity mask)
             az = None; tilt = 0.0; kind = "iso"; bore = np.ones(3) / np.sqrt(3.0)
-        cg, epsr, sigma, sdf, normals, U, tx, h = subvol_field_em(
-            band, (tc[0] * cs, tc[1] * cs), npw=npw, region_m=region_m, crossings=crossings,
-            super=super, baked=baked, base_cell=cs, az_deg=az, tilt_deg=tilt, kind=kind)
+        try:
+            cg, epsr, sigma, sdf, normals, U, tx, h = subvol_field_em(
+                band, (tc[0] * cs, tc[1] * cs), npw=npw, region_m=region_m, crossings=crossings,
+                super=super, baked=baked, base_cell=cs, az_deg=az, tilt_deg=tilt, kind=kind)
+        except Exception as e:                             # skip a bad Tx (blown-up solve, OOM, …) — don't kill the run
+            print(f"  [skip] shard {sid:03d}: solve failed ({type(e).__name__}: {e})"); continue
         Dx, Dy, Dz = U.shape
         if min(Dx, Dy, Dz) < box:
             print(f"  [skip] tx {tuple(tc)}: fine {U.shape} < box {box}"); continue
