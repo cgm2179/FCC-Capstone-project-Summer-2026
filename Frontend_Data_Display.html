@@ -613,194 +613,58 @@
         <!-- 3D Simulation: construct + place Tx/Rx on the voxel model, pick a
              waveform, run a Static field or Animated wavefront. Engine lives in
              Frontend/simulator/simulation3d.js; assets from SIM3D/web/. -->
+        <!-- 3D Simulation: the SIM V3 3-D Full-Wave Studio (voxel grid + ONNX/FDTD), embedded like
+             the 2-D studio. Indoor = fw_studio3d.html (7th-floor voxel model, three.js); outdoor =
+             fw_studio3d_outdoor.html (placeholder until an outdoor voxel scene exists). landing.js
+             reveals the matching one by environment. Replaces the old simulation3d.js sandbox. -->
         <div id="sim3dPanel" hidden>
-          <p class="sub">Construct a transmitter and receiver, place them on the voxelized 3D
-            model (real mass &amp; collision), pick a waveform, then run a Static field or an
-            Animated wavefront. Geometry-aware wave physics (reflection · refraction ·
-            diffraction · absorption · scattering) is the next milestone.</p>
-          <div class="sim3d-layout">
-            <aside class="sim3d-rail">
-              <!-- Model source (Phase B). Solve on the built-in fixed scene (cached full
-                   physics) OR voxelize an imported model in the browser and solve on that.
-                   An imported model is a new scene, so it runs on the analytic tier — no
-                   cached volume / surrogate (voxelize_browser.js + setRuntimeScene). -->
-              <section class="sim3d-step">
-                <h3><span class="step-n">M</span> Model</h3>
-                <p id="sim3dModelNote" class="sim3d-modenote">Built-in 7th floor (cached full physics). Load your own model to simulate on it — voxelized in-browser, analytic tier (no cache).</p>
-                <label class="sim-btn ghost" style="display:block; text-align:center; cursor:pointer;">Load model to simulate…
-                  <input type="file" id="sim3dModelFile" accept=".glb,.gltf,.obj,.json" style="display:none">
-                </label>
-                <label class="sim3d-field">Sandbox bounds — real-world size (metres)
-                  <span class="sim3d-cell" style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
-                    <input type="number" id="sim3dSizeX" min="0.1" max="20000" step="1" value="80" title="Width — X axis (metres)" style="width:4.2em;"> ×
-                    <input type="number" id="sim3dSizeY" min="0.1" max="20000" step="1" value="30" title="Height — Y axis, up (metres)" style="width:4.2em;"> ×
-                    <input type="number" id="sim3dSizeZ" min="0.1" max="20000" step="1" value="80" title="Depth — Z axis (metres)" style="width:4.2em;"> m
-                  </span>
-                </label>
-                <p class="sim3d-modenote" style="margin-top:4px; font-size:0.82em;">X × Y (height) × Z bounds of the simulation sandbox. The imported model is scaled to fit inside, centred.</p>
-                <button type="button" id="sim3dModelRevert" class="sim-btn ghost" style="display:none;">← Back to built-in scene</button>
-              </section>
-              <!-- Propagation mode (M3). Chooses the scene AND the source model, so it
-                   comes before the transmitter: in O2I there is no Tx to place, the
-                   source is a macro cell 416 m outside the grid. Registry and the
-                   per-mode physics live in SIM V1 3D/modes_3d.py. -->
-              <section class="sim3d-step">
-                <h3><span class="step-n">0</span> Propagation mode</h3>
-                <label class="sim3d-field">Mode
-                  <select id="mode3dSelect">
-                    <option value="vacuum">Vacuum / free space</option>
-                    <option value="indoor" selected>Indoor</option>
-                    <option value="o2i">Indoor + Outdoor (O2I)</option>
-                    <option value="outdoor">Outdoor (city)</option>
-                  </select>
-                </label>
-                <p id="mode3dNote" class="sim3d-modenote"></p>
-              </section>
-              <section class="sim3d-step">
-                <h3><span class="step-n">1</span> Transmitter</h3>
-                <label class="sim3d-field">Antenna type
-                  <span class="sim3d-selrow">
-                    <span id="tx3dSwatch" class="sim3d-swatch"></span>
-                    <select id="tx3dType"></select>
-                  </span>
-                </label>
-                <button type="button" id="tx3dPlace" class="sim-btn ghost">Place on model</button>
-                <ul id="tx3dList" class="sim3d-list"></ul>
-              </section>
-              <section class="sim3d-step">
-                <h3><span class="step-n">2</span> Waveform</h3>
-                <label class="sim3d-field">Coverage type
-                  <select id="cov3dType">
-                    <option value="wifi">WiFi</option>
-                    <option value="cellular">Cellular (donor bands)</option>
-                  </select>
-                </label>
-                <label class="sim3d-field">Band
-                  <select id="wf3dBand"></select>
-                </label>
-                <div class="sim3d-radios">
-                  <label><input type="radio" name="wf3dSolver" value="static" checked> Static solver</label>
-                  <label><input type="radio" name="wf3dSolver" value="timelapse"> Time-lapse</label>
-                </div>
-              </section>
-              <section class="sim3d-step">
-                <h3><span class="step-n">3</span> Receiver</h3>
-                <label class="sim3d-field">Antenna type
-                  <select id="rx3dType"></select>
-                </label>
-                <button type="button" id="rx3dPlace" class="sim-btn ghost">Place on model</button>
-                <label class="sim3d-cbx"><input type="checkbox" id="rx3dInterference"> Interference physics</label>
-                <ul id="rx3dList" class="sim3d-list"></ul>
-              </section>
-              <section class="sim3d-step">
-                <h3><span class="step-n">4</span> Run</h3>
-                <button type="button" id="run3dStatic" class="sim-btn">Static 3D Simulation</button>
-                <button type="button" id="run3dAnim" class="sim-btn ghost">Animated Wave 3D Simulation</button>
-                <div id="anim3dControls" class="sim3d-anim" hidden>
-                  <button type="button" id="anim3dPlay" class="sim-btn ghost">Pause</button>
-                  <input type="range" id="anim3dScrub" min="0" max="1000" value="0">
-                </div>
-              </section>
-              <section class="sim3d-step">
-                <h3><span class="step-n">5</span> Visualize</h3>
-                <label class="sim3d-field">Property
-                  <select id="viz3dMode">
-                    <option value="field">Field distribution</option>
-                    <option value="radiation">Radiation pattern</option>
-                    <option value="interference">Interference &amp; multipath</option>
-                    <option value="coverage">Propagation &amp; coverage</option>
-                    <!-- SIM V3 full-wave: the precomputed 3-D FDTD/surrogate field rendered on
-                         the real CAD, as a |U| heatmap or an animated Re{U·e^{jωt}} wave-mesh.
-                         Static run = heatmap, Animated run = wave-mesh; toggle in the viewport. -->
-                    <option value="fullwave">Full-wave field (SIM V3) — heatmap / wave-mesh</option>
-                    <option value="sweep">Wavefront sweep (eikonal T)</option>
-                    <option value="mechlapse">Mechanism time-lapse</option>
-                    <!-- Per-mechanism views read the m_<mech>_*.bin channels written by
-                         export_pl_volume.py --mechanisms. Path loss and the diagnostics
-                         show absolute dB; reflection/diffraction/scattering show each
-                         mechanism's share of the total power. -->
-                    <optgroup label="RF physics — per mechanism">
-                      <option value="path_loss">Geometric spreading + transmission (S1–S7)</option>
-                      <option value="reflection">Specular reflection / multipath</option>
-                      <option value="diffraction">UTD diffraction (S8)</option>
-                      <option value="scattering">Diffuse scattering</option>
-                    </optgroup>
-                    <optgroup label="RF physics — diagnostics (decomposition)">
-                      <option value="refraction" disabled>Refraction — module stub (not built)</option>
-                      <option value="absorption" disabled>Absorption — module stub (not built)</option>
-                    </optgroup>
-                  </select>
-                </label>
-              </section>
-              <!-- Display controls (Tier 1, WinProp-inspired). These change how the
-                   solved volume is READ, not the physics: a height cut-plane (ProMan's
-                   "prediction plane"), a received-power view with coverage classes
-                   (WRAP's good/marginal/dead), and the fixed dBm scale that makes the
-                   3D field directly comparable to the 2D sim and the scanner data. -->
-              <section class="sim3d-step">
-                <h3><span class="step-n">6</span> Display</h3>
-                <label class="sim3d-field">Prediction plane <span class="sim3d-hint" title="Slice the field at one height so it reads as a clean 2D heatmap, like WinProp's prediction-plane cut. Full volume shows the voxel cloud.">?</span></label>
-                <div class="sim3d-planerow">
-                  <button type="button" id="disp3dPlaneBtn" class="sim-btn ghost active">Plane</button>
-                  <input type="range" id="disp3dHeight" min="0" max="100" value="45">
-                </div>
-                <div class="sim-note" id="disp3dHeightVal">prediction plane</div>
-                <!-- Geometry view: CAD mesh is the default look; voxel boxes stay for physics
-                     / collision only. Smooth heatmap wash = WinProp-style draped coverage. -->
-                <label class="sim3d-cbx"><input type="checkbox" id="disp3dCad" checked> Show CAD model</label>
-                <!-- Fade the CAD/building shell so the field reads through it (Indoor + Outdoor).
-                     Default ≈ the translucent Studio look; slide to 100 % for a solid model. -->
-                <label class="sim3d-field">Model visibility
-                  <span class="sim3d-cell"><input type="range" id="disp3dModelVis" min="0" max="100" value="35"> <span id="disp3dModelVisVal" class="sim3d-cellval">35</span>%</span>
-                </label>
-                <label class="sim3d-cbx"><input type="checkbox" id="disp3dVoxels"> Show voxel boxes</label>
-                <label class="sim3d-cbx"><input type="checkbox" id="disp3dSmooth"> Smooth surface (from voxels)</label>
-                <label class="sim3d-cbx"><input type="checkbox" id="disp3dWash" checked> Smooth heatmap wash</label>
-                <label class="sim3d-cbx"><input type="checkbox" id="disp3dClipGeom"> Cut model at this level</label>
-                <label class="sim3d-field">Cut direction
-                  <select id="disp3dClipAxis">
-                    <option value="y">Horizontal — ground ↔ roof</option>
-                    <option value="x">Vertical — along X</option>
-                    <option value="z">Vertical — along Z</option>
-                  </select>
-                </label>
-                <label class="sim3d-field">Transmit EIRP
-                  <span class="sim3d-cell"><input type="number" id="disp3dEirp" min="-10" max="60" step="1" value="20"> dBm</span>
-                </label>
-                <label class="sim3d-field">Colour scale
-                  <select id="disp3dScale">
-                    <option value="auto">Auto · path loss (dB)</option>
-                    <option value="fixed">Fixed · received power (dBm)</option>
-                  </select>
-                </label>
-                <!-- Colour palette for the field/heatmap (weak → strong): Rainbow (jet) matches
-                     the warehouse-reference look; Viridis is perceptually uniform. -->
-                <label class="sim3d-field">Colour palette
-                  <select id="disp3dPalette">
-                    <option value="rainbow">Rainbow (jet)</option>
-                    <option value="viridis">Viridis</option>
-                  </select>
-                </label>
-                <label class="sim3d-cbx"><input type="checkbox" id="disp3dClasses"> Coverage classes (good / marginal / dead)</label>
-                <label class="sim3d-field">Coverage threshold
-                  <span class="sim3d-cell"><input type="range" id="disp3dThresh" min="-110" max="-60" value="-85" step="1"> <span id="disp3dThreshVal" class="sim3d-cellval">-85</span> dBm</span>
-                </label>
-              </section>
-            </aside>
-            <div class="sim3d-viewport-wrap">
-              <div id="sim3dViewport"></div>
-              <!-- Persistent context strip (WinProp status bar): grid, cell, extent,
-                   tier that drew this, active cut-plane, and the last solve time. -->
-              <div id="sim3dMeta" class="sim3d-metabar" hidden></div>
-              <!-- Point probe (WRAP Spectrum-Viewer style): click any cell to read
-                   PL / RSRP / first-arrival delay + the dominant mechanism there. -->
-              <div id="sim3dProbe" class="sim3d-probe" hidden>
-                <button type="button" class="probe-x" id="sim3dProbeClose" aria-label="Close probe">✕</button>
-                <div class="probe-body" id="sim3dProbeBody"></div>
-              </div>
-              <div id="sim3dStatus" class="sim3d-status">Open this tab in 3D mode to load the simulation scene…</div>
-            </div>
+          <div class="sim-bar" id="simFw3dBar" style="align-items:center; gap:10px; flex-wrap:wrap;">
+            <button type="button" class="sim-btn" id="simFw3dToggle">▶ 3-D Full-Wave (SIM&nbsp;V3 · voxel grid · ONNX / FDTD)</button>
+            <span class="sim-note">The voxelized 7th floor in three.js — every wall/floor/ceiling/object the surrogate sees. Solve the 3-D field with the ONNX surrogate (whole-floor, once trained) or the in-browser <b>sub-volume FDTD</b>.</span>
           </div>
+          <div id="simFw3dWrap" style="display:none; margin:6px 0 16px;">
+            <iframe id="simFw3dFrame" title="SIM V3 Full-Wave 3D"
+                    style="width:100%; height:82vh; border:1px solid #d9e0dc; border-radius:12px; background:#0b0e14;"></iframe>
+          </div>
+          <script>
+            (function () {
+              var b = document.getElementById('simFw3dToggle'),
+                  w = document.getElementById('simFw3dWrap'),
+                  f = document.getElementById('simFw3dFrame');
+              if (!b) return;
+              var LABEL = ' 3-D Full-Wave (SIM V3 \u00b7 voxel grid \u00b7 ONNX / FDTD)';
+              b.addEventListener('click', function () {
+                var open = w.style.display === 'none';
+                if (open && !f.getAttribute('src')) f.setAttribute('src', 'Frontend/simulator/fw_studio3d.html');
+                w.style.display = open ? 'block' : 'none';
+                b.innerHTML = (open ? '\u25bc' : '\u25b6') + LABEL;
+              });
+            })();
+          </script>
+
+          <div class="sim-bar" id="simFw3dBarOut" style="display:none; align-items:center; gap:10px; flex-wrap:wrap;">
+            <button type="button" class="sim-btn" id="simFw3dToggleOut">▶ Outdoor 3-D Full-Wave (SIM&nbsp;V3 · placeholder)</button>
+            <span class="sim-note">Outdoor 3-D voxel model — placeholder until an outdoor voxel scene is generated. Use the 2-D outdoor studio for live outdoor coverage.</span>
+          </div>
+          <div id="simFw3dWrapOut" style="display:none; margin:6px 0 16px;">
+            <iframe id="simFw3dFrameOut" title="SIM V3 Full-Wave 3D Outdoor"
+                    style="width:100%; height:82vh; border:1px solid #d9e0dc; border-radius:12px; background:#0b0e14;"></iframe>
+          </div>
+          <script>
+            (function () {
+              var b = document.getElementById('simFw3dToggleOut'),
+                  w = document.getElementById('simFw3dWrapOut'),
+                  f = document.getElementById('simFw3dFrameOut');
+              if (!b) return;
+              var LABEL = ' Outdoor 3-D Full-Wave (SIM V3 \u00b7 placeholder)';
+              b.addEventListener('click', function () {
+                var open = w.style.display === 'none';
+                if (open && !f.getAttribute('src')) f.setAttribute('src', 'Frontend/simulator/fw_studio3d_outdoor.html');
+                w.style.display = open ? 'block' : 'none';
+                b.innerHTML = (open ? '\u25bc' : '\u25b6') + LABEL;
+              });
+            })();
+          </script>
         </div><!-- /sim3dPanel -->
       </div><!-- /simTab -->
     </section>
@@ -835,10 +699,11 @@
        =================================================================== -->
   <script type="module" src="Frontend/2d-3d/viewer3d.js"></script>
 
-  <!-- 3D Simulation tab: three.js + cannon-es sandbox (construct/place Tx & Rx,
-       waveform, static field + animated wavefront). Lazy-inits when the
-       Simulation tab is opened in 3D mode. -->
-  <script type="module" src="Frontend/simulator/simulation3d.js?v=fullwave-2"></script>
+  <!-- 3D Simulation tab now = the SIM V3 3-D Full-Wave Studio (voxel grid + ONNX/FDTD), embedded as
+       an iframe in #sim3dPanel above (fw_studio3d.html / fw_studio3d_outdoor.html). The old
+       simulation3d.js sandbox is retired. -->
+  <!-- <script type="module" src="Frontend/simulator/simulation3d.js?v=fullwave-2"></script> -->
+
 
   <!-- Additive: "3D engine: Three.js ⇄ Unity (C#)" toggle for the Simulation tab. Overlays the Unity
        WebGL C# engine (from the nested Unity_RF_Simulator/ repo) in an isolated iframe when switched on;

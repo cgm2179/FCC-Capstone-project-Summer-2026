@@ -384,6 +384,16 @@
       if (outToggle) outToggle.innerHTML = '▼ Outdoor Full-Wave (SIM V3 · base-station coverage)';
     }
 
+    // Simulation 3D: same indoor/outdoor swap for the 3-D Full-Wave Studio. Indoor = fw_studio3d
+    // (7th-floor voxel grid); outdoor = fw_studio3d_outdoor (placeholder). Only relevant in 3D mode.
+    const isOutdoor3d = window.appMode.environment === 'outdoor' && dim === '3d';
+    const in3Bar = document.getElementById('simFw3dBar'), in3Wrap = document.getElementById('simFw3dWrap');
+    const out3Bar = document.getElementById('simFw3dBarOut'), out3Wrap = document.getElementById('simFw3dWrapOut');
+    if (in3Bar) in3Bar.style.display = isOutdoor3d ? 'none' : '';
+    if (in3Wrap && isOutdoor3d) in3Wrap.style.display = 'none';
+    if (out3Bar) out3Bar.style.display = isOutdoor3d ? '' : 'none';
+    if (!isOutdoor3d && out3Wrap) out3Wrap.style.display = 'none';
+
     // Map Coverage: match the dimension (viewer3d wires these buttons).
     const btn = document.getElementById(dim === '3d' ? 'mapMode3dBtn' : 'mapMode2dBtn');
     if (btn) btn.click();

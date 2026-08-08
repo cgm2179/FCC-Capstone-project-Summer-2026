@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SIM V3 · Outdoor Full-Wave Studio (3D)</title>
+  <style>
+    :root { --bg:#f4f6f3; --panel:#ffffff; --ink:#1f2a2a; --muted:#5b6662; --accent:#0a7f7a; --line:#d9e0dc; --warn:#b26a00; }
+    * { box-sizing: border-box; }
+    body { margin:0; height:100vh; display:flex; background:var(--bg); color:var(--ink);
+           font:13px/1.5 "Avenir Next","Helvetica Neue",Helvetica,sans-serif; overflow:hidden; }
+    #side { width:310px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:18px; overflow-y:auto; }
+    #side h2 { margin:0 0 2px; font-size:1.15rem; } #side .sub { color:var(--muted); font-size:0.82rem; margin:0 0 16px; }
+    .grp { margin-bottom:13px; } .grp > label { display:block; font-weight:600; margin-bottom:5px; color:var(--muted); font-size:0.84rem; }
+    select, input[type=number] { width:100%; background:#fff; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:7px 10px; font:inherit; }
+    .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+    .seg button { flex:1; background:#fff; color:var(--muted); border:0; padding:7px; font:inherit; }
+    .seg button.on { background:var(--accent); color:#fff; }
+    .btn { width:100%; padding:9px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-weight:600; margin-top:4px; opacity:.5; cursor:not-allowed; }
+    .note { font-size:0.74rem; color:var(--muted); margin:2px 0 0; }
+    #warn { margin-top:10px; font-size:0.8rem; color:var(--warn); }
+    #view { flex:1; display:flex; flex-direction:column; background:#0b0e14; overflow:hidden; }
+    #stage { flex:1; position:relative; display:flex; align-items:center; justify-content:center; min-height:0; }
+    #ph { text-align:center; color:#8aa; max-width:460px; padding:24px; }
+    #ph .big { font-size:1.1rem; color:#cfe; font-weight:600; margin-bottom:8px; }
+    #ph .grid { margin-top:18px; opacity:.35; }
+    #desc { flex:none; padding:9px 16px 11px; border-top:1px solid var(--line); background:var(--panel);
+            font-size:0.78rem; line-height:1.45; color:var(--muted); }
+    #desc b { color:var(--ink); }
+  </style>
+</head>
+<body>
+  <div id="side">
+    <h2>Outdoor Full-Wave Studio · 3D</h2>
+    <p class="sub">SIM V3 · outdoor 3-D voxel city — placeholder. The indoor 3-D studio is live; the outdoor 3-D voxel model isn't built yet.</p>
+
+    <div class="grp"><label>Solver</label>
+      <div class="seg" id="solverSeg">
+        <button class="on" data-v="auto">Auto</button><button data-v="onnx">ONNX</button><button data-v="fdtd">FDTD</button>
+      </div>
+      <div class="note">Same engines as indoor (ONNX surrogate / sub-volume FDTD) — wired up once an outdoor 3-D voxel scene exists.</div>
+    </div>
+    <div class="grp"><label>Band</label>
+      <select id="band"><option>LTE 617 MHz</option><option>NR n77 3700 MHz</option><option>Wi-Fi 5 GHz</option></select></div>
+    <div class="grp"><label>Tx / BS power (dBm)</label><input type="number" value="30" min="0" max="46"></div>
+
+    <button class="btn" id="run" disabled>▶ Generate field</button>
+    <div id="warn">Outdoor 3-D model pending — see the 2-D outdoor studio (base-station coverage over the NoMa OSM city) for the working outdoor path.</div>
+  </div>
+
+  <div id="view">
+    <div id="stage">
+      <div id="ph">
+        <div class="big">Outdoor 3-D voxel model — coming soon</div>
+        <div>This window will render the outdoor city as a 3-D voxel grid (buildings, ground, foliage) the same way the indoor studio renders the 7th floor — with the ONNX surrogate and sub-volume FDTD. It's a blank placeholder until an outdoor 3-D voxel scene is generated.</div>
+        <div class="grid">▦ ▦ ▦ ▦ ▦<br>▦ ▦ ▦ ▦ ▦<br>▦ ▦ ▦ ▦ ▦</div>
+      </div>
+    </div>
+    <div id="desc"><b>Placeholder.</b> The outdoor 3-D full-wave studio mirrors the indoor one but has no voxel model yet. For live outdoor coverage today, use the <b>2-D Outdoor Full-Wave Studio</b> (base-station coverage over the real NoMa OSM city).</div>
+  </div>
+</body>
+</html>
