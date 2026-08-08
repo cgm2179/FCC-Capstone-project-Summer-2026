@@ -93,8 +93,9 @@ MIN_STRUCT_VERTS = 20        # connected solids smaller than this = sub-waveleng
 _CLUTTER_CACHE = {}
 
 ADAPTIVE_SUBCELL_M = 0.005   # ~5 mm geometry-sampling floor (the finest useful wave cell, 5.5 GHz λ/10)
-MAX_SUBVOX = 3.0e8           # cap on prod(dims)·super³ — the supersampled bake (rasterize + EDT, esp.
-#                             CuPy's PBA distance-transform) must fit GPU/host RAM (sized for A100-40)
+MAX_SUBVOX = 1.5e8           # cap on prod(dims)·super³ — the supersampled bake (rasterize + EDT, esp.
+#                             CuPy's PBA distance-transform) must fit alongside JAX on the GPU. ~1.5e8
+#                             keeps the bake EDT ≲ ~5 GB so it coexists with the JAX FDTD solver.
 
 
 def auto_super(cell_m, subcell_m=ADAPTIVE_SUBCELL_M, lo=2, hi=8):
