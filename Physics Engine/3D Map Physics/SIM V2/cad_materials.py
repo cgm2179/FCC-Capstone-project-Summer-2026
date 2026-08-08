@@ -28,7 +28,10 @@ import physics_v2 as PV
 HERE = Path(__file__).resolve().parent
 
 # P.2040 has no carpet; add a thin low-loss floor-covering (εr≈1.2, small σ).
-LOCAL = {"carpet": dict(a=1.2, b=0.0, c=0.002, d=1.0)}
+# `clutter` = homogenized sub-wavelength office clutter (chair wheels, handles, cables…):
+# a bulk lossy medium (σ≈0.03 S/m) per the two-tier rule, not resolved as its real material.
+LOCAL = {"carpet": dict(a=1.2, b=0.0, c=0.002, d=1.0),
+         "clutter": dict(a=1.2, b=0.0, c=0.03, d=0.0)}
 
 # nearest compat class ids (manifest 6-class scheme):
 # 0 air · 1 drywall · 2 concrete/floor · 3 barrier(core/metal) · 4 furniture/wood · 5 glass
