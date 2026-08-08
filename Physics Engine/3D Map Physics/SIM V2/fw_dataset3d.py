@@ -296,6 +296,9 @@ def generate3d_em(band_label="LTE_B71_617", n_tx=2, boxes_per=20, box=24, npw=10
         print(f"  shard {sid:03d} boxes={len(xs)} x{xs[0].shape} "
               f"[{'directional' if directional else 'iso'} {xs[0].shape[0]}-ch]")
     n_done = len(list(out.glob("shard_*.npz")))            # done-marker only after every Tx is on disk
+    if n_done == 0:                                        # every Tx failed → do NOT mark the band done (retry next run)
+        print(f"  [WARN] {band_label}: 0 shards produced (every Tx failed) — not writing the done-marker; will retry")
+        return out
     spec = "fw-unet3d-v4" if antenna else "fw-unet3d-v3"
     chans = INPUT_CHANNELS_V4 if antenna else INPUT_CHANNELS_V3
     (out / "dataset_meta.json").write_text(json.dumps(dict(
