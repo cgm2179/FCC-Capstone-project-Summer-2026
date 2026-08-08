@@ -180,7 +180,7 @@ def train_resumable(data_dir, total_epochs=100, base=48, bs=8, lr=1e-3, seed=0,
     Loss = MSE + `phys_weight`·Helmholtz-residual (the scalar vector-wave equation ∇²E+k²εr·E=0,
     the field reconstructed from the phase-reduced envelope; applied only to isotropic samples, since
     the directional teacher is a masked field). Set phys_weight=0 for pure MSE."""
-    import jax, jax.numpy as jnp, optax, pickle, time
+    import jax, jax.numpy as jnp, optax, pickle, time, datetime
     from jax import lax
     import dataset_3d as D3
     x, y, kbox, hbox, physmask = _load_shards_phys(data_dir)
@@ -257,16 +257,26 @@ def train_resumable(data_dir, total_epochs=100, base=48, bs=8, lr=1e-3, seed=0,
                     open(tmp, "wb"))
         tmp.replace(ckpt)   # atomic: a timeout mid-write can't corrupt the checkpoint
 
+    def _fmt(s):                                          # human "time left"
+        return f"{s:.0f}s" if s < 90 else (f"{s/60:.1f} min" if s < 5400 else f"{s/3600:.2f} h")
+
     xj, yj = jnp.asarray(x), jnp.asarray(y)
     kj, hj, mj = jnp.asarray(kbox), jnp.asarray(hbox), jnp.asarray(physmask)
+    ep_dt = []
     for ep in range(start, total_epochs):
         t0 = time.time(); idx = rng.permutation(n); tmse = tphys = 0.0
         for i in range(0, n, bs):
             b = idx[i:i + bs]
             P, state, mse_b, phys_b = step(P, state, xj[b], yj[b], kj[b], hj[b], mj[b])
             tmse += float(mse_b) * len(b); tphys += float(phys_b) * len(b)
+        dt = time.time() - t0; ep_dt.append(dt)
+        ref = ep_dt[1:] or ep_dt                          # drop epoch-0 (JIT compile) once we can
+        left = total_epochs - ep - 1
+        eta = (sum(ref) / len(ref)) * left
+        finish = (datetime.datetime.now() + datetime.timedelta(seconds=eta)).strftime('%a %H:%M')
         if ep % log_every == 0 or ep == total_epochs - 1:
-            print(f"  ep{ep:3d}/{total_epochs}  mse={tmse/n:.5f}  phys={tphys/n:.5f}  {time.time()-t0:.1f}s")
+            print(f"  ep{ep:3d}/{total_epochs}  mse={tmse/n:.5f}  phys={tphys/n:.5f}  {dt:.1f}s/ep  "
+                  f"·  {left} epochs left  ·  ETA {_fmt(eta)} (≈{finish})")
         if (ep + 1) % ckpt_every == 0 or ep == total_epochs - 1:
             save_ckpt(ep + 1); print(f"    [ckpt] epoch {ep+1} -> {ckpt.name}")
 
