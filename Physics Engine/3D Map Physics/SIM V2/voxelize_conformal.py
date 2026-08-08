@@ -252,7 +252,9 @@ def bake(band_label="LTE_B71_617", crop_m=None, cell_m=None, super=3, out_dir=No
     xp, xndi = _backend()
     Msub = xp.asarray(_rasterize(Vs, F, Fk, sdims, priority))   # to device when CuPy is active
     occ = Msub >= 0
-    solid = xndi.binary_closing(occ, iterations=max(1, super - 1))
+    # brute_force=True: cupyx only implements the brute-force iteration path (scipy gives the identical
+    # result either way), so this is required for iterations>1 on the GPU and harmless on CPU.
+    solid = xndi.binary_closing(occ, iterations=max(1, super - 1), brute_force=True)
     newly = solid & ~occ
     if bool(newly.any()):                                      # fill closed gaps w/ nearest material
         ind = xndi.distance_transform_edt(~occ, return_distances=False, return_indices=True)
