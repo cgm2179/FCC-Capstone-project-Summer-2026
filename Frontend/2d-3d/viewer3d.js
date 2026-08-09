@@ -16,6 +16,10 @@
       // download-then-parse freeze. This is the default; the OBJ iterations stay selectable.
       { name: '7th floor · full detail (fast GLB)',
         url: 'Data/models/7th_floor_full.glb' },
+      // Second full-detail SketchUp export (3ff8432c…), converted the same way (328.8 MB OBJ,
+      // 3.28M tris → 10.8 MB Draco GLB via convert_obj_to_glb.mjs).
+      { name: '7th floor · full detail v2 (GLB)',
+        url: 'Data/models/7th_floor_3ff8432c.glb' },
       { name: 'v2 · First Render (materials, OBJ)',
         url: 'Data/models/Indoor%207th%20floor%20v2%20First%20Render.obj/6afecb6b-b2f0-47e9-8488-d48cd283b15a.obj' },
       { name: 'v2 · Test 2 (OBJ)',
@@ -49,10 +53,18 @@
     let rfMesh = null;            // the textured contour plane (added to scene)
     let rfPoints = null;          // optional measurement-dot cloud
     let floorInfo = null;         // { minX,maxX,minZ,maxZ,topY,height } in world coords
-    // Indoor 3D "sandwiched inside a building" context: an OSM ground plane beneath the
-    // floor + a translucent storey shell above/below, so the 7th-floor model reads as one
-    // floor of a real building rather than floating in space. Toggleable; model stays central.
+    // Indoor 3D real-world context: the georeferenced OSM street map on the ground, the 7th
+    // floor lifted onto a 6-storey building massing that stands on it, and the surveyed base
+    // stations around it — so the model reads as one floor of a real building on the real map
+    // rather than floating in space. showOsmGround / showShell toggle the map and the massing.
     let contextGroup = null, showShell = true, showOsmGround = true;
+    let lastGroundY = 0;          // street level of the current building context (for framing)
+    let lastUpm = 1, lastFloor7Y = 0;         // real-world scale + 7th-floor slab Y (for the slice)
+    let modelOpacity = 1, modelClipH = 4.5;   // model display: opacity (0–1) + slice height (m)
+    // One shared world-space clip plane (normal points down) = the horizontal "slice"; its
+    // constant is the cut height. Assigned once to every model material, so moving the slider
+    // just changes the constant and re-clips. constant 1e9 ⇒ above the model ⇒ nothing clipped.
+    const modelClipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e9);
 
     function setStatus(msg, isError) {
       statusEl.textContent = msg || '';
@@ -141,6 +153,7 @@
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.setSize(w, h);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.localClippingEnabled = true;   // per-material slice clipping (model only)
       container.appendChild(renderer.domElement);
 
       scene = new THREE.Scene();
@@ -352,16 +365,73 @@
       });
     }
 
+    // Model display (Opacity + Slice). WebGPU (this three build) does NOT pick up in-place
+    // changes to material.opacity / transparent / clippingPlanes — only a *fresh* material
+    // rebuilds the render pipeline. So we keep each mesh's pristine base material and re-clone
+    // from it on every change, baking in the opacity and the shared slice clip plane. Same-
+    // config clones reuse the cached shader (just a new uniform), so it stays cheap; throttled
+    // via requestModelDisplay so dragging a slider doesn't churn every frame.
+    function applyModelDisplay(object) {
+      if (!object) return;
+      const clip = modelClipH < 4.5;
+      updateModelClip();
+      object.traverse((o) => {
+        if (!o.isMesh || !o.material) return;
+        if (o.userData.__wfSaved != null) return;          // wireframe owns the material
+        if (!o.userData.__baseMat) o.userData.__baseMat = o.material;   // pristine original(s)
+        const base = o.userData.__baseMat, baseArr = Array.isArray(base) ? base : [base];
+        if (o.userData.__dispMat) {                         // dispose the previous clones
+          (Array.isArray(o.userData.__dispMat) ? o.userData.__dispMat : [o.userData.__dispMat]).forEach((m) => m.dispose());
+        }
+        const fresh = baseArr.map((bm) => {
+          const m = bm.clone();
+          const baseOp = (bm.opacity == null ? 1 : bm.opacity);
+          m.opacity = baseOp * modelOpacity;
+          m.transparent = bm.transparent || modelOpacity < 0.999;
+          m.depthWrite = m.opacity >= 0.999;
+          m.side = THREE.DoubleSide;                        // so a slice shows the interior faces
+          m.clippingPlanes = clip ? [modelClipPlane] : null;
+          m.clipShadows = true;
+          return m;
+        });
+        o.material = Array.isArray(base) ? fresh : fresh[0];
+        o.userData.__dispMat = Array.isArray(base) ? fresh : fresh[0];
+      });
+    }
+
+    // Position the slice plane (metres above the 7th-floor slab) + update the label. At full
+    // height the plane sits above the model so nothing is clipped (constant 1e9).
+    function updateModelClip() {
+      const full = modelClipH >= 4.5;
+      modelClipPlane.constant = full ? 1e9 : (lastFloor7Y + modelClipH * lastUpm);
+      const lbl = document.getElementById('view3dSliceVal');
+      if (lbl) lbl.textContent = full ? 'Slice: off' : `Slice: ${modelClipH.toFixed(1)} m`;
+    }
+
+    // Throttle the rebuild so dragging a slider stays smooth (≤ ~1 rebuild / 90 ms + trailing).
+    let __dispPending = false, __dispLast = 0;
+    function requestModelDisplay() {
+      if (!currentModel) return;
+      const now = performance.now();
+      if (now - __dispLast > 90) { __dispLast = now; applyModelDisplay(currentModel); }
+      else if (!__dispPending) {
+        __dispPending = true;
+        setTimeout(() => { __dispPending = false; __dispLast = performance.now(); applyModelDisplay(currentModel); }, 90);
+      }
+    }
+
     function disposeModel(object) {
       object.traverse((o) => {
         if (o.geometry) o.geometry.dispose();
-        if (o.material) {
-          const mats = Array.isArray(o.material) ? o.material : [o.material];
-          mats.forEach((m) => {
-            for (const k in m) { const v = m[k]; if (v && v.isTexture) v.dispose(); }
-            m.dispose();
-          });
-        }
+        // dispose the rendered material(s) and the pristine base kept for the display controls
+        const all = [];
+        if (o.material) all.push(...(Array.isArray(o.material) ? o.material : [o.material]));
+        if (o.userData && o.userData.__baseMat) all.push(...(Array.isArray(o.userData.__baseMat) ? o.userData.__baseMat : [o.userData.__baseMat]));
+        all.forEach((m) => {
+          if (!m || !m.dispose) return;
+          for (const k in m) { const v = m[k]; if (v && v.isTexture) v.dispose(); }
+          m.dispose();
+        });
       });
     }
 
@@ -420,8 +490,30 @@
       frameObject(object);
       updateFloorInfo(object);
       addBuildingContext(object);
+      frameToBuilding(object);      // re-frame to include the 6-storey drop to the street
+      applyModelDisplay(object);    // opacity + slice clip (needs the scale set above)
       if (rfActive) buildRFContour();
       if (label) nameEl.textContent = label;
+    }
+
+    // After the building context exists, frame the whole 7-storey building (street → 7th-floor
+    // roof) instead of just the thin floor slab, and open up the zoom range so the user can
+    // pull back to the base stations and the outdoor-walk extent on the expanded OSM ground.
+    function frameToBuilding(object) {
+      if (!floorInfo || !camera || !controls) return;
+      const box = new THREE.Box3().setFromObject(object);
+      const cx = (floorInfo.minX + floorInfo.maxX) / 2, cz = (floorInfo.minZ + floorInfo.maxZ) / 2;
+      const w = floorInfo.maxX - floorInfo.minX, d = floorInfo.maxZ - floorInfo.minZ;
+      const cy = (lastGroundY + box.max.y) / 2, h = box.max.y - lastGroundY;
+      const span = Math.max(w, d, h) || 1;
+      const dist = span * 1.5;
+      camera.near = Math.max(0.01, span / 1000);
+      camera.far = span * 400;                       // OSM ground + base stations extend far
+      camera.position.set(cx + dist * 0.85, cy + dist * 0.7, cz + dist * 0.85);
+      camera.updateProjectionMatrix();
+      controls.target.set(cx, cy, cz);
+      controls.maxDistance = span * 60;              // room to reach the walk boundary
+      controls.update();
     }
 
     // Locate the floor in world space so the RF overlay registers to it.
@@ -470,59 +562,232 @@
       contextGroup = null;
     }
 
-    // Give the 7th-floor model a sense of elevation: an OSM ground plane a few storeys
-    // below (street level) + a faint translucent building shell with storey lines above and
-    // below, so the floor reads as "sandwiched" inside a real building. Model stays central.
+    // Set the 7th-floor model in real-world context: it sits on top of 6 storeys of building
+    // (4.5 m each), which stand on the OSM street map (addOsmGround, dropped to street level),
+    // with the surveyed base stations placed around it as boxes at their real building height
+    // topped by a red antenna dot. Heights use model-units-per-metre derived from the
+    // georeference; all horizontal placement goes through px2x/py2z (Pseudo-Mercator), so
+    // everything shares the one rectangular grid. "Building" (showShell) toggles the massing.
     function addBuildingContext(model) {
       clearBuildingContext();
-      if (!scene) return;
+      if (!scene || !floorInfo) return;
       model.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(model);
       if (!isFinite(box.min.y) || box.isEmpty()) return;
-      const size = box.getSize(new THREE.Vector3());
-      const center = box.getCenter(new THREE.Vector3());
-      const floorH = Math.max(size.y, 3);
-      const baseY = box.min.y;
-      const floorsBelow = 6, floorsAbove = 3;   // a 7th floor: ~6 storeys of building below, a few above
       const g = new THREE.Group(); g.name = '__buildingContext';
 
-      if (showOsmGround && window.INDOOR_BASEMAP && window.INDOOR_BASEMAP.source) {
-        const tex = new THREE.TextureLoader().load(window.INDOOR_BASEMAP.source);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        const ground = new THREE.Mesh(
-          new THREE.PlaneGeometry(size.x * 1.7, size.z * 1.7),
-          new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.9, depthWrite: false }));
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.set(center.x, baseY - floorH * floorsBelow - 0.5, center.z);
-        ground.name = '__osmGround';
-        g.add(ground);
-      }
+      // Model units per metre, from the georeference. Horizontal is exact (plan px → model via
+      // floorInfo); height reuses the horizontal average — the SketchUp export is ~uniform
+      // (~57 u/m here, so the ~249-unit-tall model ≈ one 4.3 m storey).
+      const mpp = (window.FLOORPLAN_META || {}).meters_per_px || 0.0679;
+      const fw = floorInfo.maxX - floorInfo.minX, fd = floorInfo.maxZ - floorInfo.minZ;
+      const upmX = fw / (FLOOR_W * mpp), upmZ = fd / (FLOOR_H * mpp), upm = (upmX + upmZ) / 2;
 
-      if (showShell) {
-        const shellH = floorH * (floorsBelow + 1 + floorsAbove);
-        const shellY = baseY - floorH * floorsBelow + shellH * 0.5;
-        const dims = new THREE.Vector3(size.x * 1.06 + 1, shellH, size.z * 1.06 + 1);
-        const shell = new THREE.Mesh(
-          new THREE.BoxGeometry(dims.x, dims.y, dims.z),
-          new THREE.MeshStandardMaterial({ color: 0x9fb3c8, transparent: true, opacity: 0.05,
-            side: THREE.BackSide, depthWrite: false }));
-        shell.position.set(center.x, shellY, center.z);
-        g.add(shell);
+      // 7th floor on top of 6 storeys standing on the street.
+      const FLOOR_M = 4.5, FLOORS_UNDER = 6;
+      const floor7Y = box.min.y;                              // 7th-floor slab (model base)
+      const groundY = floor7Y - FLOORS_UNDER * FLOOR_M * upm; // street / OSM level
+      lastGroundY = groundY; lastUpm = upm; lastFloor7Y = floor7Y;
+      const cx = (floorInfo.minX + floorInfo.maxX) / 2, cz = (floorInfo.minZ + floorInfo.maxZ) / 2;
+
+      if (showOsmGround) addOsmGround(g, groundY);
+
+      if (showShell) {                                        // the 6 storeys under the 7th floor
+        const h = floor7Y - groundY;
+        const massing = new THREE.Mesh(
+          new THREE.BoxGeometry(fw, h, fd),
+          new THREE.MeshStandardMaterial({ color: 0xaeb9c4, transparent: true, opacity: 0.28,
+            roughness: 0.92, depthWrite: false }));
+        massing.position.set(cx, (groundY + floor7Y) / 2, cz);
+        g.add(massing);
         const edges = new THREE.LineSegments(
-          new THREE.EdgesGeometry(new THREE.BoxGeometry(dims.x, dims.y, dims.z)),
-          new THREE.LineBasicMaterial({ color: 0x6b8299, transparent: true, opacity: 0.3 }));
-        edges.position.copy(shell.position); g.add(edges);
-        // faint storey slabs so the stack of floors reads
-        for (let f = -floorsBelow; f <= floorsAbove; f++) {
-          const slab = new THREE.GridHelper(Math.max(dims.x, dims.z), 1, 0x6b8299, 0x6b8299);
-          slab.material.transparent = true; slab.material.opacity = f === 0 ? 0.0 : 0.14;
-          slab.position.set(center.x, baseY + f * floorH, center.z);
-          g.add(slab);
+          new THREE.EdgesGeometry(new THREE.BoxGeometry(fw, h, fd)),
+          new THREE.LineBasicMaterial({ color: 0x6b8299, transparent: true, opacity: 0.35 }));
+        edges.position.copy(massing.position); g.add(edges);
+        for (let fl = 1; fl < FLOORS_UNDER; fl++) {           // faint storey outlines
+          const line = new THREE.LineSegments(
+            new THREE.EdgesGeometry(new THREE.BoxGeometry(fw, 0.0001, fd)),
+            new THREE.LineBasicMaterial({ color: 0x6b8299, transparent: true, opacity: 0.16 }));
+          line.position.set(cx, groundY + fl * FLOOR_M * upm, cz); g.add(line);
         }
       }
 
+      if (showOsmGround) addBaseStations(g, groundY, upm, upmX, upmZ);
+
       scene.add(g);
       contextGroup = g;
+    }
+
+    // OSM basemap ground on the SAME plane as the 7th-floor model box, georeferenced by the
+    // floor-plan GCP affine (EPSG:3857 / Pseudo-Mercator) — so the box sits on the real map
+    // and each side lines up with its street (L St NE etc.). Live OSM tiles are warped into
+    // the plan's pixel frame: the whole px→mercator→tile-pixel chain is affine, so a single
+    // ctx.setTransform per tile bakes in the ~-7.33° map rotation (same idea as the committed
+    // 2D static raster, but wider and live). Axis-aligned to the model like the RF overlay
+    // (px2x/py2z), so no plane yaw is needed. Falls back to the embedded INDOOR_BASEMAP
+    // footprint raster if the affine is missing or the tiles can't load (offline). Other
+    // buildings / elevation are intentionally ignored — this is just a ground reference.
+    function addOsmGround(g, groundY) {
+      if (!floorInfo) return;
+      const yGround = (groundY != null) ? groundY : floorInfo.topY + 0.05;   // street level
+      const mpp = (window.FLOORPLAN_META || {}).meters_per_px || 0.0679;
+
+      // Drape a texture over the plan-px rectangle [pxMin,pxMax]×[pyMin,pyMax] on the floor.
+      const placePlane = (tex, pxMin, pxMax, pyMin, pyMax) => {
+        if (g.parent !== scene) { if (tex && tex.dispose) tex.dispose(); return; }
+        const old = g.getObjectByName('__osmGround');
+        if (old) { g.remove(old); old.geometry.dispose(); if (old.material.map) old.material.map.dispose(); old.material.dispose(); }
+        const w = px2x(pxMax) - px2x(pxMin), d = py2z(pyMax) - py2z(pyMin);
+        const mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(w, d),
+          new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.96, depthWrite: false }));
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set((px2x(pxMin) + px2x(pxMax)) / 2, yGround, (py2z(pyMin) + py2z(pyMax)) / 2);
+        mesh.renderOrder = 1;
+        mesh.name = '__osmGround';
+        g.add(mesh);
+      };
+
+      const useEmbedded = () => {
+        if (!(window.INDOOR_BASEMAP && window.INDOOR_BASEMAP.source)) return;
+        const tex = new THREE.TextureLoader().load(window.INDOOR_BASEMAP.source);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        placePlane(tex, 0, FLOOR_W, 0, FLOOR_H);             // raster is exactly the plan frame
+      };
+
+      const A = (window.FLOORPLAN_META || {}).affine_px_to_mercator;
+      if (!A) { useEmbedded(); return; }
+
+      // Extent (plan px): the plan frame ∪ the whole outdoor walk ∪ every base station.
+      const { pxMin, pxMax, pyMin, pyMax } = osmGroundExtent();
+      const merc = (px, py) => [A[0][0]*px + A[0][1]*py + A[0][2], A[1][0]*px + A[1][1]*py + A[1][2]];
+      const cs = [merc(pxMin, pyMin), merc(pxMax, pyMin), merc(pxMax, pyMax), merc(pxMin, pyMax)];
+      const mxMin = Math.min(...cs.map(p => p[0])), mxMax = Math.max(...cs.map(p => p[0]));
+      const myMin = Math.min(...cs.map(p => p[1])), myMax = Math.max(...cs.map(p => p[1]));
+
+      const R = 20037508.342789244, worldPx = (z) => 256 * Math.pow(2, z);
+      const gW = (z) => (mxMax - mxMin) / (2 * R) * worldPx(z);
+      const gH = (z) => (myMax - myMin) / (2 * R) * worldPx(z);
+      // Highest zoom that keeps the mosaic sane (≤ ~2400 px a side and ≤ 63 tiles) — as the
+      // extent grows to the walk boundary this steps the zoom out automatically.
+      let z = 19;
+      while (z > 12 && (gW(z) > 2400 || gH(z) > 2400 ||
+                        (Math.ceil(gW(z) / 256) + 1) * (Math.ceil(gH(z) / 256) + 1) > 63)) z--;
+      const WP = worldPx(z), TM = 2 * R / WP;                // mercator metres / tile pixel
+      const merc2gx = (mx) => (mx + R) / (2 * R) * WP;
+      const merc2gy = (my) => (R - my) / (2 * R) * WP;
+      const nTiles = Math.pow(2, z);
+      const tx0 = Math.floor(merc2gx(mxMin) / 256), tx1 = Math.floor(merc2gx(mxMax) / 256);
+      const ty0 = Math.floor(merc2gy(myMax) / 256), ty1 = Math.floor(merc2gy(myMin) / 256);
+
+      // Output canvas = the extent rectangle (aspect-preserving); wider extent → bigger canvas.
+      const CW = Math.min(4096, Math.max(2048, Math.round((pxMax - pxMin) * mpp / 0.4)));
+      const CH = Math.max(1, Math.round(CW * (pyMax - pyMin) / (pxMax - pxMin)));
+      const canvas = document.createElement('canvas'); canvas.width = CW; canvas.height = CH;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#e9edf0'; ctx.fillRect(0, 0, CW, CH);
+
+      // merc → canvas-pixel affine M (via the inverse of the px→merc 2×2, then plan→canvas).
+      const a = A[0][0], b = A[0][1], cc = A[1][0], dd = A[1][1], e = A[0][2], f = A[1][2];
+      const det = a * dd - b * cc || 1e-9;
+      const ia = dd / det, ib = -b / det, ic = -cc / det, idd = a / det;
+      const sX = CW / (pxMax - pxMin), sY = CH / (pyMax - pyMin);
+      const M = {
+        a: sX * ia, c: sX * ib, e: sX * (-ia * e - ib * f - pxMin),
+        b: sY * ic, d: sY * idd, f: sY * (-ic * e - idd * f - pyMin)
+      };
+
+      // Build the tile job list, then fetch PROGRESSIVELY and THROTTLED. OSM's tile server
+      // rate-limits big bursts (fetching a whole ~50-tile mosaic at once 429s a block of them
+      // and leaves the ground sliced), so cap concurrency and retry each tile a couple of
+      // times. The plane is placed on the first tile that lands and refreshed as the rest
+      // arrive, so the map fills in to a full rectangle instead of blocking on the full set.
+      const jobs = [];
+      for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) {
+        if (ty < 0 || ty >= nTiles) continue;
+        jobs.push({ nx: ((tx % nTiles) + nTiles) % nTiles, ty,
+                    mx0: tx * 256 * TM - R, my0: R - ty * 256 * TM });
+      }
+      let tex = null, any = false, remaining = jobs.length, idx = 0, active = 0, done = false;
+      const subd = ['a', 'b', 'c'], MAX_ACTIVE = 5;
+      const finish = () => { if (done) return; done = true; if (!any) useEmbedded(); };
+      const showProgress = () => {
+        if (!tex) {
+          tex = new THREE.CanvasTexture(canvas);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+          placePlane(tex, pxMin, pxMax, pyMin, pyMax);
+        } else tex.needsUpdate = true;
+      };
+      const drawTile = (img, j) => {   // tile-image (u,v) → canvas affine = M ∘ (tile-px → merc)
+        ctx.setTransform(M.a * TM, M.b * TM, -M.c * TM, -M.d * TM,
+                         M.a * j.mx0 + M.c * j.my0 + M.e, M.b * j.mx0 + M.d * j.my0 + M.f);
+        ctx.drawImage(img, -0.5, -0.5, 257, 257);            // slight bleed hides seams
+      };
+      const startJob = (j, attempt) => {
+        const img = new Image(); img.crossOrigin = 'anonymous';
+        img.onload = () => { any = true; drawTile(img, j); showProgress(); active--; if (--remaining === 0) finish(); pump(); };
+        img.onerror = () => {
+          if (attempt < 2) { setTimeout(() => startJob(j, attempt + 1), 350 + 250 * attempt); return; }
+          active--; if (--remaining === 0) finish(); pump();
+        };
+        img.src = `https://${subd[(j.nx + j.ty) % 3]}.tile.openstreetmap.org/${z}/${j.nx}/${j.ty}.png`;
+      };
+      const pump = () => { while (active < MAX_ACTIVE && idx < jobs.length) { active++; startJob(jobs[idx++], 0); } };
+      if (jobs.length === 0) finish(); else pump();
+    }
+
+    // Rectangle (plan px) the OSM ground should cover: the floor plan ∪ the whole outdoor
+    // walk ∪ every base station, so the wider street grid and the surveyed cells share one
+    // georeferenced plane. Memoized — depends only on the static datasets.
+    let _osmExtent = null;
+    function osmGroundExtent() {
+      if (_osmExtent) return _osmExtent;
+      let pxMin = 0, pxMax = FLOOR_W, pyMin = 0, pyMax = FLOOR_H;
+      const grow = (px, py) => {
+        if (!Number.isFinite(px) || !Number.isFinite(py)) return;
+        if (px < pxMin) pxMin = px; if (px > pxMax) pxMax = px;
+        if (py < pyMin) pyMin = py; if (py > pyMax) pyMax = py;
+      };
+      if (georef.available()) {
+        const W = window.OUTDOOR_WALK;
+        if (W && Array.isArray(W.pts)) for (const r of W.pts) { const p = georef.lonlatToPx(r[0], r[1]); grow(p.px, p.py); }
+        for (const b of (window.BASE_STATIONS || [])) if (Number.isFinite(b.lat)) { const p = georef.lonlatToPx(b.lon, b.lat); grow(p.px, p.py); }
+      }
+      const mX = (pxMax - pxMin) * 0.05, mY = (pyMax - pyMin) * 0.05;
+      _osmExtent = { pxMin: pxMin - mX, pxMax: pxMax + mX, pyMin: pyMin - mY, pyMax: pyMax + mY };
+      return _osmExtent;
+    }
+
+    // The surveyed base stations, each a box at its real building height (building_height_m)
+    // topped by a red antenna dot — the 3D read of the red pins on the 2D Leaflet map. Placed
+    // by lon/lat → px (georef) → px2x/py2z, i.e. the same Pseudo-Mercator grid as the OSM
+    // ground, so a station lands on its real rooftop, standing on the shared street level.
+    function addBaseStations(g, groundY, upm, upmX, upmZ) {
+      const list = window.BASE_STATIONS || [];
+      if (!list.length || !georef.available()) return;
+      const FP_M = 16;                                        // ~16 m footprint per site
+      for (const b of list) {
+        if (!Number.isFinite(b.lat) || !Number.isFinite(b.lon)) continue;
+        const p = georef.lonlatToPx(b.lon, b.lat);
+        const x = px2x(p.px), z = py2z(p.py);
+        const live = b.status === 'live';
+        const hU = Math.max((Number.isFinite(b.building_height_m) ? b.building_height_m : 20) * upm, 1);
+        const bldg = new THREE.Mesh(
+          new THREE.BoxGeometry(FP_M * upmX, hU, FP_M * upmZ),
+          new THREE.MeshStandardMaterial({ color: live ? 0x8f9ba8 : 0xbfb4ab,
+            transparent: true, opacity: 0.55, roughness: 0.9 }));
+        bldg.position.set(x, groundY + hU / 2, z);
+        bldg.name = '__baseStation';
+        g.add(bldg);
+        const r = Math.max(4.5 * upm, 1.5);
+        const dot = new THREE.Mesh(
+          new THREE.SphereGeometry(r, 20, 16),
+          new THREE.MeshStandardMaterial({ color: live ? 0xc0392b : 0x7f8c8d, roughness: 0.5 }));
+        dot.position.set(x, groundY + hU + r, z);
+        dot.name = '__baseStation';
+        g.add(dot);
+      }
     }
 
     const MODEL_EXTS = ['dae', 'obj', 'glb', 'gltf', 'fbx', '3ds', 'stl', 'kmz'];
@@ -720,6 +985,17 @@
     const osmGroundCbx = document.getElementById('view3dOsmGround');
     if (shellCbx) shellCbx.addEventListener('change', () => { showShell = shellCbx.checked; if (currentModel) addBuildingContext(currentModel); });
     if (osmGroundCbx) osmGroundCbx.addEventListener('change', () => { showOsmGround = osmGroundCbx.checked; if (currentModel) addBuildingContext(currentModel); });
+    const opacityEl = document.getElementById('view3dOpacity');
+    if (opacityEl) opacityEl.addEventListener('input', () => {
+      modelOpacity = Number(opacityEl.value) / 100;
+      requestModelDisplay();                     // rebuild materials (WebGPU won't mutate live)
+    });
+    const sliceEl = document.getElementById('view3dSlice');
+    if (sliceEl) sliceEl.addEventListener('input', () => {
+      modelClipH = Number(sliceEl.value) / 10;   // slider is decimetres (0–45 → 0–4.5 m)
+      updateModelClip();                         // live label + plane position
+      requestModelDisplay();                     // rebuild so the clip actually applies
+    });
     wireBtn.addEventListener('click', () => {
       wireframe = !wireframe;
       wireBtn.classList.toggle('active', wireframe);
