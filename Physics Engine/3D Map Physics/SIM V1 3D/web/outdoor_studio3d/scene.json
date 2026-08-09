@@ -431,5 +431,15 @@
     "order": "x-y-z"
   },
   "n_buildings_mesh": 1055,
-  "notes": "Browser studio grid is 2 m (Outdoor 2-D parity). fdtd_foundation records the massive indoor-scale / \u03bb/8 cell budgets for the later full-wave scene. Transmitters are known base stations from sites_registry.json (BS1 TV + BS3 Starry excluded from live Tx)."
+  "notes": "Browser studio grid is 2 m (Outdoor 2-D parity). fdtd_foundation records the massive indoor-scale / \u03bb/8 cell budgets for the later full-wave scene. Transmitters are known base stations from sites_registry.json (BS1 TV + BS3 Starry excluded from live Tx).",
+  "cad": {
+    "obj": "../../../../Data/models/NoMa_DC/Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.obj",
+    "mtl": "../../../../Data/models/NoMa_DC/Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.mtl",
+    "name": "Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D",
+    "cube_anchor_m": [
+      8572395.0,
+      4707865.5
+    ],
+    "note": "Blender OSM export \u2014 buildings/streets/foliage polyhedra; Cube is EPSG:3857 marker"
+  }
 }
