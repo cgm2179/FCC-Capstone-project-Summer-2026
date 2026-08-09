@@ -104,20 +104,240 @@ export function envelopeDb3d(re, im, grid) {
 }
 
 // ---------------------------------------------------------------- ONNX (3-D, tiled)
-// Ready for fw_unet3d.onnx once trained. Contract mirrors fw_unet2d.json but 3-D (box³).
+// fw_unet3d.onnx — 18-ch V4 input (6 material one-hot + tx-blob + freq + log-dist + εr + σ
+// + SDF + 3 normals + antenna |Jx|,|Jy|,|Jz|) → 2-ch phase-reduced complex field. Whole floor
+// is tiled in 24³ boxes (X,Z multiples of 8; Y is the thin, un-pooled axis) and stitched.
 export async function loadContract3d(url) {
   const j = await (await fetch(url, { cache: 'no-store' })).json();
   const inp = j.input || {}, out = j.output || {};
   return {
     sigma: inp.tx_blob_sigma_cells || 2.0, logdiv: inp.logdist_divisor || 3.0,
-    flo: inp.freq_log_lo_mhz || 600, fhi: inp.freq_log_hi_mhz || 6200,
-    box: j.box_train || 24, sizeMultiple: inp.size_multiple || 8,
-    inChannels: (j.in_channels && j.in_channels.length) || 18,
-    trainedMhz: j.trained_mhz || j.bands_mhz || [], reconstruct: out.reconstruct,
+    epsrNorm: inp.epsr_norm || 6.0, sigmaLog: inp.sigma_log || 7.0, sdfNorm: inp.sdf_norm || 0.5,
+    flo: inp.freq_log_lo_mhz || 600, fhi: inp.freq_log_hi_mhz || 6000,
+    box: j.box_train || 24, stride: j.stride || 18, sizeMultiple: inp.size_multiple || 8,
+    inChannels: j.in_channels || (inp.in_channels || 18),
+    bands: j.bands || {}, reconstruct: out.reconstruct,
   };
 }
-// (Full-volume 24³ tiled predict — implemented when the model + its exact channel featurization
-// land from the Colab export. Kept as a clear stub so the ONNX toggle wires up now.)
-export async function onnxTiledPredict3d() {
-  throw new Error('fw_unet3d.onnx not available yet — train it in Colab, export, and drop it in SIM V1 3D/web/');
+
+// per-band ff + per-class (εr,σ). Falls back to a log-freq interpolation if the band is absent.
+function bandParams(contract, fMHz) {
+  const key = String(Math.round(fMHz));
+  if (contract.bands[key]) return contract.bands[key];
+  const lo = Math.log10(contract.flo), hi = Math.log10(contract.fhi);
+  const ff = Math.max(0, Math.min(1, (Math.log10(fMHz) - lo) / (hi - lo)));
+  const any = Object.values(contract.bands)[0];
+  return { ff, class_eps: (any && any.class_eps) || [[1, 0], [2.7, .05], [5.2, .3], [1, 1e7], [2, .02], [6.3, .05]] };
+}
+
+// ---- Felzenszwalb & Huttenlocher separable squared-EDT (distance to nearest seed, in cells²) ----
+function edt1d(f, n, d, v, z) {              // 1-D lower-envelope of parabolas; f in→out (len n)
+  let k = 0; v[0] = 0; z[0] = -Infinity; z[1] = Infinity;
+  for (let q = 1; q < n; q++) {
+    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+    k++; v[k] = q; z[k] = s; z[k + 1] = Infinity;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) { while (z[k + 1] < q) k++; const dx = q - v[k]; d[q] = dx * dx + f[v[k]]; }
+  for (let q = 0; q < n; q++) f[q] = d[q];
+}
+// sq Euclidean distance to nearest cell where seed(c)==true, over the (X,Y,Z) volume
+function sqEDT(grid, X, Y, Z, seed) {
+  const INF = 1e12, N = X * Y * Z, D = new Float64Array(N);
+  const id = (x, y, z) => (x * Y + y) * Z + z;
+  for (let i = 0; i < N; i++) D[i] = seed(grid[i]) ? 0 : INF;
+  const mx = Math.max(X, Y, Z);
+  const line = new Float64Array(mx), dd = new Float64Array(mx), v = new Int32Array(mx), z = new Float64Array(mx + 1);
+  for (let y = 0; y < Y; y++) for (let z0 = 0; z0 < Z; z0++) {            // along X
+    for (let x = 0; x < X; x++) line[x] = D[id(x, y, z0)];
+    edt1d(line, X, dd, v, z);
+    for (let x = 0; x < X; x++) D[id(x, y, z0)] = line[x];
+  }
+  for (let x = 0; x < X; x++) for (let z0 = 0; z0 < Z; z0++) {            // along Y
+    for (let y = 0; y < Y; y++) line[y] = D[id(x, y, z0)];
+    edt1d(line, Y, dd, v, z);
+    for (let y = 0; y < Y; y++) D[id(x, y, z0)] = line[y];
+  }
+  for (let x = 0; x < X; x++) for (let y = 0; y < Y; y++) {              // along Z
+    for (let z0 = 0; z0 < Z; z0++) line[z0] = D[id(x, y, z0)];
+    edt1d(line, Z, dd, v, z);
+    for (let z0 = 0; z0 < Z; z0++) D[id(x, y, z0)] = line[z0];
+  }
+  return D;
+}
+// signed distance (metres, +air/−solid) + unit air-ward normals — approximates the conformal
+// SDF/normal channels from the binary class grid. Cached per grid (band-independent).
+const _sdfCache = new WeakMap();
+function sdfNormals(grid, X, Y, Z, cell) {
+  const hit = _sdfCache.get(grid); if (hit) return hit;
+  const dSolid = sqEDT(grid, X, Y, Z, c => c !== 0);   // in air: dist to nearest solid
+  const dAir = sqEDT(grid, X, Y, Z, c => c === 0);      // in solid: dist to nearest air
+  const N = X * Y * Z, sdf = new Float32Array(N);
+  for (let i = 0; i < N; i++) sdf[i] = (grid[i] === 0 ? Math.sqrt(dSolid[i]) : -Math.sqrt(dAir[i])) * cell;
+  const nx = new Float32Array(N), ny = new Float32Array(N), nz = new Float32Array(N);
+  const id = (x, y, z) => (x * Y + y) * Z + z;
+  for (let x = 1; x < X - 1; x++) for (let y = 1; y < Y - 1; y++) for (let z = 1; z < Z - 1; z++) {
+    const i = id(x, y, z);
+    let gx = sdf[id(x + 1, y, z)] - sdf[id(x - 1, y, z)];
+    let gy = sdf[id(x, y + 1, z)] - sdf[id(x, y - 1, z)];
+    let gz = sdf[id(x, y, z + 1)] - sdf[id(x, y, z - 1)];
+    const m = Math.hypot(gx, gy, gz);
+    if (m > 1e-6) { nx[i] = gx / m; ny[i] = gy / m; nz[i] = gz / m; }
+  }
+  const out = { sdf, nx, ny, nz }; _sdfCache.set(grid, out); return out;
+}
+
+function axStarts(D, box, stride) {
+  const s = []; for (let x = 0; x < Math.max(1, D - box + 1); x += stride) s.push(x);
+  const last = Math.max(0, D - box); if (s[s.length - 1] !== last) s.push(last); return s;
+}
+
+// Whole-floor (or near-region) complex U via the trained net, overlap-tiled.
+// `opts.regionCells` restricts tiling to an XZ box of that half-width around the Tx (the near
+// region where the sub-volume-trained net is valid) — the rest of `wsum` stays 0.
+export async function onnxTiledPredict3d(session, grid, dims, cell, fMHz, tx, contract, onProg, opts = {}) {
+  const [X, Y, Z] = dims, N = X * Y * Z, id = (x, y, z) => (x * Y + y) * Z + z;
+  const { ff, class_eps } = bandParams(contract, fMHz);
+  const sig2 = 2.0 * contract.sigma * contract.sigma, INV3 = 1 / Math.sqrt(3.0);
+  const k = 2 * Math.PI / wavelength(fMHz);
+  const { sdf, nx, ny, nz } = sdfNormals(grid, X, Y, Z, cell);
+  const box = contract.box, stride = contract.stride;
+  let xs = axStarts(X, box, stride); const ys = axStarts(Y, box, stride); let zs = axStarts(Z, box, stride);
+  if (opts.regionCells != null) {                            // near-region only (hybrid): keep tiles overlapping tx±Rc
+    const Rc = opts.regionCells, bxx = Math.min(box, X), bzz = Math.min(box, Z);
+    xs = xs.filter(x0 => x0 <= tx.x + Rc && x0 + bxx >= tx.x - Rc);
+    zs = zs.filter(z0 => z0 <= tx.z + Rc && z0 + bzz >= tx.z - Rc);
+  }
+  const nTiles = xs.length * ys.length * zs.length;
+  const inName = session.inputNames[0], outName = session.outputNames[0];
+  const accRe = new Float32Array(N), accIm = new Float32Array(N), wsum = new Float32Array(N);
+  let done = 0;
+  for (const x0 of xs) for (const y0 of ys) for (const z0 of zs) {
+    const bx = Math.min(box, X), by = Math.min(box, Y), bz = Math.min(box, Z), nb = bx * by * bz;
+    const buf = new Float32Array(18 * nb);
+    for (let i = 0; i < bx; i++) for (let j = 0; j < by; j++) for (let kk = 0; kk < bz; kk++) {
+      const gx = x0 + i, gy = y0 + j, gz = z0 + kk, gi = id(gx, gy, gz);
+      const off = (i * by + j) * bz + kk, C = c => c * nb + off;
+      const cls = grid[gi]; if (cls < 6) buf[C(cls)] = 1;                       // 0..5 one-hot
+      const dx = gx - tx.x, dy = gy - tx.y, dz = gz - tx.z, r2 = dx * dx + dy * dy + dz * dz;
+      const blob = Math.exp(-r2 / sig2), dm = Math.sqrt(r2) * cell;
+      const ce = class_eps[cls] || [1, 0];
+      buf[C(6)] = blob;                                                          // tx blob
+      buf[C(7)] = ff;                                                            // freq feature
+      buf[C(8)] = Math.log10(Math.max(dm, 1.0)) / contract.logdiv;              // log distance
+      buf[C(9)] = Math.max(0, Math.min(1.5, (ce[0] - 1.0) / contract.epsrNorm)); // εr eff
+      buf[C(10)] = Math.max(0, Math.min(1.5, Math.log10(1.0 + Math.max(0, ce[1])) / contract.sigmaLog)); // σ eff
+      buf[C(11)] = Math.max(-1, Math.min(1, sdf[gi] / contract.sdfNorm));       // SDF
+      buf[C(12)] = nx[gi]; buf[C(13)] = ny[gi]; buf[C(14)] = nz[gi];            // normals
+      buf[C(15)] = INV3 * blob; buf[C(16)] = INV3 * blob; buf[C(17)] = INV3 * blob; // omni |J|
+    }
+    const y = await session.run({ [inName]: new ort.Tensor('float32', buf, [1, 18, bx, by, bz]) });
+    const pr = y[outName].data, np = bx * by * bz;
+    for (let i = 0; i < bx; i++) for (let j = 0; j < by; j++) for (let kk = 0; kk < bz; kk++) {
+      const gi = id(x0 + i, y0 + j, z0 + kk), off = (i * by + j) * bz + kk;
+      accRe[gi] += pr[off]; accIm[gi] += pr[np + off]; wsum[gi] += 1;
+    }
+    if (onProg) onProg(++done / nTiles);
+    await tick();
+  }
+  const re = new Float32Array(N), im = new Float32Array(N);                     // stitch + undo phase reduction
+  for (let x = 0; x < X; x++) for (let y = 0; y < Y; y++) for (let z = 0; z < Z; z++) {
+    const i = id(x, y, z), w = wsum[i] || 1e-9, rr = accRe[i] / w, ii = accIm[i] / w;
+    const dg = Math.hypot(x - tx.x, y - tx.y, z - tx.z) * cell, th = k * dg, c = Math.cos(th), s = Math.sin(th);
+    re[i] = rr * c + ii * s; im[i] = ii * c - rr * s;                           // U = Ũ·e^{-jkd}
+  }
+  return { re, im, wsum, dims: [X, Y, Z], tiles: nTiles };
+}
+
+// ---------------------------------------------------------------- eikonal far field (ray-marched)
+// Per-material transmission loss (dB per 0.3-m solid voxel a ray crosses). class:
+// 0 air · 1 drywall · 2 concrete/floor · 3 metal/core · 4 wood/furniture · 5 glass
+const WALL_DB = [0, 2.5, 7.0, 30.0, 3.0, 3.0];
+// Absolute-RSRP coverage over open cells: RSRP = Ptx + Gtx − FSPL(1m) − 10·n·log10(d) − Σ wall(ray).
+// A 3-D DDA (Amanatides–Woo) marches Tx→voxel through the grid, summing wall loss (indoor shadows).
+export function eikonalRsrp3d(grid, dims, cell, fMHz, tx, txDbm, opts = {}) {
+  const [X, Y, Z] = dims, N = X * Y * Z, id = (x, y, z) => (x * Y + y) * Z + z;
+  const n = opts.pathExp || 2.2, Gtx = opts.gainDbi ?? 2.0, capWall = opts.wallCap || 80.0;
+  const fscale = Math.max(1.0, Math.pow(fMHz / 2000.0, 0.25));                  // walls lose a bit more at higher f
+  const wdb = WALL_DB.map(v => v * fscale);
+  const fspl1 = 20 * Math.log10(fMHz) - 27.55;                                  // free-space PL at 1 m (dB)
+  const db = new Float32Array(N).fill(-Infinity);
+  const tcx = tx.x + 0.5, tcy = tx.y + 0.5, tcz = tx.z + 0.5;
+  for (let X0 = 0; X0 < X; X0++) for (let Y0 = 0; Y0 < Y; Y0++) for (let Z0 = 0; Z0 < Z; Z0++) {
+    const i = id(X0, Y0, Z0), c = grid[i]; if (!(c === 0 || c === 4)) continue;  // open cells only
+    const dm = Math.hypot(X0 - tx.x, Y0 - tx.y, Z0 - tx.z) * cell;
+    // --- march Tx→voxel, accumulate wall loss for solid voxels strictly between ---
+    let wall = 0;
+    let px = tcx, py = tcy, pz = tcz;
+    let dx = (X0 + 0.5) - px, dy = (Y0 + 0.5) - py, dz = (Z0 + 0.5) - pz;
+    const L = Math.hypot(dx, dy, dz) || 1e-6; dx /= L; dy /= L; dz /= L;
+    let vx = tx.x, vy = tx.y, vz = tx.z;
+    const sx = dx > 0 ? 1 : -1, sy = dy > 0 ? 1 : -1, sz = dz > 0 ? 1 : -1;
+    const tDX = dx !== 0 ? Math.abs(1 / dx) : 1e30, tDY = dy !== 0 ? Math.abs(1 / dy) : 1e30, tDZ = dz !== 0 ? Math.abs(1 / dz) : 1e30;
+    let tMX = dx !== 0 ? (((sx > 0 ? vx + 1 : vx) - px) / dx) : 1e30;
+    let tMY = dy !== 0 ? (((sy > 0 ? vy + 1 : vy) - py) / dy) : 1e30;
+    let tMZ = dz !== 0 ? (((sz > 0 ? vz + 1 : vz) - pz) / dz) : 1e30;
+    let guard = 0;
+    while (guard++ < 4 * (X + Y + Z)) {
+      if (tMX <= tMY && tMX <= tMZ) { vx += sx; tMX += tDX; }
+      else if (tMY <= tMZ) { vy += sy; tMY += tDY; }
+      else { vz += sz; tMZ += tDZ; }
+      if (vx === X0 && vy === Y0 && vz === Z0) break;
+      if (vx < 0 || vy < 0 || vz < 0 || vx >= X || vy >= Y || vz >= Z) break;
+      const cc = grid[id(vx, vy, vz)];
+      if (cc !== 0 && cc !== 4) { wall += wdb[cc] || wdb[1]; if (wall > capWall) { wall = capWall; break; } }
+    }
+    const pl = fspl1 + 10 * n * Math.log10(Math.max(dm, 1.0));
+    db[i] = txDbm + Gtx - pl - Math.min(wall, capWall);
+  }
+  return db;
+}
+
+// ---------------------------------------------------------------- hybrid: ONNX (near) ⊕ eikonal (far)
+// Absolute-RSRP whole-floor map: the sub-volume-trained net supplies the near-Tx structure; the
+// eikonal supplies path loss + wall shadows everywhere else; blended in dB across a transition ring.
+export async function hybridField3d(session, grid, dims, cell, fMHz, tx, txDbm, contract, onProg) {
+  const [X, Y, Z] = dims, N = X * Y * Z, id = (x, y, z) => (x * Y + y) * Z + z;
+  const R1 = 3.0, R2 = 6.5;                                                     // metres: pure-ONNX / pure-eikonal
+  const eik = eikonalRsrp3d(grid, dims, cell, fMHz, tx, txDbm);
+  if (onProg) onProg(0.25);
+  const Rc = Math.ceil(R2 / cell) + contract.box;                              // tile only the near box
+  const near = await onnxTiledPredict3d(session, grid, dims, cell, fMHz, tx, contract,
+    p => { if (onProg) onProg(0.25 + 0.6 * p); }, { regionCells: Rc });
+  // ONNX |U| → relative dB; calibrate an offset so it meets the eikonal at the R1..R2 ring
+  const onDb = new Float32Array(N).fill(-Infinity);
+  let sOff = 0, nOff = 0;
+  for (let x = 0; x < X; x++) for (let y = 0; y < Y; y++) for (let z = 0; z < Z; z++) {
+    const i = id(x, y, z), c = grid[i]; if (!(c === 0 || c === 4)) continue;
+    if (near.wsum[i] <= 0) continue;
+    const a = Math.hypot(near.re[i], near.im[i]); if (a <= 0) continue;
+    onDb[i] = 20 * Math.log10(a);
+    const dm = Math.hypot(x - tx.x, y - tx.y, z - tx.z) * cell;
+    if (dm >= R1 && dm <= R2 && isFinite(eik[i])) { sOff += eik[i] - onDb[i]; nOff++; }
+  }
+  const off = nOff ? sOff / nOff : 0;
+  // blend
+  const db = new Float32Array(N).fill(-Infinity), re = new Float32Array(N), im = new Float32Array(N);
+  const k = 2 * Math.PI / wavelength(fMHz);
+  let dbMax = -Infinity;
+  for (let x = 0; x < X; x++) for (let y = 0; y < Y; y++) for (let z = 0; z < Z; z++) {
+    const i = id(x, y, z), c = grid[i]; if (!(c === 0 || c === 4)) continue;
+    const dm = Math.hypot(x - tx.x, y - tx.y, z - tx.z) * cell;
+    const oa = isFinite(onDb[i]) ? onDb[i] + off : -Infinity, ea = eik[i];
+    let val;
+    if (dm <= R1 && isFinite(oa)) val = oa;
+    else if (dm >= R2 || !isFinite(oa)) val = ea;
+    else { const w = (R2 - dm) / (R2 - R1); val = w * oa + (1 - w) * ea; }      // linear dB blend
+    db[i] = val; if (val > dbMax) dbMax = val;
+  }
+  for (let i = 0; i < N; i++) {                                                 // synth complex for the wave view
+    if (!isFinite(db[i])) continue;
+    const amp = Math.pow(10, (db[i] - dbMax) / 20);
+    const x = (i / (Y * Z)) | 0, y = ((i / Z) | 0) % Y, z = i % Z;
+    const th = k * Math.hypot(x - tx.x, y - tx.y, z - tx.z) * cell;
+    re[i] = amp * Math.cos(th); im[i] = -amp * Math.sin(th);
+  }
+  if (onProg) onProg(1);
+  return { re, im, db, dims: [X, Y, Z], tiles: near.tiles, dbMax, mode: 'hybrid' };
 }
