@@ -1,0 +1,256 @@
+{
+  "spec_version": "fw-unet3d-v4-web",
+  "model_file": "fw_unet3d.onnx",
+  "predicts": "complex full-wave field (3-D), phase-reduced",
+  "input": {
+    "name": "x",
+    "layout": "N,C,X,Y,Z",
+    "dtype": "float32",
+    "in_channels": 18,
+    "channels": [
+      "material_onehot_0..5",
+      "tx_blob",
+      "freq_feat",
+      "log_distance",
+      "epsr_eff",
+      "sigma_eff",
+      "sdf",
+      "normal_x",
+      "normal_y",
+      "normal_z",
+      "antenna_jx",
+      "antenna_jy",
+      "antenna_jz"
+    ],
+    "material_classes": 6,
+    "tx_blob_sigma_cells": 2.0,
+    "logdist_divisor": 3.0,
+    "epsr_norm": 6.0,
+    "sigma_log": 7.0,
+    "sdf_norm": 0.5,
+    "freq_log_lo_mhz": 600.0,
+    "freq_log_hi_mhz": 6000.0,
+    "size_multiple": 8,
+    "y_axis": "thin, free (not pooled)"
+  },
+  "output": {
+    "name": "y",
+    "layout": "N,C,X,Y,Z",
+    "channels": [
+      "field_re",
+      "field_im"
+    ],
+    "phase_reduced": true,
+    "reconstruct": "U=(re+j*im)*exp(-j*k*d), d=|voxel-tx|*cell, k=2pi/lambda"
+  },
+  "box_train": 24,
+  "stride": 18,
+  "in_channels": 18,
+  "eps_source": "cad_materials.eps_sigma (ITU-R P.2040)",
+  "note": "browser approximates training's conformal effective-medium eps/sigma/SDF from the class grid; interiors match, sub-voxel boundaries are quantized.",
+  "bands": {
+    "617": {
+      "ff": 0.012134,
+      "class_eps": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          2.73,
+          0.00539998
+        ],
+        [
+          5.24,
+          0.0316667
+        ],
+        [
+          1.0,
+          10000000.0
+        ],
+        [
+          1.99,
+          0.00280108
+        ],
+        [
+          6.31,
+          0.00188543
+        ]
+      ]
+    },
+    "751": {
+      "ff": 0.097489,
+      "class_eps": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          2.73,
+          0.00649505
+        ],
+        [
+          5.24,
+          0.036929
+        ],
+        [
+          1.0,
+          10000000.0
+        ],
+        [
+          1.99,
+          0.00345787
+        ],
+        [
+          6.31,
+          0.00245321
+        ]
+      ]
+    },
+    "1960": {
+      "ff": 0.514105,
+      "class_eps": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          2.73,
+          0.0159953
+        ],
+        [
+          5.24,
+          0.0782068
+        ],
+        [
+          1.0,
+          10000000.0
+        ],
+        [
+          1.99,
+          0.00966803
+        ],
+        [
+          6.31,
+          0.00886646
+        ]
+      ]
+    },
+    "2442": {
+      "ff": 0.609594,
+      "class_eps": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          2.73,
+          0.0196655
+        ],
+        [
+          5.24,
+          0.0928831
+        ],
+        [
+          1.0,
+          10000000.0
+        ],
+        [
+          1.99,
+          0.0122372
+        ],
+        [
+          6.31,
+          0.0119028
+        ]
+      ]
+    },
+    "2506": {
+      "ff": 0.62083,
+      "class_eps": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          2.73,
+          0.0201494
+        ],
+        [
+          5.24,
+          0.0947818
+        ],
+        [
+          1.0,
+          10000000.0
+        ],
+        [
+          1.99,
+          0.0125813
+        ],
+        [
+          6.31,
+          0.0123225
+        ]
+      ]
+    },
+    "3700": {
+      "ff": 0.79005,
+      "class_eps": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          2.73,
+          0.0290566
+        ],
+        [
+          5.24,
+          0.128555
+        ],
+        [
+          1.0,
+          10000000.0
+        ],
+        [
+          1.99,
+          0.0191028
+        ],
+        [
+          6.31,
+          0.020766
+        ]
+      ]
+    },
+    "5500": {
+      "ff": 0.962211,
+      "class_eps": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          2.73,
+          0.0421686
+        ],
+        [
+          5.24,
+          0.175289
+        ],
+        [
+          1.0,
+          10000000.0
+        ],
+        [
+          1.99,
+          0.0292159
+        ],
+        [
+          6.31,
+          0.0353138
+        ]
+      ]
+    }
+  }
+}

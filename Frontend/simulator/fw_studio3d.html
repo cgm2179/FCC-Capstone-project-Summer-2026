@@ -58,7 +58,7 @@
         <button class="on" data-v="auto">Auto</button><button data-v="onnx">ONNX</button><button data-v="fdtd">FDTD</button>
       </div>
       <div id="engine">loading model…</div>
-      <p class="note">Auto = ONNX surrogate (whole-floor) → FDTD. ONNX runs the whole floor tiled (slow, never crashes); <b>FDTD solves a sub-volume around the Tx</b> (whole-floor 3-D FDTD is infeasible in a browser).</p>
+      <p class="note">Auto/ONNX = <b>hybrid</b> whole-floor RSRP: the trained surrogate near the Tx ⊕ eikonal path-loss + wall shadows for the rest. <b>FDTD solves a sub-volume around the Tx</b> (whole-floor 3-D FDTD is infeasible in a browser).</p>
     </div>
     <div class="grp"><label>Band</label><select id="band"></select></div>
     <div class="grp"><label>Tx power (dBm)</label><input id="txp" type="number" value="20" min="0" max="46" step="1"></div>
@@ -230,8 +230,9 @@
 
     let onnxReady = false, onnxWhy = 'not loaded', session = null, contract = null;
     function reflectEngine() {
-      const eff = solverSel === 'auto' ? (onnxReady ? 'ONNX surrogate (whole-floor)' : 'FDTD sub-volume (ONNX pending)') :
-                  solverSel === 'onnx' ? (onnxReady ? 'ONNX surrogate (whole-floor)' : 'ONNX PENDING — train + export fw_unet3d.onnx') : 'sub-volume FDTD (around Tx)';
+      const HYB = 'hybrid: ONNX near ⊕ eikonal far (whole-floor RSRP)';
+      const eff = solverSel === 'auto' ? (onnxReady ? HYB : 'FDTD sub-volume (ONNX pending)') :
+                  solverSel === 'onnx' ? (onnxReady ? HYB : 'ONNX PENDING — train + export fw_unet3d.onnx') : 'sub-volume FDTD (around Tx)';
       $('engine').textContent = `engine: SIM V3 · ${eff}` + (onnxReady ? '' : `  ·  ${onnxWhy}`);
     }
 
@@ -244,6 +245,31 @@
       setWarn(''); const fMHz = parseFloat($('band').value);
       let solver = solverSel; if (solver === 'auto') solver = onnxReady ? 'onnx' : 'fdtd';
       if (solver === 'onnx' && !onnxReady) { setStatus(`ONNX pending — ${onnxWhy}. Switch to FDTD or train + drop in fw_unet3d.onnx.`, true); return; }
+
+      // ---- ONNX hybrid: near-Tx surrogate ⊕ eikonal far field → absolute-RSRP whole floor ----
+      if (solver === 'onnx') {
+        const txDbm = parseFloat($('txp').value) || 20;
+        $('run').disabled = true;
+        setWarn('⚙ Hybrid — ONNX surrogate near the Tx ⊕ eikonal path-loss + wall shadows for the rest of the floor (absolute RSRP).');
+        setStatus('solving (hybrid: ONNX near ⊕ eikonal far)…'); setBar(0);
+        const t0 = performance.now();
+        let res;
+        try { res = await S.hybridField3d(session, GRID, [X, Y, Z], CELL, fMHz, tx, txDbm, contract, setBar); }
+        catch (e) { setBar(null); setStatus('hybrid failed: ' + e.message, true); $('run').disabled = false; return; }
+        const secs = (performance.now() - t0) / 1000; setBar(null); $('run').disabled = false;
+        for (let i = 0; i < res.db.length; i++) if (!isFinite(res.db[i])) res.db[i] = -120;   // solids → below floor
+        field = { re: res.re, im: res.im, db: res.db, dims: [X, Y, Z], origin: [0, 0, 0], sub: GRID, fMHz, txy: tx.y, absolute: true };
+        // absolute RSRP range (dBm)
+        rangeHi = -40; rangeLo = -100; $('rangeHi').value = rangeHi; $('rangeLo').value = rangeLo;
+        $('cbLo').textContent = `${rangeLo} dBm`; $('cbHi').textContent = `${rangeHi} dBm`;
+        $('hudMeta').textContent = `${X}×${Y}×${Z} whole floor · hybrid (ONNX ${res.tiles} tiles ⊕ eikonal) · ${fMHz} MHz · ${secs.toFixed(1)} s`;
+        setStatus(`done — hybrid RSRP in ${secs.toFixed(1)} s (peak ${res.dbMax.toFixed(0)} dBm).`);
+        setOpacity(0.3); $('modelOpacity').value = 30;
+        fieldStyle = 'slice';                                  // whole-floor → coverage cut-plane (the iBwave look)
+        document.querySelectorAll('#fstyleSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === 'slice'));
+        drawCbar(); buildFieldMesh(); updateDesc();
+        return;
+      }
 
       const half = parseInt($('region').value, 10);
       const npw = 8.0;
@@ -349,7 +375,7 @@
       $('cbLo').textContent = wave ? '− trough' : `${rangeLo} dB`; $('cbHi').textContent = wave ? 'crest +' : `${rangeHi} dB`;
     }
     function updateDesc() {
-      $('desc').innerHTML = `<b>What this shows.</b> The 3-D voxelized 7th floor — every wall, floor, ceiling, glass and metal object the surrogate sees, colored by ITU material. Place a Tx and <b>Generate</b> to solve the steady-state complex full-wave field U(x,y,z): the <b>ONNX surrogate</b> tiles the whole floor (fast, once trained), or the <b>FDTD</b> solves a sub-volume around the Tx at λ/8. <b>Heatmap</b> = |U| in dB; <b>Wavefront</b> = the animated Re{U·e<sup>jωt</sup>} snapshot. Whole-floor 3-D FDTD is infeasible in a browser, so FDTD is scoped to the box the surrogate is trained on.`;
+      $('desc').innerHTML = `<b>What this shows.</b> The 3-D voxelized 7th floor — every wall, floor, ceiling, glass and metal object the model sees, colored by ITU material. Place a Tx and <b>Generate</b> for whole-floor coverage. The <b>hybrid</b> engine runs the trained full-wave surrogate in the box around the Tx (where it's accurate) and composites it with a fast <b>eikonal</b> path-loss + wall-transmission field for the rest of the floor, giving an <b>absolute RSRP (dBm)</b> map — strong at the Tx, fading with distance and wall shadowing. The <b>FDTD</b> option instead solves the true sub-volume field around the Tx at λ/8. <b>Heatmap</b> = level; <b>Wavefront</b> = the animated phase snapshot. (The surrogate was trained on ±3 m sub-volumes, so far-field coverage comes from the eikonal, not the net.)`;
     }
 
     // ---- render loop ----
@@ -368,6 +394,14 @@
       setStatus(onnxReady ? 'ready — place a Tx, pick a band, Generate.' : 'ready — FDTD sub-volume solver (ONNX pending training).');
     })();
     reflectEngine();
+
+    // headless test hook (verification only — the 3-D canvas is awkward to drive from tooling)
+    window.__fw3d = {
+      S, GRID, CELL, generate,
+      get dims() { return [X, Y, Z]; }, get tx() { return tx; }, set tx(v) { Object.assign(tx, v); snapTx(); placeTxMarker(); },
+      get session() { return session; }, get contract() { return contract; },
+      get onnxReady() { return onnxReady; }, get onnxWhy() { return onnxWhy; }, get field() { return field; },
+    };
   </script>
 </body>
 </html>
