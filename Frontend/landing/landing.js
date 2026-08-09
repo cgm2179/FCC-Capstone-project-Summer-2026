@@ -385,7 +385,7 @@
     }
 
     // Simulation 3D: same indoor/outdoor swap for the 3-D Full-Wave Studio. Indoor = fw_studio3d
-    // (7th-floor voxel grid); outdoor = fw_studio3d_outdoor (placeholder). Only relevant in 3D mode.
+    // (7th-floor voxel grid); outdoor = fw_studio3d_outdoor (NoMa city + known BS). Only relevant in 3D mode.
     const isOutdoor3d = window.appMode.environment === 'outdoor' && dim === '3d';
     const in3Bar = document.getElementById('simFw3dBar'), in3Wrap = document.getElementById('simFw3dWrap');
     const out3Bar = document.getElementById('simFw3dBarOut'), out3Wrap = document.getElementById('simFw3dWrapOut');
