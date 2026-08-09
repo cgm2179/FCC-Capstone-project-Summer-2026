@@ -100,8 +100,8 @@
       "site_id": "BS7_forte_hall",
       "name": "Forte Hall",
       "address": "Gonzaga College HS campus, I St NW, Washington, DC 20002",
-      "lat": 38.901550064268065,
-      "lon": -77.01142028984886,
+      "lat": 38.90159,
+      "lon": -77.01134,
       "status": "live",
       "role": "anchor",
       "carriers": [
@@ -127,15 +127,34 @@
         }
       ],
       "in_grid": true,
-      "vx": 266,
+      "vx": 265,
       "vy": 11,
-      "vz": 139,
-      "x_m": 532.0,
-      "y_m": 22.0,
-      "z_m": 278.0,
-      "roof_height_m": 20.0,
-      "height_source": "survey_override",
-      "snap_cells": 1
+      "vz": 146,
+      "x_m": 530.0,
+      "y_m": 19.02,
+      "z_m": 292.0,
+      "roof_height_m": 19.02,
+      "height_source": "cad_building_roof",
+      "snap_cells": 0,
+      "cad_roof": {
+        "cube_local_m": [
+          471.66,
+          19.02,
+          -269.84
+        ],
+        "search_r_m": 30,
+        "n_verts": 3,
+        "world": [
+          -45.75,
+          -5.49,
+          -114.62
+        ],
+        "voxel": [
+          265,
+          11,
+          146
+        ]
+      }
     },
     {
       "site_id": "BS2_900_nj_ave",
@@ -192,15 +211,34 @@
         }
       ],
       "in_grid": true,
-      "vx": 384,
-      "vy": 5,
-      "vz": 168,
-      "x_m": 768.0,
-      "y_m": 10.0,
-      "z_m": 336.0,
-      "roof_height_m": 10.0,
-      "height_source": "osm_column_snap_5",
-      "snap_cells": 5
+      "vx": 387,
+      "vy": 18,
+      "vz": 162,
+      "x_m": 774.0,
+      "y_m": 34.68,
+      "z_m": 324.0,
+      "roof_height_m": 34.68,
+      "height_source": "cad_building_roof",
+      "snap_cells": 9,
+      "cad_roof": {
+        "cube_local_m": [
+          783.88,
+          34.68,
+          -229.95
+        ],
+        "search_r_m": 25,
+        "n_verts": 24,
+        "world": [
+          75.74,
+          2.34,
+          -99.1
+        ],
+        "voxel": [
+          387,
+          18,
+          162
+        ]
+      }
     },
     {
       "site_id": "BS4_55_m_st",
@@ -232,15 +270,34 @@
         }
       ],
       "in_grid": true,
-      "vx": 254,
-      "vy": 5,
-      "vz": 378,
-      "x_m": 508.0,
-      "y_m": 10.0,
-      "z_m": 756.0,
-      "roof_height_m": 10.0,
-      "height_source": "osm_column_snap_2",
-      "snap_cells": 2
+      "vx": 253,
+      "vy": 27,
+      "vz": 382,
+      "x_m": 506.0,
+      "y_m": 52.8,
+      "z_m": 764.0,
+      "roof_height_m": 52.8,
+      "height_source": "cad_building_roof",
+      "snap_cells": 2,
+      "cad_roof": {
+        "cube_local_m": [
+          441.41,
+          52.8,
+          334.99
+        ],
+        "search_r_m": 25,
+        "n_verts": 7,
+        "world": [
+          -57.52,
+          11.4,
+          120.73
+        ],
+        "voxel": [
+          253,
+          27,
+          382
+        ]
+      }
     },
     {
       "site_id": "BS5_1140_n_capitol",
@@ -271,15 +328,34 @@
         }
       ],
       "in_grid": true,
-      "vx": 180,
-      "vy": 17,
-      "vz": 310,
-      "x_m": 360.0,
-      "y_m": 34.0,
-      "z_m": 620.0,
-      "roof_height_m": 33.0,
-      "height_source": "survey_override",
-      "snap_cells": 9
+      "vx": 160,
+      "vy": 15,
+      "vz": 320,
+      "x_m": 320.0,
+      "y_m": 27.68,
+      "z_m": 640.0,
+      "roof_height_m": 27.68,
+      "height_source": "cad_building_roof",
+      "snap_cells": 9,
+      "cad_roof": {
+        "cube_local_m": [
+          201.2,
+          27.68,
+          175.69
+        ],
+        "search_r_m": 45,
+        "n_verts": 1,
+        "world": [
+          -150.99,
+          -1.16,
+          58.75
+        ],
+        "voxel": [
+          160,
+          15,
+          320
+        ]
+      }
     },
     {
       "site_id": "BS6_1005_n_capitol",
@@ -326,15 +402,34 @@
         }
       ],
       "in_grid": true,
-      "vx": 140,
-      "vy": 26,
+      "vx": 127,
+      "vy": 29,
       "vz": 226,
-      "x_m": 280.0,
-      "y_m": 52.0,
+      "x_m": 254.0,
+      "y_m": 57.91,
       "z_m": 452.0,
-      "roof_height_m": 50.7,
-      "height_source": "survey_override",
-      "snap_cells": 0
+      "roof_height_m": 57.91,
+      "height_source": "cad_building_roof",
+      "snap_cells": 0,
+      "cad_roof": {
+        "cube_local_m": [
+          117.55,
+          57.91,
+          -66.51
+        ],
+        "search_r_m": 45,
+        "n_verts": 2,
+        "world": [
+          -183.54,
+          13.96,
+          -35.5
+        ],
+        "voxel": [
+          127,
+          29,
+          226
+        ]
+      }
     },
     {
       "site_id": "BS1_901_n_capitol",
@@ -358,15 +453,34 @@
       "role": "excluded",
       "carriers": [],
       "in_grid": true,
-      "vx": 480,
-      "vy": 26,
-      "vz": 309,
-      "x_m": 960.0,
-      "y_m": 52.0,
-      "z_m": 618.0,
-      "roof_height_m": 50.7,
-      "height_source": "survey_override",
-      "snap_cells": 0
+      "vx": 481,
+      "vy": 14,
+      "vz": 321,
+      "x_m": 962.0,
+      "y_m": 26.97,
+      "z_m": 642.0,
+      "roof_height_m": 26.97,
+      "height_source": "cad_building_roof",
+      "snap_cells": 0,
+      "cad_roof": {
+        "cube_local_m": [
+          1027.02,
+          26.97,
+          179.28
+        ],
+        "search_r_m": 45,
+        "n_verts": 41,
+        "world": [
+          170.35,
+          -1.52,
+          60.15
+        ],
+        "voxel": [
+          481,
+          14,
+          321
+        ]
+      }
     }
   ],
   "fdtd_foundation": {
@@ -439,7 +553,6 @@
     "cube_anchor_m": [
       8572395.0,
       4707865.5
-    ],
-    "note": "Blender OSM export \u2014 buildings/streets/foliage polyhedra; Cube is EPSG:3857 marker"
+    ]
   }
 }

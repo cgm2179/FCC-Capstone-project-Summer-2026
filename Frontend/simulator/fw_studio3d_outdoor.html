@@ -55,10 +55,10 @@
 
     <div class="grp"><label>Solver</label>
       <div class="seg" id="solverSeg">
-        <button class="on" data-v="auto">Auto</button><button data-v="coverage">Coverage</button><button data-v="fdtd">FDTD</button>
+        <button class="on" data-v="auto">Auto</button><button data-v="onnx">ONNX</button><button data-v="fdtd">FDTD</button>
       </div>
       <div id="engine">loading scene…</div>
-      <p class="note">Auto/Coverage = street-level eikonal RSRP (panel pattern + O2I shadows). <b>FDTD</b> = sub-volume around the rooftop Tx.</p>
+      <p class="note">Auto = street-level eikonal RSRP (panel + O2I). <b>ONNX</b> = outdoor 3-D surrogate placeholder (not trained yet). <b>FDTD</b> = sub-volume around the rooftop Tx.</p>
     </div>
 
     <div class="grp"><label>Base station</label>
@@ -333,15 +333,54 @@
     setOpacity((+$('modelOpacity').value) / 100);
     $('modelOpacity').addEventListener('input', () => setOpacity((+$('modelOpacity').value) / 100));
 
-    // ---- Tx markers ----
+    // ---- Tx markers (sit on CAD rooftops, not street level) ----
     const txMeshes = {};
     const txGeom = new THREE.SphereGeometry(2.2, 14, 14);
-    for (const s of stations) {
-      const mat = new THREE.MeshBasicMaterial({ color: s.status === 'live' ? 0x2fff6a : 0x777777 });
-      const m = new THREE.Mesh(txGeom, mat);
-      m.position.set(s.vx - cX, s.vy - cY, s.vz - cZ);
-      scene.add(m); txMeshes[s.site_id] = m;
+    // Antenna mast: thin pole + panel box so it reads as a rooftop antenna, not a ground pin
+    function makeAntennaMarker(live) {
+      const g = new THREE.Group();
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.35, 0.45, 3.2, 8),
+        new THREE.MeshLambertMaterial({ color: live ? 0x2fff6a : 0x777777 }));
+      pole.position.y = 1.6;
+      const panel = new THREE.Mesh(
+        new THREE.BoxGeometry(2.4, 1.6, 0.35),
+        new THREE.MeshLambertMaterial({ color: live ? 0xd0ffd8 : 0x999999 }));
+      panel.position.y = 3.6;
+      const ball = new THREE.Mesh(txGeom, new THREE.MeshBasicMaterial({ color: live ? 0x2fff6a : 0x777777 }));
+      ball.position.y = 4.8; ball.scale.setScalar(0.55);
+      g.add(pole, panel, ball);
+      g.userData.ball = ball;
+      return g;
     }
+    /** Place antenna on the CAD building rooftop (not street level). */
+    function placeAntennaMarker(s) {
+      const m = txMeshes[s.site_id]; if (!m) return;
+      // Prefer baked CAD roof world position (matches the 3-D polyhedron exactly).
+      if (s.cad_roof && s.cad_roof.world) {
+        const [wx, wy, wz] = s.cad_roof.world;
+        m.position.set(wx, wy + 0.2, wz);
+        return;
+      }
+      const yVox = (s.roof_height_m > 0 ? s.roof_height_m / CELL : s.vy);
+      m.position.set(s.vx - cX, yVox - cY, s.vz - cZ);
+    }
+    function roofWorldY(s) {
+      if (s.cad_roof && s.cad_roof.world) return s.cad_roof.world[1];
+      return (s.roof_height_m > 0 ? s.roof_height_m / CELL : s.vy) - cY;
+    }
+    for (const s of stations) {
+      // Align solver voxel to CAD rooftop when available
+      if (s.cad_roof && s.cad_roof.voxel) {
+        s.vx = s.cad_roof.voxel[0];
+        s.vy = s.cad_roof.voxel[1];
+        s.vz = s.cad_roof.voxel[2];
+      }
+      const m = makeAntennaMarker(s.status === 'live');
+      scene.add(m); txMeshes[s.site_id] = m;
+      placeAntennaMarker(s);
+    }
+
     let tx = { x: pickList[0].vx, y: pickList[0].vy, z: pickList[0].vz };
     let activeSite = pickList[0];
 
@@ -351,28 +390,32 @@
         `${c.carrier}: PCI ${(c.pcis || []).slice(0, 6).join(',')}${(c.pcis || []).length > 6 ? '…' : ''} · bands ${(c.bands || []).join(',')}`
       ).join('\n');
       $('bsMeta').textContent =
-        `${s.address || ''}\n${s.lat?.toFixed?.(5)}, ${s.lon?.toFixed?.(5)} · roof ${s.roof_height_m} m\n` +
+        `${s.address || ''}\n${s.lat?.toFixed?.(5)}, ${s.lon?.toFixed?.(5)} · roof ${s.roof_height_m} m (${s.height_source || 'bake'})\n` +
         `Tx cell (${s.vx}, ${s.vy}, ${s.vz}) · ${carriers || s.status}`;
       $('readout').textContent =
         `Tx @ (${(tx.x * CELL).toFixed(1)}, ${(tx.y * CELL).toFixed(1)}, ${(tx.z * CELL).toFixed(1)}) m · ${s.site_id}`;
       for (const [id, m] of Object.entries(txMeshes)) {
         const on = id === s.site_id;
-        m.scale.setScalar(on ? 1.7 : 1.0);
-        m.material.color.setHex(on ? 0xffee55 : (stations.find(t => t.site_id === id)?.status === 'live' ? 0x2fff6a : 0x666666));
+        m.scale.setScalar(on ? 1.35 : 1.0);
+        const live = stations.find(t => t.site_id === id)?.status === 'live';
+        const col = on ? 0xffee55 : (live ? 0x2fff6a : 0x666666);
+        m.traverse(o => { if (o.isMesh && o.material && o.material.color) o.material.color.setHex(col); });
       }
     }
     function selectStation(id) {
       const s = stations.find(t => t.site_id === id) || pickList[0];
       activeSite = s; tx = { x: s.vx, y: s.vy, z: s.vz };
       $('bore').value = DEFAULT_BORE[s.site_id] ?? 0;
-      // Prefer a band from the site carriers when possible
       const bands = (s.carriers || []).flatMap(c => c.bands || []);
       if (bands.includes(13)) $('band').value = '751';
       else if (bands.includes(71)) $('band').value = '617';
       else if (bands.includes(41)) $('band').value = '2506';
       updateBsMeta();
-      controls.target.set(s.vx - cX, Math.max(-cY + 2, s.vy - cY - 4), s.vz - cZ);
-      camera.position.set(s.vx - cX - 40, Y * 6, s.vz - cZ + 70);
+      const my = roofWorldY(s);
+      const mx = (s.cad_roof && s.cad_roof.world) ? s.cad_roof.world[0] : (s.vx - cX);
+      const mz = (s.cad_roof && s.cad_roof.world) ? s.cad_roof.world[2] : (s.vz - cZ);
+      controls.target.set(mx, my, mz);
+      camera.position.set(mx - 40, my + 22, mz + 48);
       updateResNote();
     }
     $('station').onchange = () => selectStation($('station').value);
@@ -397,7 +440,7 @@
     seg('solverSeg', v => {
       solverSel = v;
       $('fdtdResGrp').style.display = (v === 'fdtd') ? 'block' : 'none';
-      $('covResGrp').style.display = (v === 'fdtd') ? 'none' : 'block';
+      $('covResGrp').style.display = (v === 'fdtd' || v === 'onnx') ? 'none' : 'block';
       reflectEngine();
     });
     seg('modelSeg', v => { modelView = v; applyModelView(); });
@@ -411,6 +454,7 @@
 
     function reflectEngine() {
       const eff = solverSel === 'fdtd' ? 'sub-volume FDTD (near rooftop Tx)' :
+                  solverSel === 'onnx' ? 'ONNX outdoor 3-D surrogate — PLACEHOLDER (not trained yet)' :
                   'street-level eikonal coverage (panel + O2I)';
       $('engine').textContent = `engine: SIM V3 outdoor · ${eff}`;
     }
@@ -507,6 +551,12 @@
       const bore = parseFloat($('bore').value) || 0;
       const ant = $('ant').value;
       let solver = solverSel; if (solver === 'auto') solver = 'coverage';
+
+      if (solver === 'onnx') {
+        setWarn('ONNX outdoor 3-D surrogate is a placeholder — no fw_unet3d / fw_bs outdoor volume model is trained yet. Use Auto (eikonal) or FDTD.');
+        setStatus('ONNX placeholder — switch to Auto or FDTD.', true);
+        return;
+      }
 
       if (solver === 'coverage') {
         const regionM = Math.max(80, parseFloat($('covRegion').value) || 400);
