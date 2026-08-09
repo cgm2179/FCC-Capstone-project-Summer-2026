@@ -93,10 +93,11 @@
 
     <div class="grp" style="margin-top:16px"><label>Model view</label>
       <div class="seg" id="modelSeg">
-        <button class="on" data-v="cad">Real CAD</button>
+        <button class="on" data-v="osm">OSM buildings</button>
+        <button data-v="cad">Real CAD</button>
         <button data-v="voxel">Voxels</button>
       </div>
-      <p class="note">Real CAD = <b>Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D</b> (OSM buildings / streets / foliage). Solver always uses the voxel grid.</p></div>
+      <p class="note"><b>OSM buildings</b> = georeferenced footprints (same frame as Outdoor 2-D pins). Real CAD OBJ is sparse at some BS sites and can look mis-placed — use OSM to verify Forte / BS locations.</p></div>
     <div class="grp"><label>Field view</label>
       <div class="seg" id="viewSeg"><button class="on" data-v="heat">Heatmap |U|</button><button data-v="wave">Wavefront</button></div></div>
     <div class="grp"><label>Field style</label>
@@ -245,7 +246,59 @@
     if (solidMesh.instanceColor) solidMesh.instanceColor.needsUpdate = true;
     solidMesh.count = solids.length; solidMesh.visible = false; scene.add(solidMesh);
 
-    // ---- Real CAD: Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D ----
+    // ---- OSM extruded footprints (same EPSG:3857 frame as Outdoor 2-D / solver) ----
+    let osmRoot = null;
+    const osmMats = [];
+    setStatus('loading OSM building footprints…');
+    try {
+      const bjson = await fetch(`${ASSET}/buildings.json`).then(r => { if (!r.ok) throw new Error('buildings.json'); return r.json(); });
+      osmRoot = new THREE.Group();
+      osmRoot.name = 'osm_buildings';
+      const matOsm = new THREE.MeshLambertMaterial({
+        color: 0xc4c0b6, transparent: true, opacity: 0.82,
+        side: THREE.DoubleSide, clippingPlanes: [clipPlane],
+      });
+      osmMats.push(matOsm);
+      const matBs = new THREE.MeshLambertMaterial({
+        color: 0xd4a574, transparent: true, opacity: 0.92,
+        side: THREE.DoubleSide, clippingPlanes: [clipPlane],
+      });
+      osmMats.push(matBs);
+      // Highlight footprints nearest each live station (visual confirmation)
+      const livePins = stations.filter(s => s.status === 'live' && s.lat != null).map(s => ({
+        site_id: s.site_id,
+        xm: s.vx * CELL,
+        zm: s.vz * CELL,
+        h: s.roof_height_m || 20,
+      }));
+      for (const b of (bjson.buildings || [])) {
+        if (!b.x || b.x.length < 3 || !(b.h > 0)) continue;
+        const shape = new THREE.Shape();
+        for (let i = 0; i < b.x.length; i++) {
+          const px = b.x[i] / CELL - cX;
+          const pz = b.z[i] / CELL - cZ;
+          if (i === 0) shape.moveTo(px, pz); else shape.lineTo(px, pz);
+        }
+        const geom = new THREE.ExtrudeGeometry(shape, { depth: b.h / CELL, bevelEnabled: false });
+        geom.rotateX(-Math.PI / 2);
+        const cx = b.x.reduce((a, v) => a + v, 0) / b.x.length;
+        const cz = b.z.reduce((a, v) => a + v, 0) / b.z.length;
+        let isBs = false;
+        for (const p of livePins) {
+          const d = Math.hypot(cx - p.xm, cz - p.zm);
+          if (d < 35 && Math.abs((b.h || 0) - p.h) < 12) { isBs = true; break; }
+        }
+        const mesh = new THREE.Mesh(geom, isBs ? matBs : matOsm);
+        mesh.position.y = -cY;
+        osmRoot.add(mesh);
+      }
+      scene.add(osmRoot);
+    } catch (e) {
+      console.warn('OSM buildings load failed', e);
+      setWarn('OSM buildings.json failed — try Real CAD / Voxels.');
+    }
+
+    // ---- Real CAD: Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D (optional) ----
     let cadRoot = null;
     const cadMats = [];
     function colorForObject(name, matName) {
@@ -258,7 +311,7 @@
     }
     function applyCadGeoref(root) {
       // OBJ local (sx,sy,sz) = cube-relative metres → grid voxel frame → centered three.js.
-      // CAD_ALIGN is the Forte Hall control-point offset (cube-local m) so the mesh matches Outdoor 2-D.
+      // CAD_ALIGN is the Forte Hall control-point offset (cube-local m).
       const sx = MS / CELL, sy = 1 / CELL, sz = MS / CELL;
       const tx = (MS * (CUBE_ANCHOR[0] - ANCH[0] + CAD_ALIGN[0]) - OX) / CELL - cX;
       const ty = (0 - OY) / CELL - cY + (CAD_ALIGN[1] || 0) / CELL;
@@ -284,7 +337,6 @@
           depthWrite: !isFoliage,
         });
         o.material = mat; cadMats.push(mat);
-        // Drop giant sat plane slightly so streets read under buildings
         if (/export_google|sat/i.test(parentName + o.name)) o.position.y -= 0.02;
       });
     }
@@ -302,43 +354,73 @@
           applyCadGeoref(obj);
           styleCad(obj);
           cadRoot = obj;
+          cadRoot.visible = false;
           scene.add(obj);
           resolve();
         }, undefined, (err) => {
           console.warn('OBJ load failed', err);
-          setWarn('CAD OBJ failed to load — showing voxels only.');
           resolve();
         });
       }, undefined, () => {
-        // MTL optional — load OBJ bare
         const objLoader = new OBJLoader();
         objLoader.setPath(CAD_DIR);
         objLoader.load(CAD_OBJ, (obj) => {
-          applyCadGeoref(obj); styleCad(obj); cadRoot = obj; scene.add(obj); resolve();
+          applyCadGeoref(obj); styleCad(obj); cadRoot = obj; cadRoot.visible = false; scene.add(obj); resolve();
         }, undefined, () => resolve());
       });
     });
 
-    let modelView = 'cad';
+    let modelView = 'osm';
     function applyModelView() {
-      const cad = modelView === 'cad' && !!cadRoot;
-      if (cadRoot) cadRoot.visible = cad;
-      solidMesh.visible = !cad;
+      if (osmRoot) osmRoot.visible = modelView === 'osm';
+      if (cadRoot) cadRoot.visible = modelView === 'cad';
+      solidMesh.visible = modelView === 'voxel';
     }
     applyModelView();
 
     function setOpacity(o) {
       solidMat.opacity = o;
+      osmMats.forEach(m => { m.opacity = Math.min(0.95, o + 0.12); });
       cadMats.forEach(m => { m.opacity = Math.min(0.9, o + 0.1); });
     }
     setOpacity((+$('modelOpacity').value) / 100);
     $('modelOpacity').addEventListener('input', () => setOpacity((+$('modelOpacity').value) / 100));
 
-    // ---- Tx markers (sit on CAD rooftops, not street level) ----
+    // ---- Tx markers (on OSM / 2-D lon-lat rooftops) + name sprites ----
     const txMeshes = {};
     const txGeom = new THREE.SphereGeometry(2.2, 14, 14);
-    // Antenna mast: thin pole + panel box so it reads as a rooftop antenna, not a ground pin
-    function makeAntennaMarker(live) {
+    const SHORT = {
+      BS7_forte_hall: 'Forte Hall', BS2_900_nj_ave: 'BS2 · 900 NJ',
+      BS4_55_m_st: 'BS4 · 55 M', BS5_1140_n_capitol: 'BS5 · 1140 NCap',
+      BS6_1005_n_capitol: 'BS6 · 1005 NCap', BS3_400_ny_ave: 'BS3 · 400 NY',
+    };
+    function makeLabelSprite(text) {
+      const cv = document.createElement('canvas');
+      cv.width = 512; cv.height = 128;
+      const ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.fillStyle = 'rgba(8,12,18,0.72)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 4;
+      roundRect(ctx, 12, 24, 488, 80, 16); ctx.fill(); ctx.stroke();
+      ctx.font = 'bold 44px ui-sans-serif, system-ui, sans-serif';
+      ctx.fillStyle = '#f4f7f2';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(text, 256, 66);
+      const tex = new THREE.CanvasTexture(cv);
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+      const sp = new THREE.Sprite(mat);
+      sp.scale.set(28, 7, 1);
+      sp.position.y = 9.5;
+      return sp;
+    }
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+    }
+    function makeAntennaMarker(live, label) {
       const g = new THREE.Group();
       const pole = new THREE.Mesh(
         new THREE.CylinderGeometry(0.35, 0.45, 3.2, 8),
@@ -351,6 +433,7 @@
       const ball = new THREE.Mesh(txGeom, new THREE.MeshBasicMaterial({ color: live ? 0x2fff6a : 0x777777 }));
       ball.position.y = 4.8; ball.scale.setScalar(0.55);
       g.add(pole, panel, ball);
+      if (label) g.add(makeLabelSprite(label));
       g.userData.ball = ball;
       return g;
     }
@@ -377,7 +460,7 @@
         s.vy = s.cad_roof.voxel[1];
         s.vz = s.cad_roof.voxel[2];
       }
-      const m = makeAntennaMarker(s.status === 'live');
+      const m = makeAntennaMarker(s.status === 'live', SHORT[s.site_id] || s.name || s.site_id);
       scene.add(m); txMeshes[s.site_id] = m;
       placeAntennaMarker(s);
     }
@@ -444,7 +527,11 @@
       $('covResGrp').style.display = (v === 'fdtd' || v === 'onnx') ? 'none' : 'block';
       reflectEngine();
     });
-    seg('modelSeg', v => { modelView = v; applyModelView(); });
+    seg('modelSeg', v => {
+      modelView = v; applyModelView();
+      const tag = v === 'osm' ? 'OSM buildings' : (v === 'cad' ? 'Real CAD' : 'Voxels');
+      $('hudMeta').textContent = `${X}×${Y}×${Z} · ${(X * CELL).toFixed(0)}×${(Z * CELL).toFixed(0)} m · ${tag} · ${CELL} m cells`;
+    });
     seg('viewSeg', v => { viewMode = v; if (field) buildFieldMesh(); });
     seg('cmapSeg', v => { cmapName = v; drawCbar(); if (field) buildFieldMesh(); });
     seg('fstyleSeg', v => { fieldStyle = v; if (field) buildFieldMesh(); });
@@ -531,17 +618,17 @@
 
     function updateDesc(extra) {
       $('desc').innerHTML =
-        `<b>Real CAD:</b> <code>${CAD_OBJ}</code> — OSM buildings as 3-D polyhedra, streets, foliage, georeferenced onto the same EPSG:3857 rectangular grid as the solver. ` +
-        `Materials: <b>air/street</b>, <b>concrete core</b> (heavy O2I), <b>foliage</b> (dilute), <b>glass facade</b> (light). ` +
-        `Tx = known NoMa base stations (Outdoor 2-D options: boresight / antenna / coverage region). ` +
-        `${extra || ''}`;
+        `<b>OSM buildings</b> (default) share the Outdoor 2-D EPSG:3857 frame — Tx pins sit on surveyed footprints ` +
+        `(Forte Hall, 900 NJ Ave, 55 M St, 1140 / 1005 N Capitol). ` +
+        `<b>Real CAD</b> OBJ is optional (<code>${CAD_OBJ}</code>); it is sparse at some BS sites. ` +
+        `Solver voxels: air/street · concrete · foliage · glass. ${extra || ''}`;
     }
-    updateDesc(cadRoot ? 'CAD mesh loaded.' : 'CAD pending — voxels available.');
+    updateDesc(osmRoot ? 'OSM footprints loaded.' : '');
 
     selectStation(pickList[0].site_id);
     $('run').disabled = false;
-    setStatus(`ready — ${pickList.length} live BS · CAD ${cadRoot ? 'loaded' : 'unavailable'} · ${X}×${Y}×${Z} @ ${CELL} m`);
-    $('hudMeta').textContent = `${X}×${Y}×${Z} · ${(X * CELL).toFixed(0)}×${(Z * CELL).toFixed(0)} m · Real CAD · ${CELL} m cells`;
+    setStatus(`ready — ${pickList.length} live BS · OSM buildings · ${X}×${Y}×${Z} @ ${CELL} m`);
+    $('hudMeta').textContent = `${X}×${Y}×${Z} · ${(X * CELL).toFixed(0)}×${(Z * CELL).toFixed(0)} m · OSM buildings · ${CELL} m cells`;
 
     // ---- generate ----
     $('run').onclick = generate;

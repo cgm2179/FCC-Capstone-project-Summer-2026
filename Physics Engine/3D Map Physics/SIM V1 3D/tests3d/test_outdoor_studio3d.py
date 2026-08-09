@@ -80,6 +80,30 @@ def test_stations_match_outdoor_2d_lonlat(scene):
         assert cr.get("xy_source") == "lonlat_2d"
 
 
+def test_live_stations_on_osm_footprints(scene):
+    """Each live Tx should land on (or within ~10 m of) an OSM extrusion of matching height."""
+    bpath = WEB / "buildings.json"
+    if not bpath.exists():
+        pytest.skip("buildings.json missing")
+    buildings = json.loads(bpath.read_text())["buildings"]
+    cell = float(scene["cell_size_m"])
+    live = [s for s in scene["stations"] if s.get("status") == "live" and s.get("in_grid")]
+    assert len(live) >= 5
+    for s in live:
+        xm, zm = s["vx"] * cell, s["vz"] * cell
+        prefer = float(s["roof_height_m"])
+        best = None
+        for b in buildings:
+            cx = sum(b["x"]) / len(b["x"])
+            cz = sum(b["z"]) / len(b["z"])
+            d = ((cx - xm) ** 2 + (cz - zm) ** 2) ** 0.5
+            score = (d + 0.15 * abs(float(b["h"]) - prefer), d, float(b["h"]))
+            if best is None or score < best:
+                best = score
+        assert best[1] < 10.0, (s["site_id"], best)
+        assert abs(best[2] - prefer) < 8.0 or best[1] < 6.0, (s["site_id"], best)
+
+
 def test_cad_forte_align_present(scene):
     cad = scene.get("cad") or {}
     assert cad.get("align_site_id") == "BS7_forte_hall"

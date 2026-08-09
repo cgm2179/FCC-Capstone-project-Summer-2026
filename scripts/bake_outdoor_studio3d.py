@@ -68,14 +68,15 @@ HEIGHT_OVERRIDES = {
     "BS3_400_ny_ave": 50.7,       # Meridian Phase 2 (excluded, informational)
 }
 
-# Optional lon/lat pin overrides (Apple Maps / field survey) when registry coords are approximate.
+# Lon/lat on the OSM building footprint (centroid) matching Apple Maps / OSM Buildings
+# ground truth. Address pins sometimes sit in the street; antennas must sit on the roof.
 COORD_OVERRIDES = {
-    "BS7_forte_hall": (38.90159, -77.01134),  # user survey — back-right of Forte Hall
-    "BS2_900_nj_ave": (38.90197, -77.01423),
-    "BS4_55_m_st": (38.90587, -77.01110),
-    "BS5_1140_n_capitol": (38.90476, -77.00920),
-    "BS6_1005_n_capitol": (38.90309, -77.00848),
-    "BS3_400_ny_ave": (38.90458, -77.01633),
+    "BS7_forte_hall": (38.901612, -77.011348),       # Forte Hall footprint
+    "BS2_900_nj_ave": (38.902110, -77.014037),       # 900 New Jersey Ave NW (~34 m)
+    "BS4_55_m_st": (38.905883, -77.011264),          # osm-w67094459 · 55 M St NW
+    "BS5_1140_n_capitol": (38.905004, -77.009485),   # osm-w67093724 · Sibley Plaza
+    "BS6_1005_n_capitol": (38.903029, -77.008657),   # osm-w535751723 · Conway Residence
+    "BS3_400_ny_ave": (38.904231, -77.016515),       # Meridian Phase 2
 }
 
 C0 = 299792458.0
