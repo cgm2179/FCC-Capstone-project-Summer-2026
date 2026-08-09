@@ -52,6 +52,43 @@ def test_live_base_stations_placed(scene):
         assert s["roof_height_m"] > 0
 
 
+def test_stations_match_outdoor_2d_lonlat(scene):
+    """Antenna XZ must sit on the Outdoor 2-D / BASE_STATIONS pin (no building hop)."""
+    import sys
+    sys.path.insert(0, str(SIM3D))
+    import voxelize_city as VC
+
+    man = {
+        "epsg": 3857,
+        "merc_scale": scene["merc_scale"],
+        "merc_anchor": scene["merc_anchor"],
+        "origin_units": scene["origin_units"],
+        "cell_size_m": scene["cell_size_m"],
+    }
+    nx, _ny, nz = scene["grid_shape"]
+    live = [s for s in scene["stations"] if s.get("status") == "live" and s.get("in_grid")]
+    assert live
+    for s in live:
+        vx, vz = VC.lonlat_to_vox(man, float(s["lon"]), float(s["lat"]))
+        assert abs(s["vx"] - round(vx)) <= 1, (s["site_id"], s["vx"], vx)
+        assert abs(s["vz"] - round(vz)) <= 1, (s["site_id"], s["vz"], vz)
+        cr = s.get("cad_roof") or {}
+        world = cr.get("world")
+        assert world is not None, s["site_id"]
+        assert abs(world[0] - (vx - nx / 2)) < 0.75, (s["site_id"], world[0], vx)
+        assert abs(world[2] - (vz - nz / 2)) < 0.75, (s["site_id"], world[2], vz)
+        assert cr.get("xy_source") == "lonlat_2d"
+
+
+def test_cad_forte_align_present(scene):
+    cad = scene.get("cad") or {}
+    assert cad.get("align_site_id") == "BS7_forte_hall"
+    off = cad.get("align_offset_local_m")
+    assert isinstance(off, list) and len(off) == 3
+    # Non-trivial fix point (metres in cube-local frame)
+    assert abs(off[0]) + abs(off[2]) > 1.0
+
+
 def test_excluded_sites(scene):
     by_id = {s["site_id"]: s for s in scene["stations"]}
     assert by_id["BS1_901_n_capitol"]["in_grid"] is False

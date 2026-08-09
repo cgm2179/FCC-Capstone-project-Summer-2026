@@ -139,51 +139,57 @@ def _fmt_cells(n: int) -> str:
     return f"{n:,} cells"
 
 
-def _best_rooftop_column(M, ix, iz, prefer_h_m=None, max_r=30, cell=2.0):
-    """Pick a building column near the pin — prefer surveyed height, then tallest, then closest.
+def _roof_height_at_pin(M, ix, iz, prefer_h_m=None, cell=2.0, ref_r=4):
+    """Resolve antenna AGL at the fixed lon/lat column (Outdoor 2-D parity).
 
-    Antennas sit on rooftops; 'nearest solid' often lands on a short shed / facade stub.
+    Horizontal search is intentionally tiny and only used as a height reference when
+    the pin column is empty (street / courtyard). XZ of the station never moves.
     """
     nx, ny, nz = M.shape
-    best = None  # (score, -roof_m, r, x, roof_y, z)
-    for r in range(0, max_r + 1):
+    if prefer_h_m is not None:
+        roof_m = float(prefer_h_m)
+        roof_y = min(ny - 2, max(0, int(round(roof_m / cell)) - 1))
+        return roof_y, roof_m, "survey_height"
+
+    def _col_roof(x, z):
+        solid = np.where(M[x, :, z] > 0)[0]
+        if not solid.size:
+            return None
+        ry = int(solid.max())
+        rm = (ry + 1) * cell
+        if rm < 6.0:
+            return None
+        return ry, rm
+
+    hit = _col_roof(ix, iz)
+    if hit is not None:
+        return hit[0], hit[1], "pin_column"
+
+    best = None  # (r, -rm, ry, rm)
+    for r in range(1, ref_r + 1):
         for dx in range(-r, r + 1):
             for dz in range(-r, r + 1):
-                if r > 0 and abs(dx) != r and abs(dz) != r:
+                if abs(dx) != r and abs(dz) != r:
                     continue
                 x, z = ix + dx, iz + dz
                 if not (0 <= x < nx and 0 <= z < nz):
                     continue
-                solid = np.where(M[x, :, z] > 0)[0]
-                if not solid.size:
+                hit = _col_roof(x, z)
+                if hit is None:
                     continue
-                roof_y = int(solid.max())
-                roof_m = (roof_y + 1) * cell
-                if roof_m < 6.0:          # skip curb / low stubs
-                    continue
-                # score: height match to survey (primary), then taller, then closer
-                if prefer_h_m is not None:
-                    hscore = -abs(roof_m - prefer_h_m)
-                else:
-                    hscore = roof_m
-                score = (hscore, roof_m, -r)
-                cand = (score, x, roof_y, z, r, roof_m)
-                if best is None or cand[0] > best[0]:
+                ry, rm = hit
+                cand = (r, -rm, ry, rm)
+                if best is None or cand < best:
                     best = cand
-        # early exit when we already have a good height match on/near the pin
-        if best is not None and r >= 8 and prefer_h_m is not None:
-            if abs(best[5] - prefer_h_m) <= 6.0:
-                break
-        if best is not None and r >= 12 and prefer_h_m is None:
+        if best is not None:
             break
     if best is None:
-        return ix, 0, iz, -1, 0.0
-    _, x, roof_y, z, r, roof_m = best
-    return x, roof_y, z, r, roof_m
+        return 0, 0.0, "none"
+    return best[2], best[3], "height_ref_nearby"
 
 
 def place_stations(sites, man, M):
-    """Lon/lat → voxel; snap Tx onto the best nearby rooftop (air cell just above)."""
+    """Lon/lat → voxel at the Outdoor 2-D pin; vertical roof/air only (no XY building hop)."""
     nx, ny, nz = M.shape
     cell = float(man["cell_size_m"])
     out = []
@@ -201,18 +207,11 @@ def place_stations(sites, man, M):
                         "vx": ix, "vz": iz})
             continue
         h_ov = HEIGHT_OVERRIDES.get(s["site_id"])
-        ix, roof_y, iz, snap_r, roof_m = _best_rooftop_column(
-            M, ix, iz, prefer_h_m=h_ov, max_r=30, cell=cell)
-        if snap_r < 0:
+        roof_y, roof_m, hsrc = _roof_height_at_pin(M, ix, iz, prefer_h_m=h_ov, cell=cell)
+        if hsrc == "none":
             out.append({**_site_public(s), "in_grid": False, "reason": "no_rooftop",
                         "vx": ix, "vz": iz})
             continue
-        src = "rooftop_match" if h_ov is not None else "rooftop_tallest"
-        if h_ov is not None:
-            # Keep surveyed height for the antenna AGL; column gives the building XY.
-            roof_m = float(h_ov)
-            roof_y = min(ny - 2, max(0, int(round(h_ov / cell)) - 1))
-            src = "survey_height+rooftop_xy"
         ty = min(ny - 1, roof_y + 1)          # air cell just above roof
         col = M[ix, :, iz]
         if col[ty] != 0:
@@ -230,8 +229,8 @@ def place_stations(sites, man, M):
             "y_m": round(ty * cell, 2),
             "z_m": round(iz * cell, 2),
             "roof_height_m": round(roof_m, 2),
-            "height_source": src,
-            "snap_cells": snap_r,
+            "height_source": hsrc,
+            "snap_cells": 0,
         })
     return out
 
@@ -271,72 +270,137 @@ def _load_cad_building_verts(obj_path: Path):
     return np.asarray(verts, float) if verts else np.zeros((0, 3))
 
 
-def attach_cad_roofs(stations, man, obj_path: Path = CAD_OBJ):
-    """Snap each in-grid station onto the CAD building rooftop polyhedron.
+# Control point shared with Outdoor 2-D (Leaflet BASE_STATIONS / outdoor_view.html).
+CAD_ALIGN_SITE_ID = "BS7_forte_hall"
 
-    Writes cad_roof.{cube_local_m, world, voxel} and updates vx/vy/vz / roof_height_m
-    so the studio antenna marker sits on the 3-D mesh (not street level).
+
+def _cad_roof_height_near(V, sx0, sz0, prefer_h_m=None, max_r=40.0):
+    """Sample CAD roof AGL near a cube-local pin. Does not move the pin horizontally."""
+    d2 = (V[:, 0] - sx0) ** 2 + (V[:, 2] - sz0) ** 2
+    m = d2 <= max_r * max_r
+    if not m.any():
+        i = int(np.argmin(d2))
+        return float(V[i, 1]), float(np.sqrt(d2[i])), 1
+    sub = V[m]
+    if prefer_h_m is not None:
+        pref = sub[np.abs(sub[:, 1] - prefer_h_m) <= 8]
+        band = pref if len(pref) >= 3 else sub[sub[:, 1] >= sub[:, 1].max() - 3]
+    else:
+        band = sub[sub[:, 1] >= sub[:, 1].max() - 3]
+    if len(band) < 1:
+        band = sub
+    # Closest roof-band vert to the 2-D pin (height only — XY stays on the pin).
+    j = int(np.argmin((band[:, 0] - sx0) ** 2 + (band[:, 2] - sz0) ** 2))
+    return float(band[j, 1]), float(np.hypot(band[j, 0] - sx0, band[j, 2] - sz0)), int(len(band))
+
+
+def compute_cad_align_offset(V, man, site_id: str = CAD_ALIGN_SITE_ID):
+    """One-point CAD↔2-D fix: translate mesh so Forte Hall roof sits under the 2-D pin.
+
+    Returns cube-local unscaled metres [dx, 0, dz] added to CAD verts / mesh position.
     """
+    if site_id not in COORD_OVERRIDES:
+        return [0.0, 0.0, 0.0], None
+    lat, lon = COORD_OVERRIDES[site_id]
+    prefer = HEIGHT_OVERRIDES.get(site_id)
+    mx, mz = VC.lonlat_to_merc(float(lon), float(lat))
+    cube = CUBE_ANCHOR
+    sx0, sz0 = mx - cube[0], mz - cube[1]
+    d2 = (V[:, 0] - sx0) ** 2 + (V[:, 2] - sz0) ** 2
+    found = None
+    for rad in (20, 30, 40, 60):
+        m = d2 <= rad * rad
+        if not m.any():
+            continue
+        sub = V[m]
+        if prefer is not None:
+            pref = sub[np.abs(sub[:, 1] - prefer) <= 8]
+            band = pref if len(pref) >= 3 else sub[sub[:, 1] >= sub[:, 1].max() - 3]
+        else:
+            band = sub[sub[:, 1] >= sub[:, 1].max() - 3]
+        if len(band) < 1:
+            continue
+        # Use the closest roof-band vert (not the blob mean) so the fix point is sharp.
+        j = int(np.argmin((band[:, 0] - sx0) ** 2 + (band[:, 2] - sz0) ** 2))
+        found = (float(band[j, 0]), float(band[j, 2]), rad)
+        break
+    if not found:
+        return [0.0, 0.0, 0.0], None
+    rx, rz, rad = found
+    dx, dz = sx0 - rx, sz0 - rz
+    ms = float(man.get("merc_scale", 1.0))
+    print(f"  CAD align fix @ {site_id}: Δlocal=({dx:.2f},{dz:.2f}) m "
+          f"(ground {dx * ms:.2f},{dz * ms:.2f} m, search_r={rad})")
+    return [round(dx, 4), 0.0, round(dz, 4)], {
+        "site_id": site_id,
+        "lat": lat,
+        "lon": lon,
+        "cube_local_pin_m": [round(sx0, 3), round(sz0, 3)],
+        "cube_local_roof_m": [round(rx, 3), round(rz, 3)],
+        "search_r_m": rad,
+        "offset_ground_m": [round(dx * ms, 3), round(dz * ms, 3)],
+    }
+
+
+def attach_cad_roofs(stations, man, obj_path: Path = CAD_OBJ):
+    """Attach CAD roof heights; keep antenna XZ on the Outdoor 2-D lon/lat pin.
+
+    Horizontal CAD centroid snap is intentionally disabled — it was hopping markers
+    onto neighbouring buildings. A single Forte Hall control-point offset aligns the
+    whole CAD mesh to the 2-D map; markers use lon/lat world XZ + CAD roof Y.
+    """
+    align = [0.0, 0.0, 0.0]
+    align_meta = None
     if not obj_path.exists():
         print(f"  (CAD roofs skipped — missing {obj_path})")
-        return stations
+        return stations, align, align_meta
     V = _load_cad_building_verts(obj_path)
     if len(V) == 0:
         print("  (CAD roofs skipped — no Areas:building verts)")
-        return stations
+        return stations, align, align_meta
     ms = float(man["merc_scale"])
     anch = man["merc_anchor"]
     ox, _oy, oz = man["origin_units"]
     cell = float(man["cell_size_m"])
     nx, ny, nz = man["grid_shape"]
     cube = CUBE_ANCHOR
+    align, align_meta = compute_cad_align_offset(V, man, CAD_ALIGN_SITE_ID)
+    ax, _ay, az = align
     for s in stations:
         if not s.get("in_grid") or s.get("lat") is None:
             continue
         prefer = HEIGHT_OVERRIDES.get(s["site_id"], s.get("roof_height_m"))
         mx, mz = VC.lonlat_to_merc(float(s["lon"]), float(s["lat"]))
-        sx0, sz0 = mx - cube[0], mz - cube[1]
-        d2 = (V[:, 0] - sx0) ** 2 + (V[:, 2] - sz0) ** 2
-        found = None
-        for rad in (25, 35, 45, 70):
-            m = d2 <= rad * rad
-            if not m.any():
-                continue
-            sub = V[m]
-            if prefer is not None:
-                pref = sub[np.abs(sub[:, 1] - prefer) <= 8]
-                band = pref if len(pref) >= 3 else sub[sub[:, 1] >= sub[:, 1].max() - 3]
-            else:
-                band = sub[sub[:, 1] >= sub[:, 1].max() - 3]
-            if len(band) < 1:
-                continue
-            cx, cz = float(band[:, 0].mean()), float(band[:, 2].mean())
-            cy = float(band[:, 1].max())
-            found = (cx, cy, cz, rad, len(band))
-            break
-        if not found:
-            continue
-        sx, sy, sz, rad, n = found
-        wx = (ms / cell) * sx + (ms * (cube[0] - anch[0]) - ox) / cell - nx / 2
+        # Pin in unshifted CAD frame, then into mesh frame (pre-align) for height sample.
+        sx_pin, sz_pin = mx - cube[0], mz - cube[1]
+        sx_mesh, sz_mesh = sx_pin - ax, sz_pin - az
+        sy, d_xy, n = _cad_roof_height_near(V, sx_mesh, sz_mesh, prefer_h_m=prefer)
+        if prefer is not None:
+            sy = float(prefer)
+        # World XZ from lon/lat (same transform as Outdoor 2-D → grid) — not CAD centroid.
+        wx = (ms * (mx - anch[0]) - ox) / cell - nx / 2
+        wz = (ms * (mz - anch[1]) - oz) / cell - nz / 2
         wy = (1 / cell) * sy - ny / 2
-        wz = (ms / cell) * sz + (ms * (cube[1] - anch[1]) - oz) / cell - nz / 2
-        vx = int(round((ms * (sx + cube[0] - anch[0]) - ox) / cell))
-        vz = int(round((ms * (sz + cube[1] - anch[1]) - oz) / cell))
+        vx = int(round((ms * (mx - anch[0]) - ox) / cell))
+        vz = int(round((ms * (mz - anch[1]) - oz) / cell))
         vy = min(ny - 1, max(1, int(round(sy / cell)) + 1))
         s["cad_roof"] = {
-            "cube_local_m": [round(sx, 2), round(sy, 2), round(sz, 2)],
-            "search_r_m": rad, "n_verts": int(n),
+            "cube_local_m": [round(sx_pin, 2), round(sy, 2), round(sz_pin, 2)],
+            "cad_mesh_local_m": [round(sx_mesh, 2), round(sy, 2), round(sz_mesh, 2)],
+            "nearest_roof_xy_m": round(d_xy, 2),
+            "n_verts": int(n),
             "world": [round(wx, 2), round(wy, 2), round(wz, 2)],
             "voxel": [vx, vy, vz],
+            "xy_source": "lonlat_2d",
         }
-        s["vx"], s["vy"], s["vz"] = vx, vy, vz
+        # Keep Outdoor 2-D XZ; only lift the antenna onto the roof height.
+        s["vy"] = vy
         s["roof_height_m"] = round(sy, 2)
-        s["height_source"] = "cad_building_roof"
-        s["x_m"] = round(vx * cell, 2)
+        s["height_source"] = "cad_roof_y+lonlat_xy"
         s["y_m"] = round(sy, 2)
-        s["z_m"] = round(vz * cell, 2)
-        print(f"  CAD roof {s['site_id']:22s} {sy:.1f} m → voxel ({vx},{vy},{vz})")
-    return stations
+        print(f"  CAD roof {s['site_id']:22s} Y={sy:.1f} m · 2D XZ voxel ({vx},{vz}) "
+              f"· nearest CAD XY {d_xy:.1f} m")
+    return stations, align, align_meta
 
 
 def export_buildings_json(gdf, heights, fr, anchor, cell, out_path: Path, max_buildings=2500):
@@ -534,7 +598,7 @@ def main():
     (city / "manifest_3d.json").write_text(json.dumps(man, indent=2))
 
     stations = place_stations(sites, man, M)
-    stations = attach_cad_roofs(stations, man, CAD_OBJ)
+    stations, cad_align, cad_align_meta = attach_cad_roofs(stations, man, CAD_OBJ)
     for st in stations:
         tag = "LIVE" if st.get("status") == "live" and st.get("in_grid") else st.get("status", "?")
         if st.get("in_grid"):
@@ -593,13 +657,18 @@ def main():
             "mtl": "../../../../Data/models/NoMa_DC/Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.mtl",
             "name": "Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D",
             "cube_anchor_m": list(CUBE_ANCHOR),
+            # One-point fix: translate CAD so Forte Hall matches Outdoor 2-D / BASE_STATIONS.
+            "align_site_id": CAD_ALIGN_SITE_ID,
+            "align_offset_local_m": cad_align,
+            "align_meta": cad_align_meta,
         },
         "n_buildings_mesh": n_build,
         "notes": (
             "Browser studio grid is 2 m (Outdoor 2-D parity). "
             "fdtd_foundation records the massive indoor-scale / λ/8 cell budgets "
-            "for the later full-wave scene. Transmitters are known base stations "
-            "snapped onto CAD building rooftops (cad_roof.world) for antenna display."
+            "for the later full-wave scene. Transmitters use BASE_STATIONS / registry "
+            "lon/lat (same pins as Outdoor 2-D); CAD mesh is one-point-aligned to "
+            "Forte Hall and only supplies antenna roof height."
         ),
     }
     (out / "scene.json").write_text(json.dumps(scene, indent=2))

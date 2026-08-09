@@ -149,9 +149,6 @@
     const CAD_DIR = '../../Data/models/NoMa_DC/';
     const CAD_OBJ = 'Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.obj';
     const CAD_MTL = 'Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.mtl';
-    // Blender OSM export stores an absolute-Mercator "Cube" marker; local verts are cube-relative metres.
-    const CUBE_ANCHOR = [8572395.0, 4707865.5];
-
     const BANDS = [
       ['617', 'LTE 617 (B71)'], ['751', 'LTE 751 (B13)'], ['869', 'LTE 869 (B5)'],
       ['1960', 'LTE 1960'], ['2506', 'NR n41 2506'], ['3700', 'NR n77 3700'],
@@ -171,6 +168,9 @@
     const CELL = sceneMeta.cell_size_m;
     const [OX, OY, OZ] = sceneMeta.origin_units;
     const MS = sceneMeta.merc_scale, ANCH = sceneMeta.merc_anchor;
+    // Blender OSM Cube marker + Forte Hall one-point CAD↔2-D align (cube-local metres).
+    const CUBE_ANCHOR = (sceneMeta.cad && sceneMeta.cad.cube_anchor_m) || [8572395.0, 4707865.5];
+    const CAD_ALIGN = (sceneMeta.cad && sceneMeta.cad.align_offset_local_m) || [0, 0, 0];
     const idx = (x, y, z) => (x * Y + y) * Z + z;
     const GRID = new Uint8Array(await fetch(`${ASSET}/material_grid.bin`).then(r => r.arrayBuffer()));
     if (GRID.length !== X * Y * Z) throw new Error(`grid size mismatch ${GRID.length} vs ${X * Y * Z}`);
@@ -257,11 +257,12 @@
       return 0x8a8f8c;
     }
     function applyCadGeoref(root) {
-      // OBJ local (sx,sy,sz) = cube-relative metres → grid voxel frame → centered three.js
+      // OBJ local (sx,sy,sz) = cube-relative metres → grid voxel frame → centered three.js.
+      // CAD_ALIGN is the Forte Hall control-point offset (cube-local m) so the mesh matches Outdoor 2-D.
       const sx = MS / CELL, sy = 1 / CELL, sz = MS / CELL;
-      const tx = (MS * (CUBE_ANCHOR[0] - ANCH[0]) - OX) / CELL - cX;
-      const ty = (0 - OY) / CELL - cY;
-      const tz = (MS * (CUBE_ANCHOR[1] - ANCH[1]) - OZ) / CELL - cZ;
+      const tx = (MS * (CUBE_ANCHOR[0] - ANCH[0] + CAD_ALIGN[0]) - OX) / CELL - cX;
+      const ty = (0 - OY) / CELL - cY + (CAD_ALIGN[1] || 0) / CELL;
+      const tz = (MS * (CUBE_ANCHOR[1] - ANCH[1] + CAD_ALIGN[2]) - OZ) / CELL - cZ;
       root.scale.set(sx, sy, sz);
       root.position.set(tx, ty, tz);
     }
@@ -353,10 +354,10 @@
       g.userData.ball = ball;
       return g;
     }
-    /** Place antenna on the CAD building rooftop (not street level). */
+    /** Place antenna at Outdoor 2-D lon/lat XZ; Y from CAD/survey roof height. */
     function placeAntennaMarker(s) {
       const m = txMeshes[s.site_id]; if (!m) return;
-      // Prefer baked CAD roof world position (matches the 3-D polyhedron exactly).
+      // cad_roof.world XZ is lon/lat-projected (Outdoor 2-D parity); Y is roof AGL.
       if (s.cad_roof && s.cad_roof.world) {
         const [wx, wy, wz] = s.cad_roof.world;
         m.position.set(wx, wy + 0.2, wz);
