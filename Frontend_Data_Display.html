@@ -403,6 +403,11 @@
       </div>
 
       <div id="timeTab" class="tab-content" style="display: none;">
+        <!-- Outdoor mode (NoMa): the 2D outdoor walk replayed on OSM — a self-contained Time Elapse
+             (Leaflet walk map + histogram + metric-vs-time line + table + play/scrub controls),
+             mirroring the indoor playback below. Revealed by landing.js when the workspace is Outdoor;
+             the indoor controls/grid/table (siblings below) are hidden by #timeTab.outdoor-mode CSS. -->
+        <div id="outdoorTimeHost" style="display:none; width:100%; border-radius:6px; overflow:hidden; border:1px solid var(--line);"></div>
         <p class="sub">Map Coverage and Histogram always show the whole dataset. This tab replays it: scrub or play the timeline to watch a synced mini map, histogram, and points table build up together as the walk progressed.</p>
         <div class="time-controls">
           <button type="button" id="playBtn">Play</button>
