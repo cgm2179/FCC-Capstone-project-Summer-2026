@@ -1,0 +1,22 @@
+# Materials for Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D
+# Source: Test_3D_Render_NoMa_Washington_DC_3D_Sim_v1 (Blender OSM export)
+
+newmtl Material
+Kd 0.55 0.55 0.58
+Ka 0.10 0.10 0.10
+d 1.0
+illum 2
+
+newmtl rastMat
+Kd 0.22 0.26 0.24
+Ka 0.05 0.05 0.05
+d 1.0
+illum 2
+
+newmtl concrete_facade
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Kd 0.72 0.72 0.70
+Ks 0.35 0.35 0.35
+d 1.000000
+illum 2

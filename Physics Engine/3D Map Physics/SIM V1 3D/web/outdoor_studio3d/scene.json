@@ -1,0 +1,618 @@
+{
+  "version": 1,
+  "studio": "outdoor_fw_3d",
+  "domain": "city_outdoor",
+  "cell_size_m": 2.0,
+  "grid_shape": [
+    622,
+    30,
+    522
+  ],
+  "origin_units": [
+    -186.9122,
+    0.0,
+    -506.4991
+  ],
+  "epsg": 3857,
+  "merc_scale": 0.778243,
+  "merc_anchor": [
+    8572425.168,
+    4707870.298
+  ],
+  "anchor_lonlat": [
+    -77.0074055,
+    38.90358466666667
+  ],
+  "bbox_lonlat": [
+    -77.0196073,
+    38.8990348,
+    -77.005248,
+    38.9084127
+  ],
+  "materials": [
+    {
+      "id": 0,
+      "name": "air / street",
+      "color": "#eef2ef",
+      "loss": "\u2014",
+      "loss_db": 0.0
+    },
+    {
+      "id": 2,
+      "name": "concrete core",
+      "color": "#555555",
+      "loss": "heavy (O2I)",
+      "loss_db": 20.0
+    },
+    {
+      "id": 4,
+      "name": "foliage / trees",
+      "color": "#2e9e3f",
+      "loss": "light (dilute)",
+      "loss_db": 0.3,
+      "loss_per_m_db": 0.3
+    },
+    {
+      "id": 5,
+      "name": "glass facade",
+      "color": "#3a86ff",
+      "loss": "light",
+      "loss_db": 3.0
+    }
+  ],
+  "physics": {
+    "0": {
+      "n": 1.0,
+      "gPerF": 0.0,
+      "rigid": false
+    },
+    "2": {
+      "n": 2.2944,
+      "gPerF": 0.42812,
+      "rigid": false
+    },
+    "3": {
+      "n": 2.2944,
+      "gPerF": 0.0,
+      "rigid": true
+    },
+    "4": {
+      "n": 1.411,
+      "gPerF": 0.00294,
+      "rigid": false
+    },
+    "5": {
+      "n": 2.512,
+      "gPerF": 0.04076,
+      "rigid": false
+    }
+  },
+  "wall_db_per_voxel": [
+    0,
+    2.5,
+    18.0,
+    30.0,
+    1.5,
+    3.0
+  ],
+  "stations": [
+    {
+      "site_id": "BS7_forte_hall",
+      "name": "Forte Hall",
+      "address": "Gonzaga College HS campus, I St NW, Washington, DC 20002",
+      "lat": 38.901612,
+      "lon": -77.011348,
+      "status": "live",
+      "role": "anchor",
+      "carriers": [
+        {
+          "carrier": "Verizon",
+          "pcis": [
+            396,
+            397,
+            398
+          ],
+          "bands": [
+            13,
+            2,
+            256,
+            26,
+            4,
+            5,
+            65,
+            66,
+            77,
+            78
+          ]
+        }
+      ],
+      "in_grid": true,
+      "vx": 264,
+      "vy": 11,
+      "vz": 143,
+      "x_m": 528.0,
+      "y_m": 20.0,
+      "z_m": 286.0,
+      "roof_height_m": 20.0,
+      "height_source": "cad_roof_y+lonlat_xy",
+      "snap_cells": 0,
+      "cad_roof": {
+        "cube_local_m": [
+          469.04,
+          20.0,
+          -277.38
+        ],
+        "cad_mesh_local_m": [
+          465.47,
+          20.0,
+          -273.26
+        ],
+        "nearest_roof_xy_m": 0.0,
+        "n_verts": 3,
+        "world": [
+          -46.77,
+          -5.0,
+          -117.55
+        ],
+        "voxel": [
+          264,
+          11,
+          143
+        ],
+        "xy_source": "lonlat_2d"
+      }
+    },
+    {
+      "site_id": "BS2_900_nj_ave",
+      "name": "Second Base Station",
+      "address": "900 New Jersey Ave NW, Washington, DC 20002",
+      "lat": 38.90211,
+      "lon": -77.014037,
+      "status": "live",
+      "role": "donor",
+      "carriers": [
+        {
+          "carrier": "Verizon",
+          "pcis": [
+            291,
+            82
+          ],
+          "bands": [
+            2,
+            5,
+            13,
+            66
+          ]
+        },
+        {
+          "carrier": "T-Mobile",
+          "pcis": [
+            120,
+            179,
+            142,
+            42,
+            165,
+            5,
+            244,
+            316,
+            20,
+            231,
+            233,
+            453,
+            201,
+            232,
+            463,
+            2,
+            168,
+            150
+          ],
+          "bands": [
+            41,
+            4,
+            66,
+            2,
+            12,
+            71
+          ]
+        }
+      ],
+      "in_grid": true,
+      "vx": 381,
+      "vy": 18,
+      "vz": 171,
+      "x_m": 762.0,
+      "y_m": 34.0,
+      "z_m": 342.0,
+      "roof_height_m": 34.0,
+      "height_source": "cad_roof_y+lonlat_xy",
+      "snap_cells": 0,
+      "cad_roof": {
+        "cube_local_m": [
+          768.38,
+          34.0,
+          -206.15
+        ],
+        "cad_mesh_local_m": [
+          764.81,
+          34.0,
+          -202.02
+        ],
+        "nearest_roof_xy_m": 1.5,
+        "n_verts": 98,
+        "world": [
+          69.71,
+          2.0,
+          -89.83
+        ],
+        "voxel": [
+          381,
+          18,
+          171
+        ],
+        "xy_source": "lonlat_2d"
+      }
+    },
+    {
+      "site_id": "BS4_55_m_st",
+      "name": "Fourth Base Station",
+      "address": "55 M St NW, Washington, DC 20001",
+      "lat": 38.905883,
+      "lon": -77.011264,
+      "status": "live",
+      "role": "donor",
+      "carriers": [
+        {
+          "carrier": "T-Mobile",
+          "pcis": [
+            17,
+            489,
+            172,
+            272,
+            429,
+            382,
+            194,
+            300,
+            56,
+            214
+          ],
+          "bands": [
+            41,
+            66
+          ]
+        }
+      ],
+      "in_grid": true,
+      "vx": 261,
+      "vy": 27,
+      "vz": 381,
+      "x_m": 522.0,
+      "y_m": 53.0,
+      "z_m": 762.0,
+      "roof_height_m": 53.0,
+      "height_source": "cad_roof_y+lonlat_xy",
+      "snap_cells": 0,
+      "cad_roof": {
+        "cube_local_m": [
+          459.69,
+          53.0,
+          333.57
+        ],
+        "cad_mesh_local_m": [
+          456.12,
+          53.0,
+          337.69
+        ],
+        "nearest_roof_xy_m": 2.19,
+        "n_verts": 21,
+        "world": [
+          -50.41,
+          11.5,
+          120.18
+        ],
+        "voxel": [
+          261,
+          27,
+          381
+        ],
+        "xy_source": "lonlat_2d"
+      }
+    },
+    {
+      "site_id": "BS5_1140_n_capitol",
+      "name": "Fifth Base Station",
+      "address": "1140 North Capitol St NW, Washington, DC 20002",
+      "lat": 38.905004,
+      "lon": -77.009485,
+      "status": "live",
+      "role": "donor",
+      "carriers": [
+        {
+          "carrier": "AT&T",
+          "pcis": [
+            67,
+            185,
+            171,
+            172,
+            173,
+            293
+          ],
+          "bands": [
+            2,
+            12,
+            14,
+            30,
+            66
+          ]
+        }
+      ],
+      "in_grid": true,
+      "vx": 184,
+      "vy": 17,
+      "vz": 332,
+      "x_m": 368.0,
+      "y_m": 33.0,
+      "z_m": 664.0,
+      "roof_height_m": 33.0,
+      "height_source": "cad_roof_y+lonlat_xy",
+      "snap_cells": 0,
+      "cad_roof": {
+        "cube_local_m": [
+          261.66,
+          33.0,
+          207.83
+        ],
+        "cad_mesh_local_m": [
+          258.08,
+          33.0,
+          211.95
+        ],
+        "nearest_roof_xy_m": 22.17,
+        "n_verts": 11,
+        "world": [
+          -127.47,
+          1.5,
+          71.25
+        ],
+        "voxel": [
+          184,
+          17,
+          332
+        ],
+        "xy_source": "lonlat_2d"
+      }
+    },
+    {
+      "site_id": "BS6_1005_n_capitol",
+      "name": "Sixth Base Station",
+      "address": "1005 North Capitol St NE, Washington, DC 20002",
+      "lat": 38.903029,
+      "lon": -77.008657,
+      "status": "live",
+      "role": "donor",
+      "carriers": [
+        {
+          "carrier": "T-Mobile",
+          "pcis": [
+            71,
+            169,
+            256,
+            199,
+            255,
+            54,
+            194,
+            193,
+            359,
+            140
+          ],
+          "bands": [
+            12,
+            71,
+            41,
+            2,
+            4,
+            66
+          ]
+        },
+        {
+          "carrier": "AT&T",
+          "pcis": [
+            146,
+            411
+          ],
+          "bands": [
+            2,
+            30
+          ]
+        }
+      ],
+      "in_grid": true,
+      "vx": 148,
+      "vy": 26,
+      "vz": 222,
+      "x_m": 296.0,
+      "y_m": 50.7,
+      "z_m": 444.0,
+      "roof_height_m": 50.7,
+      "height_source": "cad_roof_y+lonlat_xy",
+      "snap_cells": 0,
+      "cad_roof": {
+        "cube_local_m": [
+          169.48,
+          50.7,
+          -74.69
+        ],
+        "cad_mesh_local_m": [
+          165.91,
+          50.7,
+          -70.57
+        ],
+        "nearest_roof_xy_m": 24.21,
+        "n_verts": 3,
+        "world": [
+          -163.33,
+          10.35,
+          -38.68
+        ],
+        "voxel": [
+          148,
+          26,
+          222
+        ],
+        "xy_source": "lonlat_2d"
+      }
+    },
+    {
+      "site_id": "BS1_901_n_capitol",
+      "name": "First Base Station",
+      "address": "901 North Capitol St, Washington, DC",
+      "lat": null,
+      "lon": null,
+      "status": "na_tv",
+      "role": "excluded",
+      "carriers": [],
+      "in_grid": false,
+      "reason": "no_coords"
+    },
+    {
+      "site_id": "BS3_400_ny_ave",
+      "name": "Third Base Station",
+      "address": "400 New York Ave NW, Washington, DC 20001",
+      "lat": 38.904231,
+      "lon": -77.016515,
+      "status": "na_bankrupt",
+      "role": "excluded",
+      "carriers": [],
+      "in_grid": true,
+      "vx": 488,
+      "vy": 26,
+      "vz": 289,
+      "x_m": 976.0,
+      "y_m": 50.7,
+      "z_m": 578.0,
+      "roof_height_m": 50.7,
+      "height_source": "cad_roof_y+lonlat_xy",
+      "snap_cells": 0,
+      "cad_roof": {
+        "cube_local_m": [
+          1044.23,
+          50.7,
+          97.25
+        ],
+        "cad_mesh_local_m": [
+          1040.66,
+          50.7,
+          101.38
+        ],
+        "nearest_roof_xy_m": 29.82,
+        "n_verts": 5,
+        "world": [
+          177.05,
+          10.35,
+          28.23
+        ],
+        "voxel": [
+          488,
+          26,
+          289
+        ],
+        "xy_source": "lonlat_2d"
+      }
+    }
+  ],
+  "fdtd_foundation": {
+    "indoor_scale_0p3m": {
+      "cell_m": 0.3,
+      "grid": [
+        4147,
+        200,
+        3480
+      ],
+      "n_cells": 2886312000,
+      "note": "Same cell size as Indoor 3-D Full-Wave Studio \u2014 not the browser asset."
+    },
+    "lambda_over_8": [
+      {
+        "f_mhz": 617.0,
+        "cell_m": 0.060736,
+        "npw": 8,
+        "grid": [
+          20483,
+          988,
+          17190
+        ],
+        "n_cells": 347877536760,
+        "n_cells_label": "347.88 Gcell"
+      },
+      {
+        "f_mhz": 2412.0,
+        "cell_m": 0.015537,
+        "npw": 8,
+        "grid": [
+          80070,
+          3862,
+          67197
+        ],
+        "n_cells": 20779351156980,
+        "n_cells_label": "20.78 Tcell"
+      },
+      {
+        "f_mhz": 3700.0,
+        "cell_m": 0.010128,
+        "npw": 8,
+        "grid": [
+          122827,
+          5925,
+          103080
+        ],
+        "n_cells": 75016467423000,
+        "n_cells_label": "75.02 Tcell"
+      }
+    ],
+    "domain_m": [
+      1244.0,
+      60.0,
+      1044.0
+    ]
+  },
+  "assets": {
+    "material_grid": "material_grid.bin",
+    "buildings": "buildings.json",
+    "dtype": "uint8",
+    "order": "x-y-z"
+  },
+  "n_buildings_mesh": 1055,
+  "notes": "Browser studio grid is 2 m (Outdoor 2-D parity). Tx lon/lat sit on OSM building footprints (Apple Maps / OSM Buildings ground truth). Default studio view = OSM extrusions; Real CAD OBJ is optional (sparse at some sites).",
+  "cad": {
+    "obj": "../../../../Data/models/NoMa_DC/Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.obj",
+    "mtl": "../../../../Data/models/NoMa_DC/Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.mtl",
+    "name": "Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D",
+    "cube_anchor_m": [
+      8572395.0,
+      4707865.5
+    ],
+    "align_site_id": "BS7_forte_hall",
+    "align_offset_local_m": [
+      3.5725,
+      0.0,
+      -4.1222
+    ],
+    "align_meta": {
+      "site_id": "BS7_forte_hall",
+      "lat": 38.901612,
+      "lon": -77.011348,
+      "cube_local_pin_m": [
+        469.045,
+        -277.381
+      ],
+      "cube_local_roof_m": [
+        465.472,
+        -273.259
+      ],
+      "search_r_m": 20,
+      "offset_ground_m": [
+        2.78,
+        -3.208
+      ]
+    }
+  }
+}

@@ -256,15 +256,23 @@ export async function onnxTiledPredict3d(session, grid, dims, cell, fMHz, tx, co
 const WALL_DB = [0, 2.5, 7.0, 30.0, 3.0, 3.0];
 // Absolute-RSRP coverage over open cells: RSRP = Ptx + Gtx − FSPL(1m) − 10·n·log10(d) − Σ wall(ray).
 // A 3-D DDA (Amanatides–Woo) marches Tx→voxel through the grid, summing wall loss (indoor shadows).
+// opts.wallDb: optional per-class dB table (outdoor studio uses heavier concrete-core loss).
 export function eikonalRsrp3d(grid, dims, cell, fMHz, tx, txDbm, opts = {}) {
   const [X, Y, Z] = dims, N = X * Y * Z, id = (x, y, z) => (x * Y + y) * Z + z;
   const n = opts.pathExp || 2.2, Gtx = opts.gainDbi ?? 2.0, capWall = opts.wallCap || 80.0;
   const fscale = Math.max(1.0, Math.pow(fMHz / 2000.0, 0.25));                  // walls lose a bit more at higher f
-  const wdb = WALL_DB.map(v => v * fscale);
+  const baseWall = opts.wallDb || WALL_DB;
+  const wdb = baseWall.map(v => v * fscale);
   const fspl1 = 20 * Math.log10(fMHz) - 27.55;                                  // free-space PL at 1 m (dB)
   const db = new Float32Array(N).fill(-Infinity);
   const tcx = tx.x + 0.5, tcy = tx.y + 0.5, tcz = tx.z + 0.5;
-  for (let X0 = 0; X0 < X; X0++) for (let Y0 = 0; Y0 < Y; Y0++) for (let Z0 = 0; Z0 < Z; Z0++) {
+  const yLo = opts.yLo != null ? opts.yLo : 0, yHi = opts.yHi != null ? opts.yHi : Y;  // outdoor: street band
+  const xLo = opts.xLo != null ? opts.xLo : 0, xHi = opts.xHi != null ? opts.xHi : X;
+  const zLo = opts.zLo != null ? opts.zLo : 0, zHi = opts.zHi != null ? opts.zHi : Z;
+  // Optional panel pattern: boresightDeg from N (0=N,90=E), halfPowerDeg beamwidth → dB gain vs azimuth.
+  const bore = opts.boresightDeg, hp = opts.halfPowerDeg || 65;
+  const hasPanel = Number.isFinite(bore);
+  for (let X0 = xLo; X0 < xHi; X0++) for (let Y0 = yLo; Y0 < yHi; Y0++) for (let Z0 = zLo; Z0 < zHi; Z0++) {
     const i = id(X0, Y0, Z0), c = grid[i]; if (!(c === 0 || c === 4)) continue;  // open cells only
     const dm = Math.hypot(X0 - tx.x, Y0 - tx.y, Z0 - tx.z) * cell;
     // --- march Tx→voxel, accumulate wall loss for solid voxels strictly between ---
@@ -289,7 +297,16 @@ export function eikonalRsrp3d(grid, dims, cell, fMHz, tx, txDbm, opts = {}) {
       if (cc !== 0 && cc !== 4) { wall += wdb[cc] || wdb[1]; if (wall > capWall) { wall = capWall; break; } }
     }
     const pl = fspl1 + 10 * n * Math.log10(Math.max(dm, 1.0));
-    db[i] = txDbm + Gtx - pl - Math.min(wall, capWall);
+    let gAnt = Gtx;
+    if (hasPanel) {
+      // Grid: +X ≈ west (render), +Z ≈ north. Azimuth from N, clockwise.
+      const az = Math.atan2(-(X0 - tx.x), (Z0 - tx.z)) * 180 / Math.PI; // 0=N, + = E
+      let dAz = ((az - bore + 540) % 360) - 180;
+      const u = Math.max(0, Math.cos(dAz * Math.PI / 180));
+      const nBeam = Math.log(0.5) / Math.log(Math.max(1e-6, Math.cos(hp * Math.PI / 360)));
+      gAnt = Gtx + 10 * Math.log10(Math.max(1e-4, Math.pow(u, nBeam)));
+    }
+    db[i] = txDbm + gAnt - pl - Math.min(wall, capWall);
   }
   return db;
 }

@@ -615,7 +615,7 @@
              Frontend/simulator/simulation3d.js; assets from SIM3D/web/. -->
         <!-- 3D Simulation: the SIM V3 3-D Full-Wave Studio (voxel grid + ONNX/FDTD), embedded like
              the 2-D studio. Indoor = fw_studio3d.html (7th-floor voxel model, three.js); outdoor =
-             fw_studio3d_outdoor.html (placeholder until an outdoor voxel scene exists). landing.js
+             fw_studio3d_outdoor.html (NoMa OSM city + known base stations). landing.js
              reveals the matching one by environment. Replaces the old simulation3d.js sandbox. -->
         <div id="sim3dPanel" hidden>
           <div class="sim-bar" id="simFw3dBar" style="align-items:center; gap:10px; flex-wrap:wrap;">
@@ -643,8 +643,8 @@
           </script>
 
           <div class="sim-bar" id="simFw3dBarOut" style="display:none; align-items:center; gap:10px; flex-wrap:wrap;">
-            <button type="button" class="sim-btn" id="simFw3dToggleOut">▶ Outdoor 3-D Full-Wave (SIM&nbsp;V3 · placeholder)</button>
-            <span class="sim-note">Outdoor 3-D voxel model — placeholder until an outdoor voxel scene is generated. Use the 2-D outdoor studio for live outdoor coverage.</span>
+            <button type="button" class="sim-btn" id="simFw3dToggleOut">▶ Outdoor 3-D Full-Wave (SIM&nbsp;V3 · NoMa city · BS)</button>
+            <span class="sim-note">NoMa OSM buildings as 3-D polyhedra + penetrable materials (air / concrete core / foliage / glass). Transmitters are the known base stations. Street-level eikonal coverage or sub-volume FDTD; whole-city λ/8 is the later foundation job.</span>
           </div>
           <div id="simFw3dWrapOut" style="display:none; margin:6px 0 16px;">
             <iframe id="simFw3dFrameOut" title="SIM V3 Full-Wave 3D Outdoor"
@@ -656,7 +656,7 @@
                   w = document.getElementById('simFw3dWrapOut'),
                   f = document.getElementById('simFw3dFrameOut');
               if (!b) return;
-              var LABEL = ' Outdoor 3-D Full-Wave (SIM V3 \u00b7 placeholder)';
+              var LABEL = ' Outdoor 3-D Full-Wave (SIM V3 \u00b7 NoMa city \u00b7 BS)';
               b.addEventListener('click', function () {
                 var open = w.style.display === 'none';
                 if (open && !f.getAttribute('src')) f.setAttribute('src', 'Frontend/simulator/fw_studio3d_outdoor.html');
