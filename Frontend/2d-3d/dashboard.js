@@ -660,16 +660,25 @@
       return [fp];
     }
 
-    // The 4 floor-plan corners in lon/lat (TL, TR, BR, BL) — a rotated quad, since the
-    // plan is -7.33 deg off north. Same math as georef.pxToLonlat, inlined (dashboard.js
-    // is a classic script and can't import the ES module).
-    function planCornersLonLat() {
+    // Floor-plan pixel (px,py) -> [lon,lat] via the plan's georeference affine. This is
+    // the EPSG:3857 (Web Mercator / "Pseudo-Mercator") solution fitted from the .TAB GCPs,
+    // so a point transformed this way lands at the building's true real-world spot — unlike
+    // the record's own latitude/longitude, which is raw indoor GPS (mean ~76 m, max ~260 m
+    // off here, useless for placing points inside an 80 m building). Same math as
+    // georef.pxToLonlat, inlined (dashboard.js is a classic script, can't import the ESM).
+    function pxToLonLat(px, py) {
       const A = (window.FLOORPLAN_META || {}).affine_px_to_lonlat;
-      if (!A) return null;
+      if (!A || !Number.isFinite(px) || !Number.isFinite(py)) return null;
+      return [A[0][0] * px + A[0][1] * py + A[0][2],
+              A[1][0] * px + A[1][1] * py + A[1][2]];
+    }
+
+    // The 4 floor-plan corners in lon/lat (TL, TR, BR, BL) — a rotated quad, since the
+    // plan is -7.33 deg off north.
+    function planCornersLonLat() {
+      if (!(window.FLOORPLAN_META || {}).affine_px_to_lonlat) return null;
       const W = 1150, H = 515;
-      const f = (px, py) => [A[0][0] * px + A[0][1] * py + A[0][2],
-                             A[1][0] * px + A[1][1] * py + A[1][2]];
-      return [f(0, 0), f(W, 0), f(W, H), f(0, H)];
+      return [pxToLonLat(0, 0), pxToLonLat(W, 0), pxToLonLat(W, H), pxToLonLat(0, H)];
     }
 
     // Live OSM path: Plotly Mapbox (open-street-map, no token). Floor plan draped on the
@@ -684,7 +693,11 @@
       const size = Number(sizeEl.value);
       const mode = coverageEl.value;
       const corners = planCornersLonLat();
-      const lls = corners || data.map(r => [r.longitude, r.latitude]);
+      // Georeference the points (px,py -> lon/lat) rather than trusting raw indoor GPS —
+      // same reasoning as renderLeaflet. Falls back to the record lon/lat only if the plan
+      // has no affine.
+      const geo = data.map(r => pxToLonLat(r.px, r.py) || [r.longitude, r.latitude]);
+      const lls = corners || geo;
       const center = {
         lon: lls.reduce((a, c) => a + c[0], 0) / lls.length,
         lat: lls.reduce((a, c) => a + c[1], 0) / lls.length
@@ -695,7 +708,7 @@
       if (mode === 'gradient') {
         traces.push({
           type: 'densitymapbox',
-          lon: data.map(r => r.longitude), lat: data.map(r => r.latitude),
+          lon: geo.map(g => g[0]), lat: geo.map(g => g[1]),
           z: metricValues(data, metric),
           radius: Math.max(8, size * 2), colorscale: 'Viridis',
           zmin: cmin, zmax: cmax, opacity: 0.75,
@@ -705,7 +718,7 @@
       } else {
         traces.push({
           type: 'scattermapbox', mode: 'markers',
-          lon: data.map(r => r.longitude), lat: data.map(r => r.latitude),
+          lon: geo.map(g => g[0]), lat: geo.map(g => g[1]),
           marker: {
             size: Math.max(6, Math.floor(size / 2)), color: metricValues(data, metric),
             colorscale: 'Viridis', cmin, cmax, opacity: 0.9,
@@ -785,10 +798,24 @@
 
       if (!leafletMap) {
         leafletMap = L.map('leafletMap', { preferCanvas: true }).setView([cLat, cLon], 17);
-        L.tileLayer('https://{s}.basemap.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        // Muted CARTO Positron reads best under the RF data, but that CDN isn't always
+        // reachable — if its tiles fail, swap once to standard OpenStreetMap so the streets
+        // (e.g. L St NE, so you can tell which side of the building faces the road) still
+        // show instead of a blank grey pane.
+        const base = L.tileLayer('https://{s}.basemap.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
           subdomains: 'abcd', maxZoom: 20,
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
         }).addTo(leafletMap);
+        let tilesSwapped = false;
+        base.on('tileerror', () => {
+          if (tilesSwapped) return;
+          tilesSwapped = true;
+          leafletMap.removeLayer(base);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            subdomains: 'abc', maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          }).addTo(leafletMap);
+        });
         leafletDataLayer = L.layerGroup().addTo(leafletMap);
       }
 
@@ -804,15 +831,20 @@
         ).addTo(leafletMap);
       }
 
-      // RF points
+      // RF points — placed by the floor-plan georeference (px,py -> lon/lat), NOT by the
+      // record's raw GPS. Indoor GPS here is ~76 m off on average, which would spray the
+      // walk across several city blocks; the pixel positions are drawing-exact, so routed
+      // through the Web-Mercator affine they sit precisely on the draped plan and align to
+      // the OSM streets underneath.
       leafletDataLayer.clearLayers();
       const span = (cmax - cmin) || 1;
       const vals = metricValues(data, metric);
       const rad = Math.max(3, Math.floor(size / 3));
       for (let i = 0; i < data.length; i++) {
         const r = data[i], v = vals[i];
-        if (!Number.isFinite(r.latitude) || !Number.isFinite(r.longitude)) continue;
-        L.circleMarker([r.latitude, r.longitude], {
+        const ll = pxToLonLat(r.px, r.py);
+        if (!ll) continue;
+        L.circleMarker([ll[1], ll[0]], {
           radius: rad, fillColor: viridis((v - cmin) / span),
           color: '#111', weight: 0.3, fillOpacity: 0.9
         }).bindPopup(`${metric.toUpperCase()}: ${Number.isFinite(v) ? v.toFixed(2) : '—'} ${units[metric] || ''}`

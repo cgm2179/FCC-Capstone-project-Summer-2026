@@ -398,9 +398,10 @@
     const btn = document.getElementById(dim === '3d' ? 'mapMode3dBtn' : 'mapMode2dBtn');
     if (btn) btn.click();
 
-    // Outdoor mode: show the NoMa OSM outdoor view (2D map / 3D city with the whole 7/24 walk)
-    // in the Map Coverage tab, replacing the indoor signal map. The iframe carries its own 2D/3D
-    // toggle; we sync it to the chosen dimension on entry.
+    // Outdoor mode: show the NoMa OSM outdoor view (2D Leaflet / 3D three.js — rectangular OSM
+    // ground + base-station massing + walk points) in Map Coverage, replacing the indoor signal
+    // map. OSM Buildings "3D city" and Unity C# were removed from this iframe; the iframe keeps
+    // its own 2D/3D toggle and we sync it to the chosen dimension on entry.
     const outdoor = window.appMode.environment === 'outdoor';
     const oHost = document.getElementById('outdoorMapHost');
     const mapTab = document.getElementById('mapTab');
@@ -411,7 +412,7 @@
       let f = oHost.querySelector('iframe');
       if (!f) {
         f = document.createElement('iframe');
-        f.src = 'Frontend/osm3d/outdoor_view.html';
+        f.src = 'Frontend/osm3d/outdoor_view.html?v=osm3d-three1';
         f.title = 'NoMa outdoor view';
         f.style.cssText = 'width:100%; height:100%; border:0; display:block;';
         oHost.appendChild(f);
