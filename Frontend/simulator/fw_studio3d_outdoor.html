@@ -156,9 +156,11 @@
     ];
     $('band').innerHTML = BANDS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
 
-    // Default boresights toward FCC HQ cluster (Outdoor 2-D bake / direction inference)
+    // Antenna boresights (° from N) aligned to the canonical base-station registry
+    // (Data/base_stations.js `bearing_deg`) so the 3-D studio, the Outdoor 2-D studio and the
+    // catalog all agree on each donor's azimuth.
     const DEFAULT_BORE = {
-      BS7_forte_hall: 237, BS2_900_nj_ave: 245, BS4_55_m_st: 299,
+      BS7_forte_hall: 237, BS2_900_nj_ave: 253, BS4_55_m_st: 308,
       BS5_1140_n_capitol: 310, BS6_1005_n_capitol: 240,
     };
     const ANT_HP = { panel: 65, patch: 80, yagi: 40, dish: 20, omni: null };
@@ -203,6 +205,13 @@
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     renderer.localClippingEnabled = true;
     const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0e14);
+    // North-up / east-right. The voxel grid's native frame is +vx = WEST, +vz = NORTH (the
+    // EPSG:3857 scaled-local, -easting frame the baker + Outdoor 2-D solver use). Placing content
+    // at (v - c) therefore renders east on the -X side — a 180° mis-orientation vs the real NoMa
+    // street grid and the Outdoor 2-D studio. Rotating ALL scene content 180° about Y fixes it for
+    // every layer at once (voxels, OSM footprints, CAD, station pins, coverage field) and is a pure
+    // rotation, so the map's chirality is preserved. The camera is independent of the scene.
+    scene.rotation.y = Math.PI;
     const camera = new THREE.PerspectiveCamera(50, 1, 1, 50000);
     const cX = X / 2, cY = Y / 2, cZ = Z / 2;
     camera.position.set(cX * 0.1, Y * 10, cZ * 1.8);
@@ -496,8 +505,11 @@
       else if (bands.includes(41)) $('band').value = '2506';
       updateBsMeta();
       const my = roofWorldY(s);
-      const mx = (s.cad_roof && s.cad_roof.world) ? s.cad_roof.world[0] : (s.vx - cX);
-      const mz = (s.cad_roof && s.cad_roof.world) ? s.cad_roof.world[2] : (s.vz - cZ);
+      // scene.rotation.y = π reorients the whole scene, so a point the code computes at (mx,·,mz)
+      // in the native frame renders at (−mx,·,−mz). Negate X/Z so the camera targets the pin, and
+      // sit the camera to the south (+Z) of it so the view reads north-up / east-right.
+      const mx = -((s.cad_roof && s.cad_roof.world) ? s.cad_roof.world[0] : (s.vx - cX));
+      const mz = -((s.cad_roof && s.cad_roof.world) ? s.cad_roof.world[2] : (s.vz - cZ));
       controls.target.set(mx, my, mz);
       camera.position.set(mx - 40, my + 22, mz + 48);
       updateResNote();
@@ -730,6 +742,22 @@
       controls.update();
       renderer.render(scene, camera);
     })();
+
+    // headless verification hook (the 3-D canvas is awkward to drive from tooling), matching the
+    // indoor studio's window.__fw3d. pinWorld() returns each pin's ACTUAL rendered world XZ (i.e.
+    // after scene.rotation.y) so orientation can be checked: east → +X, north stations up-screen.
+    window.__fwout = {
+      THREE, get scene() { return scene; }, get camera() { return camera; }, get controls() { return controls; },
+      get cadRoot() { return cadRoot; }, get osmRoot() { return osmRoot; },
+      get field() { return field; }, stations, X, Y, Z, CELL, cX, cY, cZ,
+      pinWorld() {
+        const v = new THREE.Vector3();
+        return stations.filter(s => s.in_grid).map(s => {
+          const m = txMeshes[s.site_id]; const p = m ? m.getWorldPosition(v) : null;
+          return { site: s.site_id, wx: p ? +p.x.toFixed(1) : null, wz: p ? +p.z.toFixed(1) : null, lat: s.lat, lon: s.lon };
+        });
+      },
+    };
   </script>
 </body>
 </html>
