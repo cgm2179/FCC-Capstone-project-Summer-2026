@@ -268,3 +268,12 @@ body {
 #mapTab.outdoor-mode #leafletMap,
 #mapTab.outdoor-mode .map-modes { display: none !important; }
 #mapTab.outdoor-mode #outdoorMapHost { display: block !important; }
+
+/* Outdoor mode: the Time Elapse tab shows the self-contained outdoor walk replay (iframe) instead of
+   the indoor floor-plan playback. Hide the indoor controls/grid/table siblings; reveal the host. */
+#timeTab.outdoor-mode > .sub,
+#timeTab.outdoor-mode > .time-controls,
+#timeTab.outdoor-mode > .stats,
+#timeTab.outdoor-mode > .playback-grid,
+#timeTab.outdoor-mode > .table-wrap { display: none !important; }
+#timeTab.outdoor-mode > #outdoorTimeHost { display: block !important; }

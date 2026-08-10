@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NoMa outdoor — Time Elapse (2D walk replay)</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <!-- base-station catalog (window.BASE_STATIONS) + the time-ordered 7/24 outdoor walk
+       (window.OUTDOOR_TIMESERIES, baked by scripts/bake_outdoor_timeseries.py). -->
+  <script src="../../Data/base_stations.js"></script>
+  <script src="../../Data/outdoor_timeseries.js"></script>
+  <style>
+    :root {
+      --ink: #1c2b28; --muted: #5f716c; --line: #d9e0dc; --accent: #0a7f7a; --panel: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: #f4f6f3; color: var(--ink);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    .shell { padding: 10px 12px 18px; }
+    .sub { color: var(--muted); font-size: 0.9rem; margin: 2px 0 10px; line-height: 1.5; }
+    .sub b { color: var(--ink); }
+
+    .time-controls {
+      display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; padding: 10px 12px;
+      border: 1px solid var(--line); border-radius: 10px; background: #fbfdfc; flex-wrap: wrap;
+    }
+    .time-controls label { font-size: 0.86rem; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    .time-controls input[type="range"] { flex: 1; min-width: 200px; accent-color: var(--accent); }
+    .time-controls select, .time-controls input[type="text"] {
+      border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 8px;
+      font-size: 0.85rem; color: var(--ink);
+    }
+    .time-controls #timeJumpInput { min-width: 230px; }
+    .time-controls button {
+      border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 12px;
+      cursor: pointer; font-size: 0.85rem; color: var(--ink);
+    }
+    .time-controls button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .time-controls #timeLabel { font-size: 0.85rem; color: var(--muted); min-width: 150px; text-align: right; }
+
+    .stats { display: flex; gap: 18px; flex-wrap: wrap; margin: 2px 2px 12px; font-size: 0.9rem; }
+    .stats > div { color: var(--muted); }
+    .stats b { color: var(--ink); }
+
+    .playback-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 4px 0 14px; }
+    .pb-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
+    #playbackMap { width: 100%; height: 460px; }
+    #playbackHistogram { width: 100%; min-height: 460px; }
+    #playbackLine { width: 100%; min-height: 340px; }
+    .playback-plot-wide { grid-column: 1 / -1; }
+
+    /* Leaflet map legend / point counter overlays */
+    .map-shell { position: relative; }
+    #mapLegend { position: absolute; bottom: 12px; left: 12px; z-index: 500; background: rgba(255,255,255,.94);
+      border-radius: 8px; padding: 7px 10px; box-shadow: 0 2px 10px rgba(0,0,0,.18); font-size: 12px; color: #223; }
+    #mapLegend .ramp { height: 10px; width: 170px; border-radius: 3px; margin: 4px 0 2px; }
+    #mapLegend .lr { display: flex; justify-content: space-between; width: 170px; }
+    #mapLegend .fcc { color: #2c7fb8; font-weight: 600; }
+    #shownNote { position: absolute; top: 10px; right: 10px; z-index: 500; background: rgba(10,18,36,.82);
+      color: #dfe6f2; border-radius: 8px; padding: 5px 9px; font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.2); }
+
+    .table-wrap { max-height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+    th, td { padding: 6px 12px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    th:first-child, td:first-child, th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3) { text-align: left; }
+    thead th { position: sticky; top: 0; background: #fbfdfc; color: var(--muted); font-size: 0.8rem; }
+
+    @media (max-width: 1000px) { .playback-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <p class="sub">The 2D outdoor walk (7/24 NoMa), replayed. Scrub or <b>play</b> the timeline to watch the
+      walk path build up on the OSM map together with a synced histogram, metric-vs-time chart, and points
+      table — the same way the Indoor Time Elapse replays the floor-plan walk. Filter the walk from the
+      <b>Coverage</b> sidebar (operator / network / band / PCI / channel).</p>
+
+    <div class="time-controls">
+      <button type="button" id="playBtn" class="primary">Play</button>
+      <label>Speed
+        <select id="playSpeed">
+          <option value="0.25">0.25x</option>
+          <option value="0.5">0.5x</option>
+          <option value="1" selected>1x</option>
+          <option value="2">2x</option>
+          <option value="4">4x</option>
+          <option value="8">8x</option>
+        </select>
+      </label>
+      <input type="range" id="timeSlider" min="0" max="0" value="0" step="1" />
+      <span id="timeLabel">0:00 / 0:00</span>
+      <select id="clockFormat" title="Clock display for the recorded time-of-day">
+        <option value="24">Military (24h)</option>
+        <option value="12">Standard (12h)</option>
+      </select>
+    </div>
+
+    <div class="time-controls">
+      <label for="metric">Metric
+        <select id="metric">
+          <option value="rsrp">RSRP (dBm)</option>
+          <option value="rsrq">RSRQ (dB)</option>
+          <option value="cinr">CINR (dB)</option>
+          <option value="rssi">RSSI (dBm)</option>
+        </select>
+      </label>
+      <label for="colorSel">Colors
+        <select id="colorSel">
+          <option value="rainbow" selected>Rainbow</option>
+          <option value="viridis">Viridis</option>
+        </select>
+      </label>
+      <label for="timeJumpInput">Jump to</label>
+      <input type="text" id="timeJumpInput" placeholder="mm:ss elapsed, or HH:MM:SS clock time" />
+      <button type="button" id="timeJumpBtn">Go</button>
+    </div>
+
+    <div class="time-controls">
+      <label for="lineAggregation">Line chart shows
+        <select id="lineAggregation">
+          <option value="point">Single point measurement</option>
+          <option value="1">Average per minute</option>
+          <option value="5">Average per 5 minutes</option>
+          <option value="10">Average per 10 minutes</option>
+          <option value="20">Average per 20 minutes</option>
+          <option value="30">Average per 30 minutes</option>
+        </select>
+      </label>
+      <label for="lineRegression">Regression
+        <select id="lineRegression">
+          <option value="none">None</option>
+          <option value="linear">Linear</option>
+          <option value="exponential">Exponential</option>
+          <option value="polynomial">Polynomial</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="logTime" /> Log scale (elapsed time)</label>
+    </div>
+
+    <div class="stats" id="timeStats"></div>
+
+    <div class="playback-grid">
+      <div class="pb-card map-shell">
+        <div id="playbackMap"></div>
+        <div id="shownNote">0 pts</div>
+        <div id="mapLegend">
+          <div><span class="fcc">◉ FCC</span> (walk centre) · ▲ base stations</div>
+          <div id="legendMetric">RSRP</div>
+          <div class="ramp" id="legendRamp"></div>
+          <div class="lr"><span id="legendLo">−120</span><span id="legendHi">−60</span></div>
+        </div>
+      </div>
+      <div class="pb-card"><div id="playbackHistogram"></div></div>
+      <div class="pb-card playback-plot-wide"><div id="playbackLine"></div></div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th><th>Operator</th><th>Network</th><th>Band</th><th>PCI</th>
+            <th>RSRP</th><th>RSRQ</th><th>CINR</th><th>RSSI</th>
+          </tr>
+        </thead>
+        <tbody id="playbackTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+  'use strict';
+  /* Outdoor "Time Elapse" — the time-ordered sibling of the indoor Time Elapse (dashboard.js
+   * renderPlayback). Reads window.OUTDOOR_TIMESERIES (baked, sorted by t_sec) and replays the
+   * walk chronologically on a Leaflet OSM map + Plotly histogram + metric-vs-time line + table.
+   * The Coverage sidebar in the parent filters the walk over postMessage (source:'outdoorFilter'),
+   * exactly like the outdoor Map Coverage view. */
+
+  var T = window.OUTDOOR_TIMESERIES || { pts: [], ops: [], nets: [], bands: [], chs: [], maxTSec: 0, fcc: { lon: -77.0074, lat: 38.90359 }, facets: {} };
+  var FCC = T.fcc || { lon: -77.0074, lat: 38.90359 };
+  var BS = (window.BASE_STATIONS || []).filter(function (s) { return s.lat != null; });
+  var START = T.startTime ? new Date(T.startTime) : null;
+  var MAXT = T.maxTSec || 0;
+
+  // Reconstruct sample objects from the packed rows:
+  //   [t_sec, lon, lat, rsrp, rsrq, cinr, rssi, pci, opIdx, netIdx, bandIdx, chIdx]
+  var PTS = (T.pts || []).map(function (r) {
+    return { t: r[0], lon: r[1], lat: r[2], rsrp: r[3], rsrq: r[4], cinr: r[5], rssi: r[6],
+             pci: r[7], op: T.ops[r[8]], net: T.nets[r[9]], band: T.bands[r[10]], ch: T.chs[r[11]] };
+  });   // already sorted by t (the bake sorts chronologically)
+
+  var UNITS = { rsrp: 'dBm', rsrq: 'dB', cinr: 'dB', rssi: 'dBm' };
+  // Fixed per-metric colour ranges — fixed (not data-dependent) so the map can draw incrementally
+  // during playback without earlier dots changing colour, and the legend stays stable.
+  var METRIC_RANGE = { rsrp: [-120, -60], rsrq: [-25, -3], cinr: [-10, 30], rssi: [-100, -40] };
+
+  var RAMP = {
+    rainbow: [[0, 0, 255], [0, 255, 255], [0, 255, 0], [255, 255, 0], [255, 0, 0]],
+    viridis: [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]],
+  };
+  var colorScheme = 'rainbow';
+  function rampAt(t) {
+    t = Math.max(0, Math.min(1, t));
+    var st = RAMP[colorScheme] || RAMP.rainbow;
+    var x = t * (st.length - 1), i = Math.floor(x), f = x - i,
+        a = st[i], b = st[Math.min(i + 1, st.length - 1)];
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * f) + ',' + Math.round(a[1] + (b[1] - a[1]) * f) + ',' + Math.round(a[2] + (b[2] - a[2]) * f) + ')';
+  }
+  function metricColor(metric, v) {
+    var rg = METRIC_RANGE[metric] || [-120, -60];
+    return rampAt((v - rg[0]) / (rg[1] - rg[0]));
+  }
+
+  /* ---------- filter (driven by the parent Coverage sidebar) ---------------- */
+  var filter = { operator: '', network: '', band: '', pci: '', channel: '' };
+  function on(v) { return v && v !== 'all' && v !== 'All'; }
+  function matches(p) {
+    if (on(filter.operator) && p.op !== filter.operator) return false;
+    if (on(filter.network) && p.net !== filter.network) return false;
+    if (on(filter.band) && String(p.band) !== String(filter.band)) return false;
+    if (on(filter.pci) && String(p.pci) !== String(filter.pci)) return false;
+    if (on(filter.channel) && String(p.ch) !== String(filter.channel)) return false;
+    return true;
+  }
+  var FILT = PTS.slice();          // current filtered set, sorted by t (recomputed on filter change)
+  function recomputeFilter() { FILT = PTS.filter(matches); }
+
+  // Number of FILT samples with t <= sec (binary search; FILT is sorted by t).
+  function cutoffIndex(sec) {
+    var lo = 0, hi = FILT.length;
+    while (lo < hi) { var mid = (lo + hi) >> 1; if (FILT[mid].t <= sec) lo = mid + 1; else hi = mid; }
+    return lo;
+  }
+
+  /* ---------- DOM refs ------------------------------------------------------ */
+  var $ = function (id) { return document.getElementById(id); };
+  var metricEl = $('metric'), colorEl = $('colorSel'), sliderEl = $('timeSlider'),
+      playBtn = $('playBtn'), speedEl = $('playSpeed'), labelEl = $('timeLabel'),
+      clockEl = $('clockFormat'), aggEl = $('lineAggregation'), regEl = $('lineRegression'),
+      logEl = $('logTime'), jumpIn = $('timeJumpInput'), jumpBtn = $('timeJumpBtn'),
+      statsEl = $('timeStats'), tbodyEl = $('playbackTableBody'),
+      mapEl = $('playbackMap'), histEl = $('playbackHistogram'), lineEl = $('playbackLine'),
+      shownEl = $('shownNote');
+  sliderEl.max = String(Math.ceil(MAXT));
+
+  /* ---------- time formatting (mirrors dashboard.js) ------------------------ */
+  function formatDuration(sec) {
+    if (!isFinite(sec)) return '0:00';
+    var m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+    return m + ':' + String(s).padStart(2, '0');
+  }
+  function formatClockTime(sec) {
+    if (!START || !isFinite(sec)) return '';
+    var t = new Date(START.getTime() + sec * 1000), is24 = clockEl.value === '24';
+    return t.toLocaleTimeString('en-US', { hour12: !is24, hour: is24 ? '2-digit' : 'numeric',
+      minute: '2-digit', second: '2-digit', timeZone: 'UTC' });
+  }
+  function updateTimeLabel() {
+    var sec = Number(sliderEl.value), clk = formatClockTime(sec);
+    var dur = formatDuration(sec) + ' / ' + formatDuration(MAXT);
+    labelEl.textContent = clk ? (clk + ' · ' + dur) : dur;
+  }
+
+  /* ---------- regression helpers (mirror dashboard.js) ---------------------- */
+  function linearRegression(xs, ys) {
+    var n = xs.length; if (n < 2) return null;
+    var mx = 0, my = 0, i;
+    for (i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; } mx /= n; my /= n;
+    var num = 0, den = 0;
+    for (i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) * (xs[i] - mx); }
+    if (den === 0) return null;
+    var slope = num / den;
+    return { slope: slope, intercept: my - slope * mx };
+  }
+  function solveLinearSystem(A, b) {
+    var n = b.length, M = A.map(function (row, i) { return row.concat([b[i]]); }), col, r, c;
+    for (col = 0; col < n; col++) {
+      var pivot = col;
+      for (r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[pivot][col])) pivot = r;
+      if (Math.abs(M[pivot][col]) < 1e-10) return null;
+      var tmp = M[col]; M[col] = M[pivot]; M[pivot] = tmp;
+      for (r = 0; r < n; r++) { if (r === col) continue; var f = M[r][col] / M[col][col]; for (c = col; c <= n; c++) M[r][c] -= f * M[col][c]; }
+    }
+    return M.map(function (row, i) { return row[n] / row[i]; });
+  }
+  function polynomialRegression(xs, ys, degree) {
+    degree = degree || 2;
+    var n = xs.length, size = degree + 1; if (n < size) return null;
+    var XtX = [], Xty = [], r, c, i;
+    for (r = 0; r < size; r++) { XtX.push(new Array(size).fill(0)); Xty.push(0); }
+    for (i = 0; i < n; i++) {
+      var powers = [1]; for (var k = 1; k <= 2 * degree; k++) powers.push(powers[k - 1] * xs[i]);
+      for (r = 0; r < size; r++) { Xty[r] += powers[r] * ys[i]; for (c = 0; c < size; c++) XtX[r][c] += powers[r + c]; }
+    }
+    var coeffs = solveLinearSystem(XtX, Xty); if (!coeffs) return null;
+    return { predict: function (x) { return coeffs.reduce(function (s, cc, kk) { return s + cc * Math.pow(x, kk); }, 0); } };
+  }
+  function exponentialRegression(xs, ys) {
+    if (xs.length < 2) return null;
+    var yMin = Math.min.apply(null, ys), shift = yMin <= 0 ? yMin - 1 : 0;
+    var logYs = ys.map(function (y) { return Math.log(y - shift); });
+    var fit = linearRegression(xs, logYs); if (!fit) return null;
+    var a = Math.exp(fit.intercept), b = fit.slope;
+    return { predict: function (x) { return a * Math.exp(b * x) + shift; } };
+  }
+  function fitRegression(kind, xs, ys) {
+    if (kind === 'linear') { var f = linearRegression(xs, ys); return f ? { predict: function (x) { return f.intercept + f.slope * x; } } : null; }
+    if (kind === 'exponential') return exponentialRegression(xs, ys);
+    if (kind === 'polynomial') return polynomialRegression(xs, ys, 2);
+    return null;
+  }
+  function buildLineSeries(captured, metric, aggregation) {
+    var withM = captured.filter(function (r) { return isFinite(r.t) && isFinite(r[metric]); });
+    if (aggregation === 'point')
+      return { x: withM.map(function (r) { return r.t / 60; }), y: withM.map(function (r) { return r[metric]; }), n: withM.length };
+    var bucketSec = Number(aggregation) * 60, buckets = new Map();
+    withM.forEach(function (r) { var idx = Math.floor(r.t / bucketSec); if (!buckets.has(idx)) buckets.set(idx, []); buckets.get(idx).push(r[metric]); });
+    var idxs = Array.from(buckets.keys()).sort(function (a, b) { return a - b; });
+    var x = idxs.map(function (i) { return (i * bucketSec + bucketSec / 2) / 60; });
+    var y = idxs.map(function (i) { var v = buckets.get(i); return v.reduce(function (s, q) { return s + q; }, 0) / v.length; });
+    return { x: x, y: y, n: withM.length };
+  }
+
+  /* ---------- Leaflet map --------------------------------------------------- */
+  var map = L.map('playbackMap', { zoomControl: true, preferCanvas: true }).setView([FCC.lat, FCC.lon], 15);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    { attribution: '© OpenStreetMap · © CARTO', maxZoom: 20, subdomains: 'abcd' }).addTo(map);
+  var walkLayer = L.layerGroup().addTo(map);
+  BS.forEach(function (s) {
+    L.marker([s.lat, s.lon]).addTo(map).bindPopup('<b>' + s.name + '</b><br>' + (s.building_height_m || '?') + ' m');
+  });
+  L.circleMarker([FCC.lat, FCC.lon], { radius: 8, color: '#fff', weight: 2, fillColor: '#2c7fb8', fillOpacity: 1 })
+    .bindTooltip('FCC — 7th-floor walk centre', { direction: 'right' }).addTo(map);
+  // Frame the whole walk (nicer than the fixed FCC view).
+  function fitToWalk() {
+    if (!PTS.length) return;
+    var b = L.latLngBounds(PTS.map(function (p) { return [p.lat, p.lon]; }));
+    if (b.isValid()) map.fitBounds(b.pad(0.08));
+  }
+  fitToWalk();
+
+  var drawnCount = 0;   // how many FILT samples are currently drawn (incremental pointer)
+  function addMarker(p) {
+    var metric = metricEl.value, v = p[metric];
+    L.circleMarker([p.lat, p.lon], { radius: 3.2, stroke: false,
+      fillColor: isFinite(v) ? metricColor(metric, v) : '#999', fillOpacity: 0.85 })
+      .bindTooltip(p.op + ' · ' + String(p.net).toUpperCase() + ' ' + p.band + ' · PCI ' + p.pci +
+        ' · ' + metric.toUpperCase() + ' ' + (isFinite(v) ? v : '—') + ' ' + (UNITS[metric] || ''), { direction: 'top' })
+      .addTo(walkLayer);
+  }
+  // Draw the walk up to `idx` samples. Grows incrementally when playing forward;
+  // rebuilds from scratch on a backward scrub / filter / metric / colour change.
+  function renderMap(idx, forceRebuild) {
+    if (forceRebuild || idx < drawnCount) { walkLayer.clearLayers(); drawnCount = 0; }
+    for (var i = drawnCount; i < idx; i++) addMarker(FILT[i]);
+    drawnCount = idx;
+    shownEl.textContent = idx.toLocaleString() + ' pts';
+  }
+
+  /* ---------- histogram + line + table (mirror renderPlayback) -------------- */
+  function renderHistogram(captured, metric) {
+    var vals = captured.map(function (r) { return r[metric]; }).filter(function (v) { return isFinite(v); });
+    Plotly.react(histEl, [{
+      type: 'histogram', x: vals, marker: { color: '#0a7f7a' }, nbinsx: 40,
+      hovertemplate: metric.toUpperCase() + ': %{x:.1f} ' + (UNITS[metric] || '') + '<br>Count: %{y}<extra></extra>'
+    }], {
+      title: { text: metric.toUpperCase() + ' Distribution (' + vals.length.toLocaleString() + ' captured)' },
+      xaxis: { title: { text: metric.toUpperCase() + ' (' + (UNITS[metric] || '') + ')' } },
+      yaxis: { title: { text: 'Measurement count' } },
+      margin: { t: 40, l: 55, r: 16, b: 45 }, paper_bgcolor: '#fff', plot_bgcolor: '#fff', bargap: 0.05
+    }, { responsive: true, displaylogo: false });
+  }
+  function renderLine(captured, metric) {
+    var aggregation = aggEl.value, series = buildLineSeries(captured, metric, aggregation);
+    var aggLabel = aggregation === 'point' ? 'Raw measurements' : (aggregation + '-minute average');
+    var traces = [{
+      type: aggregation === 'point' ? 'scattergl' : 'scatter', mode: 'lines+markers',
+      x: series.x, y: series.y, line: { color: '#3d6fae', width: 2 },
+      marker: { size: aggregation === 'point' ? 4 : 6, color: '#3d6fae' }, name: aggLabel,
+      hovertemplate: 'Minute %{x:.1f}<br>' + metric.toUpperCase() + ': %{y:.1f} ' + (UNITS[metric] || '') + '<extra></extra>'
+    }];
+    var kind = regEl.value;
+    if (kind !== 'none' && series.x.length >= 2) {
+      var fit = fitRegression(kind, series.x, series.y);
+      if (fit) {
+        var xMin = Math.min.apply(null, series.x), xMax = Math.max.apply(null, series.x), steps = 60;
+        var fx = Array.from({ length: steps + 1 }, function (_, i) { return xMin + (xMax - xMin) * i / steps; });
+        traces.push({ type: 'scatter', mode: 'lines', x: fx, y: fx.map(function (x) { return fit.predict(x); }),
+          line: { color: '#c0392b', width: 2, dash: 'dash' }, name: kind[0].toUpperCase() + kind.slice(1) + ' trend', hoverinfo: 'skip' });
+      }
+    }
+    Plotly.react(lineEl, traces, {
+      title: { text: metric.toUpperCase() + ' Over Elapsed Time — ' + aggLabel + ' (' + series.n.toLocaleString() + ' measurements)' },
+      xaxis: logEl.checked ? { title: { text: 'Elapsed time (minutes)' }, type: 'log' }
+        : { title: { text: 'Elapsed time (minutes)' }, type: 'linear', range: [0, Math.max(0.5, MAXT / 60)] },
+      yaxis: { title: { text: metric.toUpperCase() + ' (' + (UNITS[metric] || '') + ')' } },
+      margin: { t: 40, l: 55, r: 16, b: 45 }, paper_bgcolor: '#fff', plot_bgcolor: '#fff',
+      legend: { orientation: 'h', y: -0.25 }
+    }, { responsive: true, displaylogo: false });
+  }
+  function renderTable(captured) {
+    var MAX = 150, rows = captured.slice(-MAX).reverse();   // newest-captured first
+    var fmt = function (v) { return isFinite(v) ? v.toFixed(1) : '—'; };
+    tbodyEl.innerHTML = rows.map(function (r) {
+      return '<tr><td>' + (formatClockTime(r.t) || formatDuration(r.t)) + '</td><td>' + (r.op || '—') +
+        '</td><td>' + (r.net || '—') + '</td><td>' + (r.band || '—') + '</td><td>' + (isFinite(r.pci) ? r.pci : '—') +
+        '</td><td>' + fmt(r.rsrp) + '</td><td>' + fmt(r.rsrq) + '</td><td>' + fmt(r.cinr) + '</td><td>' + fmt(r.rssi) + '</td></tr>';
+    }).join('');
+    if (captured.length > MAX)
+      tbodyEl.innerHTML += '<tr><td colspan="9" style="text-align:center;color:#5f716c;font-style:italic;">showing most recent ' + MAX + ' of ' + captured.length.toLocaleString() + ' captured</td></tr>';
+  }
+  function updateLegend() {
+    var metric = metricEl.value, rg = METRIC_RANGE[metric] || [-120, -60];
+    $('legendMetric').textContent = metric.toUpperCase() + ' (' + (UNITS[metric] || '') + ')';
+    $('legendLo').textContent = rg[0];
+    $('legendHi').textContent = rg[1];
+    var st = (RAMP[colorScheme] || RAMP.rainbow).map(function (c) { return 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')'; });
+    $('legendRamp').style.background = 'linear-gradient(90deg,' + st.join(',') + ')';
+  }
+
+  /* ---------- master render ------------------------------------------------- */
+  // forceRebuild: rebuild the map layer from scratch (filter / metric / colour change).
+  function render(forceRebuild) {
+    var metric = metricEl.value, cutoff = Number(sliderEl.value), idx = cutoffIndex(cutoff);
+    var captured = FILT.slice(0, idx);
+    renderMap(idx, forceRebuild);
+    renderHistogram(captured, metric);
+    renderLine(captured, metric);
+    renderTable(captured);
+    var clk = formatClockTime(cutoff) || formatDuration(cutoff);
+    statsEl.innerHTML = '<div>Clock: <b>' + clk + '</b></div>' +
+      '<div>Elapsed: <b>' + formatDuration(cutoff) + ' / ' + formatDuration(MAXT) + '</b></div>' +
+      '<div>Measurements captured: <b>' + idx.toLocaleString() + ' / ' + FILT.length.toLocaleString() + '</b></div>';
+    updateTimeLabel();
+  }
+
+  /* ---------- playback loop ------------------------------------------------- */
+  var playTimer = null;
+  function stopPlayback() { if (playTimer) { clearInterval(playTimer); playTimer = null; } playBtn.textContent = 'Play'; }
+  playBtn.addEventListener('click', function () {
+    if (playTimer) { stopPlayback(); return; }
+    if (Number(sliderEl.value) >= Number(sliderEl.max)) { sliderEl.value = '0'; render(true); }
+    playBtn.textContent = 'Pause';
+    var baseStep = Math.max(1, Math.round(MAXT / 200));
+    playTimer = setInterval(function () {
+      var step = Math.max(1, Math.round(baseStep * Number(speedEl.value)));
+      var next = Number(sliderEl.value) + step;
+      if (next >= Number(sliderEl.max)) { sliderEl.value = sliderEl.max; stopPlayback(); }
+      else sliderEl.value = String(next);
+      render(false);
+    }, 100);
+  });
+
+  sliderEl.addEventListener('input', function () { render(false); });   // scrub (render handles backward rebuild)
+  metricEl.addEventListener('change', function () { updateLegend(); render(true); });
+  colorEl.addEventListener('change', function () { colorScheme = colorEl.value; updateLegend(); render(true); });
+  aggEl.addEventListener('change', function () { render(false); });
+  regEl.addEventListener('change', function () { render(false); });
+  logEl.addEventListener('change', function () { render(false); });
+  clockEl.addEventListener('change', function () { render(false); });
+
+  function parseTimeJumpInput(text) {
+    var parts = text.trim().split(':').map(function (p) { return p.trim(); });
+    if (parts.length < 2 || parts.length > 3 || parts.some(function (p) { return p === '' || isNaN(Number(p)); })) return null;
+    if (parts.length === 2) { return Number(parts[0]) * 60 + Number(parts[1]); }
+    if (!START) return null;
+    var h = Number(parts[0]), m = Number(parts[1]), s = Number(parts[2]);
+    var clockSec = h * 3600 + m * 60 + s;
+    var startSec = START.getUTCHours() * 3600 + START.getUTCMinutes() * 60 + START.getUTCSeconds();
+    return clockSec - startSec;
+  }
+  function goTo(sec) {
+    if (!isFinite(sec)) return false;
+    sliderEl.value = String(Math.round(Math.max(0, Math.min(MAXT, sec))));
+    render(false); return true;
+  }
+  jumpBtn.addEventListener('click', function () {
+    var sec = parseTimeJumpInput(jumpIn.value);
+    jumpIn.style.borderColor = (sec === null) ? '#c0392b' : '';
+    if (sec !== null) goTo(sec);
+  });
+  jumpIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') jumpBtn.click(); });
+
+  /* ---------- parent sidebar filter (postMessage), like outdoor_view.html ---- */
+  window.addEventListener('message', function (e) {
+    var d = e.data; if (!d || d.source !== 'outdoorFilter') return;
+    filter = { operator: d.operator || '', network: d.network || '', band: d.band || '', pci: d.pci || '', channel: d.channel || '' };
+    recomputeFilter();
+    render(true);   // filter changed the point set → rebuild map
+  });
+  // Let the parent populate the Coverage sidebar from these facets (same contract as outdoor_view.html).
+  window.__outdoorView = { n: PTS.length, bsN: BS.length, fcc: FCC, facets: (T.facets || {}),
+    setFilter: function (f) { filter = f; recomputeFilter(); render(true); } };
+  try { window.parent && window.parent.postMessage({ source: 'outdoorReady', facets: (T.facets || {}) }, '*'); } catch (e) {}
+
+  // Report our content height so the parent can size the iframe (no inner scrollbar). The table is
+  // height-capped and the layout is otherwise static, so height only changes on resize/relayout —
+  // post it there rather than on every playback tick.
+  var _lastH = 0;
+  function postHeight() {
+    var h = Math.ceil(document.body.getBoundingClientRect().height) + 8;
+    if (Math.abs(h - _lastH) < 4) return;
+    _lastH = h;
+    try { window.parent && window.parent.postMessage({ source: 'outdoorTimeResize', height: h }, '*'); } catch (e) {}
+  }
+
+  /* ---------- boot ---------------------------------------------------------- */
+  updateLegend();
+  // Start fully elapsed so the tab opens on the complete walk (same feel as Map Coverage showing
+  // the whole walk); the user scrubs/plays back from there.
+  sliderEl.value = sliderEl.max;
+  render(true);
+  postHeight();
+  // This iframe is created while the Time Elapse tab is still hidden (0×0), so Leaflet lays out with no
+  // size. A ResizeObserver on the map element fires when the tab is first shown (0 → real size): recalc
+  // Leaflet, re-frame the walk once, and re-render so the dots paint. Cheap invalidateSize on every tick.
+  var _sizedOnce = false;
+  if (window.ResizeObserver) {
+    new ResizeObserver(function () {
+      map.invalidateSize();
+      if (!_sizedOnce && mapEl.clientWidth > 0) { _sizedOnce = true; fitToWalk(); render(true); }
+      postHeight();
+    }).observe(mapEl);
+  }
+  setTimeout(function () { map.invalidateSize(); render(true); postHeight(); }, 60);
+  window.addEventListener('resize', function () { map.invalidateSize(); postHeight(); });
+  </script>
+</body>
+</html>

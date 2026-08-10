@@ -322,13 +322,22 @@
   // (stopImmediatePropagation) so dashboard.js's indoor network→band→pci cascade doesn't clobber
   // the outdoor options. Carrier ↔ operator (derived from PCI in the bake).
   let _outdoorSidebar = null;
+  // Every outdoor iframe that reads the Coverage sidebar filter: the Map Coverage view AND the Time
+  // Elapse replay. Both honour the same postMessage protocol, so the sidebar drives them together.
+  function outdoorIframes() {
+    return ['outdoorMapHost', 'outdoorTimeHost']
+      .map((id) => { const h = document.getElementById(id); return h ? h.querySelector('iframe') : null; })
+      .filter((f) => f && f.contentWindow);
+  }
+  function broadcastOutdoorFilter() {
+    const v = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
+    const msg = { source: 'outdoorFilter', operator: v('carrier'), network: v('network'), band: v('band'), pci: v('pci'), channel: v('channel') };
+    outdoorIframes().forEach((f) => { try { f.contentWindow.postMessage(msg, '*'); } catch (e) {} });
+  }
   function wireOutdoorSidebar(frame) {
     const SEL = { carrier: 'operators', network: 'networks', band: 'bands', pci: 'pcis', channel: 'channels' };
     const ids = Object.keys(SEL);
-    const readAndPost = () => {
-      const v = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
-      try { frame.contentWindow.postMessage({ source: 'outdoorFilter', operator: v('carrier'), network: v('network'), band: v('band'), pci: v('pci'), channel: v('channel') }, '*'); } catch (e) {}
-    };
+    const readAndPost = broadcastOutdoorFilter;   // broadcast to every outdoor iframe (map + time)
     const populate = (facets) => {
       ids.forEach((id) => {
         const el = document.getElementById(id); if (!el) return;
@@ -425,6 +434,22 @@
       unwireOutdoorSidebar();
     }
 
+    // Outdoor mode: also swap the Time Elapse tab to the self-contained outdoor walk replay (iframe),
+    // parallel to the Map Coverage swap above. #timeTab.outdoor-mode CSS hides the indoor playback; the
+    // replay honours the same Coverage-sidebar filter (broadcastOutdoorFilter posts to it too).
+    const timeTab = document.getElementById('timeTab');
+    const tHost = document.getElementById('outdoorTimeHost');
+    if (timeTab) timeTab.classList.toggle('outdoor-mode', outdoor);
+    if (tHost && outdoor && !tHost.querySelector('iframe')) {
+      const tf = document.createElement('iframe');
+      tf.src = 'Frontend/osm3d/outdoor_timelapse.html';
+      tf.title = 'NoMa outdoor Time Elapse';
+      tf.style.cssText = 'width:100%; height:1200px; border:0; display:block;';
+      // Push the current sidebar filter once it's live (it may load after the map frame already broadcast).
+      tf.addEventListener('load', () => broadcastOutdoorFilter(), { once: true });
+      tHost.appendChild(tf);
+    }
+
     // Feed an imported model + CSV into the 3D viewer, best-effort.
     if (dim === '3d' && window.__viewer3d) {
       if (window.appImport.modelFiles && window.__viewer3d.loadFiles) window.__viewer3d.loadFiles(window.appImport.modelFiles);
@@ -442,6 +467,16 @@
   bind('modeChange', () => showScreen('screenChooser'));
 
   function bind(id, fn) { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); }
+
+  // Size the outdoor Time Elapse iframe to its own content (it reports height) so the tab shows the
+  // whole replay without an inner scrollbar.
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.source !== 'outdoorTimeResize') return;
+    const host = document.getElementById('outdoorTimeHost');
+    const tf = host && host.querySelector('iframe');
+    if (tf && Number.isFinite(d.height)) tf.style.height = Math.max(600, d.height) + 'px';
+  });
 
   // Boot on the chooser.
   showScreen('screenChooser');
