@@ -14,11 +14,11 @@
 !Physics Engine/3D Map Physics/SIM V1 3D/web/pl_unet3d.onnx
 !SIM3D/web/pl_unet3d.onnx
 # Indoor 2-D full-wave surrogate (SIM V3). The Simulation tab's "Full-Wave (ONNX / FDTD)"
-# option fetches this from Frontend/simulator/fw_studio2d.html at
-# ../../Physics Engine/3D Map Physics/SIM V1 3D/web/fw_unet2d.onnx — so it MUST clone with the repo.
+# option fetches this from Simulation/fw_studio2d.html at
+# ../Physics Engine/3D Map Physics/SIM V1 3D/web/fw_unet2d.onnx — so it MUST clone with the repo.
 !Physics Engine/3D Map Physics/SIM V1 3D/web/fw_unet2d.onnx
 # Outdoor 2-D base-station surrogate (SIM V3). Outdoor Full-Wave Studio fetches this from
-# Frontend/simulator/fw_studio2d_outdoor.html at the same web/ path — must clone with the repo.
+# Simulation/fw_studio2d_outdoor.html at the same web/ path — must clone with the repo.
 !Physics Engine/3D Map Physics/SIM V1 3D/web/fw_bs.onnx
 !SIM3D/web/fw_bs.onnx
 
@@ -77,11 +77,13 @@ Physics Engine/3D Map Physics/SIM V1 3D/scene_v1_backup/
 # Indoor OSM basemap (PR #25): a large, per-machine generated raster. Regenerate with
 # `python3 scripts/prepare_indoor_basemap.py`. The live (Leaflet) path needs no file.
 Data/basemap_image.js
+Data + Model/basemap_image.js
 
 # PR #26 — regenerable 2D O2I prediction artifacts. Rebuild with
 # pathloss_2d/predict_o2i.py then pathloss_2d/export_web.py.
 Physics Engine/Cross_Validation/pathloss_2d/out/
 Data/pl2d_crossval.js
+Data + Model/pl2d_crossval.js
 Physics Engine/Cross_Validation/validation/reports/*.png
 
 # PR #27 — regenerable 3D O2I volumes (rebuild with pathloss_3d/predict_o2i_3d.py)

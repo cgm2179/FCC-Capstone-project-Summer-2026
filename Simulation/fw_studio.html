@@ -118,7 +118,7 @@
       try {
         const draco = new DRACOLoader(); draco.setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/');
         const ld = new GLTFLoader(); ld.setDRACOLoader(draco);
-        const g = await ld.loadAsync('../../Data/models/7th_floor_full.glb');
+        const g = await ld.loadAsync('../Data/models/7th_floor_full.glb');
         g.scene.traverse(o => { if (o.isMesh) o.material = new THREE.MeshStandardMaterial(
           { color: 0xaab4ad, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }); });
         scene.add(g.scene); cadMesh = g.scene;

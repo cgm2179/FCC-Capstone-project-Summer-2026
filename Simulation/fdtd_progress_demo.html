@@ -29,7 +29,7 @@
     import { pollFdtdProgress, estimateLine, mountFdtdProgress } from './fdtd_progress.js';
     const params = new URLSearchParams(location.search);
     // default: a representative whole-floor 617 MHz run
-    const url = params.get('url') || '../../Physics%20Engine/2D/SIM%20V3/out/LTE_B71_617/progress.json';
+    const url = params.get('url') || '../Physics%20Engine/2D/SIM%20V3/out/LTE_B71_617/progress.json';
     document.getElementById('est').textContent =
       estimateLine(+params.get('cells') || 1.3e6, +params.get('steps') || 13700, +params.get('mcps') || 120);
     mountFdtdProgress(document.getElementById('host'));
