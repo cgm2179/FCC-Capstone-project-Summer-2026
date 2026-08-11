@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Strip Cursor / LLM co-author trailers so only cgm2179 remains as contributor.
+# Installed via: git config core.hooksPath .githooks
+set -euo pipefail
+msg_file="${1:-}"
+[ -n "$msg_file" ] || exit 0
+# Remove Cursor Agent / cursoragent co-author lines (any casing / spacing)
+sed -i -E \
+  -e '/^Co-authored-by:[[:space:]]*Cursor Agent[[:space:]]*<cursoragent@cursor\.com>[[:space:]]*$/Id' \
+  -e '/^Co-authored-by:[[:space:]]*cursoragent[[:space:]]*<cursoragent@cursor\.com>[[:space:]]*$/Id' \
+  -e '/^Co-authored-by:[[:space:]]*.*<cursoragent@cursor\.com>[[:space:]]*$/Id' \
+  -e '/^Made-with:[[:space:]]*Cursor[[:space:]]*$/Id' \
+  "$msg_file"

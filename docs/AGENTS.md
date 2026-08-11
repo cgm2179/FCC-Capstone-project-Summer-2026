@@ -11,6 +11,18 @@ transmitter positions.
 See `QUICKSTART.md` for the canonical run/serve/test commands and the full simulator flow;
 this section only captures the non-obvious, durable gotchas for future cloud agents.
 
+### Contributor / LLM authorship (required)
+- The **only** authorized contributor is **cgm2179** (`cgm2179@columbia.edu`).
+  See `CONTRIBUTORS.md`, `.github/CODEOWNERS`, and `.mailmap`.
+- Every git commit Author **and** Committer must be `cgm2179 <cgm2179@columbia.edu>`.
+  Do **not** use `Cursor Agent` / `cursoragent@cursor.com` as Author or Committer.
+- Do **not** add `Co-authored-by: Cursor Agent <cursoragent@cursor.com>` (or any
+  `cursoragent@…`) trailers. Strip them if the harness injects them.
+- Before committing in a fresh clone, run `bash scripts/setup_contributor_git.sh`
+  (sets `user.name` / `user.email` and `core.hooksPath=.githooks`).
+- Prefer: `GIT_AUTHOR_NAME=cgm2179 GIT_AUTHOR_EMAIL=cgm2179@columbia.edu \
+  GIT_COMMITTER_NAME=cgm2179 GIT_COMMITTER_EMAIL=cgm2179@columbia.edu git commit …`
+
 ### Layout
 - `Frontend_Data_Display.html` — the app shell / router (open this in a browser).
 - `Frontend/landing/` — Indoor/Outdoor · 2D/3D workspace router.
