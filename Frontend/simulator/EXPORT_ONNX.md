@@ -1,15 +1,15 @@
 # Exporting the SIM V3 ONNX surrogates + running the dashboard
 
 The browser studios (`fw_studio2d.html` indoor, `fw_studio2d_outdoor.html` outdoor)
-run the trained surrogates via **onnxruntime-web**. The `.onnx` weight files are
-**git-ignored** (~30 MB each) — you export them from the trained checkpoints. The
-`.json` **contracts** next to them *are* committed, so the studios know how to build
-the input and denormalize even before the weights exist. Without the `.onnx`, the
-studios fall back to the in-browser FDTD (Auto → FDTD; ONNX → a clear error).
+run the trained surrogates via **onnxruntime-web**. The deploy-path `.onnx` files under
+`SIM V1 3D/web/` are **allow-listed in `.gitignore`** and ship with the repo (~30 MB
+each) so a fresh clone can run ONNX offline. The `.json` **contracts** next to them
+are also committed. If a weight file is missing locally, the studios fall back to
+in-browser FDTD (Auto → FDTD; ONNX → a clear error).
 
 Models live in `Physics Engine/3D Map Physics/SIM V1 3D/web/`:
 
-| Studio | ONNX (git-ignored) | Contract (committed) | Channels |
+| Studio | ONNX (shipped) | Contract (committed) | Channels |
 |---|---|---|---|
 | indoor  `fw_studio2d.html`         | `fw_unet2d.onnx` | `fw_unet2d.json` | 9  |
 | outdoor `fw_studio2d_outdoor.html` | `fw_bs.onnx`     | `fw_bs.json`    | 10 (+directivity) |

@@ -112,7 +112,8 @@ loads the same fast path; Draco geometry decodes automatically.
 
 **Included** (`.gitignore` allow-lists these — browser + Colab start after clone):
 scene grids/masks/manifest, both M4 notebooks, `dataset_3d.py`, outdoor `city_demo/`,
-cached `web/volumes/`, and `web/pl_unet3d.json` + smoke `web/pl_unet3d.onnx`.
+cached `web/volumes/`, `web/pl_unet3d.json` + smoke `web/pl_unet3d.onnx`, indoor
+`web/fw_unet2d.onnx`, and outdoor base-station `web/fw_bs.onnx`.
 After Colab, overwrite that ONNX path and `git add` it — git will **not** silently skip it.
 
 **Omitted on purpose** (regenerable / too large for GitHub):

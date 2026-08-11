@@ -17,6 +17,10 @@
 # option fetches this from Frontend/simulator/fw_studio2d.html at
 # ../../Physics Engine/3D Map Physics/SIM V1 3D/web/fw_unet2d.onnx — so it MUST clone with the repo.
 !Physics Engine/3D Map Physics/SIM V1 3D/web/fw_unet2d.onnx
+# Outdoor 2-D base-station surrogate (SIM V3). Outdoor Full-Wave Studio fetches this from
+# Frontend/simulator/fw_studio2d_outdoor.html at the same web/ path — must clone with the repo.
+!Physics Engine/3D Map Physics/SIM V1 3D/web/fw_bs.onnx
+!SIM3D/web/fw_bs.onnx
 
 # Dataset shard *volumes* (~GB). Meta sidecars are ignored the same way.
 # Do NOT use a blanket `*.npz` — that also hides small non-dataset archives.
