@@ -68,14 +68,6 @@
     #rxTip .rxHead { font-weight:700; color:var(--accent); margin-bottom:5px; }
     #rxTip .rxRow { display:flex; justify-content:space-between; gap:14px; padding:1px 0; }
     #rxTip .rxRow span { color:var(--muted); } #rxTip .rxRow b { font-family:ui-monospace,monospace; }
-    /* surrogate vs walk-test RSRP scatter */
-    #walkPanel { flex:none; display:none; padding:8px 14px; border-top:1px solid var(--line);
-                 background:var(--panel); gap:14px; align-items:flex-start; max-height:200px; overflow:auto; }
-    #walkPanel.on { display:flex; }
-    #walkScatter { width:200px; height:140px; border:1px solid var(--line); border-radius:8px; background:#fafbfa; flex:none; }
-    #walkMeta { font-size:0.78rem; color:var(--muted); line-height:1.45; max-width:420px; }
-    #walkMeta b { color:var(--ink); }
-    #walkMeta .rho { font-size:1.05rem; font-weight:700; }
     #view:fullscreen, #view:-webkit-full-screen { background:#eceef0; width:100vw; height:100vh; }
     #view:fullscreen #stage, #view:-webkit-full-screen #stage { flex:1; min-height:0; }
     /* CSS fallback when Fullscreen API is blocked (e.g. some iframe embeds) */
@@ -169,10 +161,6 @@
       <span class="note" id="dlNote">Saves the map + coverage + calc boxes + receiver dot.</span>
       <span class="spacer"></span>
     </div>
-    <div id="walkPanel">
-      <canvas id="walkScatter" width="220" height="160" title="surrogate_predicted_RSRP vs walk-test_RSRP"></canvas>
-      <div id="walkMeta">Generate coverage to score surrogate vs walk-test RSRP.</div>
-    </div>
     <div id="desc"></div>
   </div>
   <div id="rxTip"></div>
@@ -181,8 +169,6 @@
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
   <!-- the baked penetrable NoMa city grid + stations; sets window.NOMA_CITY_2D -->
   <script src="../../Data/noma_city2d.js"></script>
-  <!-- FCC outdoor walk-test points (lon,lat,rsrp,pci,…) for Spearman scoring -->
-  <script src="../../Data/outdoor_walk.js"></script>
 
   <script type="module">
     import * as S from './fw_solve2d_bs.js';
@@ -304,7 +290,7 @@
     $('station').addEventListener('change', () => {
       sel = STA[parseInt($('station').value, 10)]; $('bore').value = Math.round(sel.boresight);
       selectStationBand(); field = null; autofillBw(); updateResNote(); if (rx) updateRxReadout();
-      $('walkPanel').classList.remove('on'); drawCity();
+      drawCity();
     });
     $('bore').addEventListener('input', () => { sel = { ...sel, boresight: parseFloat($('bore').value) || 0 }; });
     $('band').addEventListener('change', () => { autofillBw(); updateResNote(); });
@@ -395,7 +381,6 @@
       $('hudMeta').textContent = `${sel.site.split('_')[0]} · ${solver.toUpperCase()} · ${fMHz} MHz · ${kind} · ${secs < 1 ? (secs * 1000).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}`;
       setStatus(`done — ${solver.toUpperCase()} coverage in ${secs < 1 ? (secs * 1000).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}.`);
       render();
-      scoreWalkRsrp();
     }
 
     // ---- rendering: base city, then the coverage patch, then Tx ----
@@ -629,121 +614,7 @@
       rx = null; rxMetrics = null; hideRxTip(); drawOverlay();
       $('probeMsg').textContent = ''; $('readout').textContent = '';
     };
-    ['eirp', 'ple', 'bw'].forEach(id => $(id).addEventListener('input', () => { updateRxReadout(); if (field) scoreWalkRsrp(); }));
-
-    // ---- surrogate_predicted_RSRP vs walk-test_RSRP + Spearman ρ ----
-    // Re-anchor the relative |U| envelope to absolute RSRP via free-space at a near-Tx
-    // reference cell (contract: "re-anchor to FSPL for absolute dB"), then sample at
-    // walk points whose PCI matches the selected station and that fall inside the calc box.
-    function lonLatToCell(lon, lat) {
-      const lon0 = CN.x0z0[0], lon1 = CN.x1z0[0], lat0 = CN.x0z0[1], lat1 = CN.x0z1[1];
-      return { x: (lon - lon0) / (lon1 - lon0) * (NX - 1), z: (lat - lat0) / (lat1 - lat0) * (NZ - 1) };
-    }
-    function fieldAnchor(R, db, fMHz, eirpDbm) {
-      // Prefer an air cell ~8–20 m from Tx on the fine grid; fall back to Tx itself.
-      const targets = [12, 8, 16, 20, 6, 4];
-      for (const dm of targets) {
-        const cells = Math.max(1, Math.round(dm / R.h_m));
-        for (const [di, dj] of [[cells, 0], [0, cells], [-cells, 0], [0, -cells], [cells, cells]]) {
-          const i = R.tx.i + di, j = R.tx.j + dj;
-          if (i < 0 || j < 0 || i >= R.H || j >= R.W) continue;
-          const fi = i * R.W + j;
-          if (SOLID(R.classes[fi]) || !isFinite(db[fi])) continue;
-          const d = Math.hypot(di, dj) * R.h_m;
-          return { db0: db[fi], rsrp0: eirpDbm - S.fsplDb(fMHz, d) };
-        }
-      }
-      const fi = R.tx.i * R.W + R.tx.j;
-      return { db0: db[fi] || 0, rsrp0: eirpDbm - S.fsplDb(fMHz, Math.max(R.h_m, 1)) };
-    }
-    function scoreWalkRsrp() {
-      const panel = $('walkPanel'), meta = $('walkMeta'), sc = $('walkScatter');
-      if (!field) { panel.classList.remove('on'); return; }
-      const WALK = window.OUTDOOR_WALK;
-      if (!WALK || !WALK.pts || !WALK.pts.length) {
-        panel.classList.add('on');
-        meta.innerHTML = 'Walk-test data missing (<code>Data/outdoor_walk.js</code>).';
-        return;
-      }
-      const pci = String(sel.pci || '');
-      if (!pci) {
-        panel.classList.add('on');
-        meta.innerHTML = `<b>Walk-test score</b><br>Station ${sel.site.split('_')[0]} has no PCI — cannot match walk points.`;
-        return;
-      }
-      const eirp = parseFloat($('eirp').value) || 63;
-      const R = field.region, db = field.db, fMHz = field.fMHz;
-      const box = S.regionBoxCells(CITY, sel, curRegionM());
-      const anchor = fieldAnchor(R, db, fMHz, eirp);
-      const pred = [], meas = [];
-      // pts: [lon, lat, rsrp, pci, opIdx, netIdx, bandIdx, chIdx]
-      for (let i = 0; i < WALK.pts.length; i++) {
-        const p = WALK.pts[i];
-        if (String(p[3]) !== pci) continue;
-        const { x, z } = lonLatToCell(p[0], p[1]);
-        if (x < box.x0 || x >= box.x1 || z < box.z0 || z >= box.z1) continue;
-        const fi = fineIdx(R, x, z);
-        if (fi < 0 || SOLID(R.classes[fi]) || !isFinite(db[fi])) continue;
-        const rsrpHat = anchor.rsrp0 + (db[fi] - anchor.db0);
-        if (!isFinite(rsrpHat) || !isFinite(p[2])) continue;
-        pred.push(rsrpHat); meas.push(p[2]);
-      }
-      panel.classList.add('on');
-      if (pred.length < 3) {
-        meta.innerHTML =
-          `<b>Walk-test score</b> · PCI ${pci}<br>` +
-          `Only ${pred.length} walk point(s) inside the calc box for this PCI — need ≥3 for Spearman. ` +
-          `Widen “Coverage region” or pick another station.`;
-        drawWalkScatter([], []);
-        return;
-      }
-      const rho = S.spearmanRho(pred, meas);
-      const q = !isFinite(rho) ? ['n/a', '#888']
-        : rho >= 0.8 ? ['Excellent', '#1a7f37']
-        : rho >= 0.6 ? ['Good', '#2d8a4e']
-        : rho >= 0.4 ? ['Fair', '#b26a00']
-        : rho >= 0.2 ? ['Weak', '#c45c00']
-        : ['Poor', '#c0392b'];
-      meta.innerHTML =
-        `<b>surrogate_predicted_RSRP vs walk-test_RSRP</b><br>` +
-        `PCI ${pci} · ${sel.site.split('_')[0]} · ${Math.round(fMHz)} MHz · ${field.solver.toUpperCase()} · n=${pred.length}<br>` +
-        `Spearman ρ = <span class="rho" style="color:${q[1]}">${isFinite(rho) ? rho.toFixed(3) : 'n/a'}</span> · ` +
-        `<span style="color:${q[1]}">${q[0]}</span><br>` +
-        `<span class="note">Predicted RSRP = EIRP−FSPL(ref) + (|U|_dB − |U|_ref) — relative surrogate field re-anchored to free-space.</span>`;
-      drawWalkScatter(pred, meas);
-    }
-    function drawWalkScatter(pred, meas) {
-      const cv = $('walkScatter'), c = cv.getContext('2d');
-      const W = cv.width, H = cv.height, pad = 28;
-      c.clearRect(0, 0, W, H);
-      c.fillStyle = '#fafbfa'; c.fillRect(0, 0, W, H);
-      if (pred.length < 2) {
-        c.fillStyle = '#5b6662'; c.font = '11px sans-serif';
-        c.fillText('no paired points', 40, H / 2); return;
-      }
-      let lo = Infinity, hi = -Infinity;
-      for (let i = 0; i < pred.length; i++) {
-        lo = Math.min(lo, pred[i], meas[i]); hi = Math.max(hi, pred[i], meas[i]);
-      }
-      if (!(hi > lo)) { hi = lo + 1; }
-      const padDb = (hi - lo) * 0.05; lo -= padDb; hi += padDb;
-      const xOf = v => pad + (v - lo) / (hi - lo) * (W - pad - 8);
-      const yOf = v => (H - pad) - (v - lo) / (hi - lo) * (H - pad - 8);
-      // 1:1 line
-      c.strokeStyle = '#c5cdc8'; c.setLineDash([4, 3]); c.beginPath();
-      c.moveTo(xOf(lo), yOf(lo)); c.lineTo(xOf(hi), yOf(hi)); c.stroke(); c.setLineDash([]);
-      // points
-      c.fillStyle = 'rgba(10,127,122,0.55)';
-      for (let i = 0; i < pred.length; i++) {
-        c.beginPath(); c.arc(xOf(pred[i]), yOf(meas[i]), 2.2, 0, Math.PI * 2); c.fill();
-      }
-      c.fillStyle = '#5b6662'; c.font = '9px ui-monospace,monospace';
-      c.fillText('pred RSRP →', pad, H - 8);
-      c.save(); c.translate(10, H / 2); c.rotate(-Math.PI / 2);
-      c.fillText('walk RSRP', 0, 0); c.restore();
-      c.fillText(`${lo.toFixed(0)}`, pad, H - 16);
-      c.fillText(`${hi.toFixed(0)}`, W - 28, H - 16);
-    }
+    ['eirp', 'ple', 'bw'].forEach(id => $(id).addEventListener('input', updateRxReadout));
 
     // ---- PNG download: composite the map + overlay at display resolution ----
     $('dlPng').onclick = () => {
@@ -831,8 +702,7 @@
         `<b>Heatmap</b> shows |U| as relative field strength in dB (0 dB = strongest near the antenna; range adjustable). ` +
         `<b>Wavefront</b> shows the instantaneous Re{U·e<sup>jωt</sup>} so you can watch the beam form, diffract around corners, penetrate glass, and shadow behind concrete. ` +
         `The antenna directivity (boresight + family) shapes the beam. The coverage heatmap is <i>relative</i> field strength; ` +
-        `for an absolute link budget, use <b>Get a Point</b> (toolbar above: Mercator / Lat·Long / Current Fix Grid) — a red receiver dot reports distance-to-Tx, geometric path loss, channel BW, and EIRP-anchored <b>RSRP / RSSI / RSRQ</b>. ` +
-        `After Generate, the panel below scores <b>surrogate_predicted_RSRP vs walk-test_RSRP</b> (Spearman ρ) for the station’s PCI inside the calc box.`;
+        `for an absolute link budget, use <b>Get a Point</b> (toolbar above: Mercator / Lat·Long / Current Fix Grid) — a red receiver dot reports distance-to-Tx, geometric path loss, channel BW, and EIRP-anchored <b>RSRP / RSSI / RSRQ</b>.`;
     }
 
     // ---- init: draw the city, load contract + ONNX ----
