@@ -518,7 +518,11 @@
           <span class="sim-note">Live complex full-wave field via <code>fw_unet2d.onnx</code> (fast) or the in-browser FDTD, with a “time to calculate grid” estimate — <b>not</b> the legacy path-loss engine below.</span>
         </div>
         <div id="simFwWrap" style="display:none; margin:6px 0 16px;">
-          <iframe id="simFwFrame" title="SIM V3 Full-Wave 2D"
+          <div class="sim-fs-toolbar">
+            <button type="button" class="sim-btn ghost" id="simFsFw2d">⛶ Full screen</button>
+            <span class="sim-note">Expand this simulation window to fill the screen.</span>
+          </div>
+          <iframe id="simFwFrame" title="SIM V3 Full-Wave 2D" allowfullscreen allow="fullscreen"
                   style="width:100%; height:78vh; border:1px solid #d9e0dc; border-radius:12px; background:#f4f6f3;"></iframe>
         </div>
         <script>
@@ -545,6 +549,10 @@
           <span class="sim-note">Live base-station coverage over the real NoMa OSM city via <code>fw_bs.onnx</code> (fast) or the penetrable FDTD, with a “time to calculate grid” estimate — <b>not</b> the legacy path-loss engine below.</span>
         </div>
         <div id="simFwWrapOut" style="display:none; margin:6px 0 16px;">
+          <div class="sim-fs-toolbar">
+            <button type="button" class="sim-btn ghost" id="simFsFw2dOut">⛶ Full screen</button>
+            <span class="sim-note">Expand this simulation window to fill the screen.</span>
+          </div>
           <iframe id="simFwFrameOut" title="SIM V3 Outdoor Full-Wave 2D" allowfullscreen
                   allow="fullscreen"
                   style="width:100%; height:86vh; border:1px solid #d9e0dc; border-radius:12px; background:#f4f6f3;"></iframe>
@@ -603,7 +611,13 @@
         </div>
         <div id="simValidation"></div>
 
-        <canvas id="simCanvas" width="448" height="256"></canvas>
+        <div id="simLegacyWrap" class="sim-fs-wrap">
+          <div class="sim-fs-toolbar">
+            <button type="button" class="sim-btn ghost" id="simFsLegacy">⛶ Full screen</button>
+            <span class="sim-note">Expand the path-loss simulation canvas.</span>
+          </div>
+          <canvas id="simCanvas" width="448" height="256"></canvas>
+        </div>
 
         <div class="sim-bar">
           <label><input type="radio" name="simView" value="static" checked> Static heatmap</label>
@@ -671,7 +685,11 @@
             <span class="sim-note">The voxelized 7th floor in three.js — every wall/floor/ceiling/object the surrogate sees. Solve the 3-D field with the ONNX surrogate (whole-floor, once trained) or the in-browser <b>sub-volume FDTD</b>.</span>
           </div>
           <div id="simFw3dWrap" style="display:none; margin:6px 0 16px;">
-            <iframe id="simFw3dFrame" title="SIM V3 Full-Wave 3D"
+            <div class="sim-fs-toolbar">
+              <button type="button" class="sim-btn ghost" id="simFsFw3d">⛶ Full screen</button>
+              <span class="sim-note">Expand this simulation window to fill the screen.</span>
+            </div>
+            <iframe id="simFw3dFrame" title="SIM V3 Full-Wave 3D" allowfullscreen allow="fullscreen"
                     style="width:100%; height:82vh; border:1px solid #d9e0dc; border-radius:12px; background:#0b0e14;"></iframe>
           </div>
           <script>
@@ -695,7 +713,11 @@
             <span class="sim-note">The NoMa DC render georeferenced over a real satellite/street basemap, with every surveyed base station selectable <b>by PCI</b> (default panel antenna + station bearing → a directional coverage lobe). Solve whole-city coverage with <b>Eikonal</b>, the <b>ONNX hybrid</b> surrogate, or the sub-volume <b>FDTD</b>.</span>
           </div>
           <div id="simFw3dWrapOut" style="display:none; margin:6px 0 16px;">
-            <iframe id="simFw3dFrameOut" title="SIM V3 Full-Wave 3D Outdoor"
+            <div class="sim-fs-toolbar">
+              <button type="button" class="sim-btn ghost" id="simFsFw3dOut">⛶ Full screen</button>
+              <span class="sim-note">Expand this simulation window to fill the screen.</span>
+            </div>
+            <iframe id="simFw3dFrameOut" title="SIM V3 Full-Wave 3D Outdoor" allowfullscreen allow="fullscreen"
                     style="width:100%; height:82vh; border:1px solid #d9e0dc; border-radius:12px; background:#0b0e14;"></iframe>
           </div>
           <script>
@@ -727,6 +749,12 @@
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js" defer></script>
   <script src="SIM/web/sim_assets.js?v=3"></script>
   <script src="SIM/web/simulator_tab.js?v=3" defer></script>
+  <script src="Frontend/simulator/sim_fs.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      if (window.SimFS) window.SimFS.wireDashboardDefaults();
+    });
+  </script>
 
   <!-- 3D Simulation assets (voxel grid + materials, collision boxes, antenna
        catalog). Classic scripts set window.SIM3D_ASSETS / _COLLISION /
