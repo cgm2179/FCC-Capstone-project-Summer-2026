@@ -8,7 +8,7 @@
     * { box-sizing: border-box; }
     body { margin:0; height:100vh; display:flex; background:var(--bg); color:var(--ink);
            font:13px/1.5 "Avenir Next","Helvetica Neue",Helvetica,sans-serif; overflow:hidden; }
-    #side { width:318px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:18px; overflow-y:auto; }
+    #side { width:314px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:18px; overflow-y:auto; }
     #side h2 { margin:0 0 2px; font-size:1.15rem; } #side .sub { color:var(--muted); font-size:0.82rem; margin:0 0 16px; }
     .grp { margin-bottom:13px; } .grp > label { display:block; font-weight:600; margin-bottom:5px; color:var(--muted); font-size:0.84rem; }
     select, input[type=number] { width:100%; background:#fff; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:7px 10px; font:inherit; }
@@ -17,6 +17,7 @@
     .seg button.on { background:var(--accent); color:#fff; }
     .btn { width:100%; padding:9px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; margin-top:4px; }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .btn.ghost { background:#eef2ef; color:var(--ink); border:1px solid var(--line); }
     #engine { font-size:0.76rem; color:var(--muted); margin-top:6px; }
     #warn { margin-top:10px; font-size:0.8rem; color:var(--warn); min-height:16px; white-space:pre-line; }
     #status { margin-top:8px; font-size:0.8rem; color:var(--muted); min-height:16px; } #status.err { color:var(--err); font-weight:600; }
@@ -31,7 +32,13 @@
     .row { display:flex; gap:8px; } .row > label { flex:1; font-size:0.72rem; color:var(--muted); }
     #hud { position:absolute; top:12px; left:14px; font-size:0.75rem; color:#cfe; pointer-events:none; text-shadow:0 1px 2px #000; }
     #hud b { color:#5fd0c8; }
-    #cbar { position:absolute; right:16px; top:16px; width:150px; }
+    #compass { position:absolute; top:12px; right:16px; width:82px; height:82px; border-radius:50%;
+               background:rgba(11,14,20,.55); border:1px solid #2a3340; color:#9fb; font-size:0.72rem; }
+    #compass .n { position:absolute; top:4px; left:50%; transform:translateX(-50%); color:#ff6b6b; font-weight:700; }
+    #compass .s { position:absolute; bottom:4px; left:50%; transform:translateX(-50%); }
+    #compass .e { position:absolute; right:6px; top:50%; transform:translateY(-50%); }
+    #compass .w { position:absolute; left:6px; top:50%; transform:translateY(-50%); }
+    #cbar { position:absolute; right:16px; bottom:64px; width:150px; }
     #cbar canvas { width:150px; height:12px; border-radius:3px; border:1px solid #2a3340; }
     #cbar .lab { display:flex; justify-content:space-between; font-size:0.7rem; color:#9fb; }
     #readout { position:absolute; bottom:12px; left:14px; font-size:0.74rem; color:#9fb; font-family:ui-monospace,monospace; text-shadow:0 1px 2px #000; }
@@ -39,7 +46,6 @@
     #legend td { padding:2px 5px; color:var(--muted); }
     #legend .sw2 { display:inline-block; width:12px; height:12px; border-radius:3px; border:1px solid #999; vertical-align:middle; }
     .note { font-size:0.74rem; color:var(--muted); margin:2px 0 0; }
-    #bsMeta { font-size:0.74rem; color:var(--muted); margin-top:4px; white-space:pre-wrap; }
   </style>
   <script type="importmap">
   { "imports": {
@@ -51,88 +57,102 @@
 <body>
   <div id="side">
     <h2>Outdoor Full-Wave Studio · 3D</h2>
-    <p class="sub">SIM V3 · real NoMa DC 3-D city CAD + known base stations — Indoor 3-D studio layout with Outdoor 2-D simulation controls (BS / band / boresight / antenna / coverage region).</p>
+    <p class="sub">SIM V3 · the NoMa DC city over a real basemap, with the surveyed base stations on their rooftops. Pick a PCI, antenna, and band, then generate the outdoor coverage field.</p>
+
+    <div class="grp"><label>Base station · PCI (Tx)</label><select id="station"></select>
+      <div class="note" id="stMeta"></div></div>
+    <div class="grp"><label>Antenna</label>
+      <select id="antenna">
+        <option value="panel" selected>Panel — 65° sector</option>
+        <option value="sector90">Wide sector — 90°</option>
+        <option value="narrow">Narrow — 33°</option>
+        <option value="omni">Omni</option>
+      </select></div>
+    <div class="grp"><label>Boresight (° from N)</label><input id="bore" type="number" value="0" min="0" max="359" step="1">
+      <p class="note">Antenna azimuth. Defaults to the station bearing when a PCI is picked; the panel/sector patterns shape the coverage lobe (omni = isotropic).</p></div>
+    <div class="grp"><label>Ground basemap</label>
+      <select id="basemapSrc">
+        <option value="sat" selected>Satellite (Esri)</option>
+        <option value="carto">Streets (CARTO)</option>
+        <option value="off">Off (dark grid)</option>
+      </select>
+      <p class="note">Real map draped under the city, georeferenced to the tile.</p></div>
+    <div class="grp"><label>Band</label><select id="band"></select></div>
+    <div class="grp"><label>Tx / EIRP (dBm)</label><input id="txp" type="number" value="46" min="0" max="60" step="1"></div>
 
     <div class="grp"><label>Solver</label>
       <div class="seg" id="solverSeg">
-        <button class="on" data-v="auto">Auto</button><button data-v="onnx">ONNX</button><button data-v="fdtd">FDTD</button>
+        <button class="on" data-v="eikonal">Eikonal</button><button data-v="onnx">ONNX (hybrid)</button><button data-v="fdtd">FDTD</button>
       </div>
-      <div id="engine">loading scene…</div>
-      <p class="note">Auto = street-level eikonal RSRP (panel + O2I). <b>ONNX</b> = outdoor 3-D surrogate placeholder (not trained yet). <b>FDTD</b> = sub-volume around the rooftop Tx.</p>
-    </div>
+      <div id="engine"></div>
+      <p class="note"><b>Eikonal</b> = whole-city absolute RSRP (FSPL + ray-marched building/foliage loss) — the iBwave/WinProp coverage look. <b>ONNX (hybrid)</b> = the trained full-wave surrogate in the box around the antenna ⊕ eikonal for the rest of the city. <b>FDTD</b> solves the true sub-volume field around the station at λ/8.</p></div>
+    <div class="grp" id="fdtdBudgetGrp"><label>FDTD detail vs speed</label>
+      <select id="fdtdBudget">
+        <option value="500000">Fast (coarse · ~0.5 M cells)</option>
+        <option value="1200000" selected>Balanced (~1.2 M cells)</option>
+        <option value="3200000">Fine (full λ/8 · ~3.2 M cells)</option>
+      </select>
+      <p class="note">FDTD resolves λ/8 within a cell budget; fewer cells = faster but coarser. Only affects the FDTD solver — an ETA shows before it runs.</p></div>
 
-    <div class="grp"><label>Base station</label>
-      <select id="station"></select>
-      <div id="bsMeta"></div>
-    </div>
-    <div class="grp"><label>Band</label><select id="band"></select></div>
-    <div class="row" style="gap:8px">
-      <div class="grp" style="flex:1"><label>Boresight (° from N)</label><input id="bore" type="number" value="0" min="0" max="359" step="1"></div>
-      <div class="grp" style="flex:1"><label>Antenna</label>
-        <select id="ant">
-          <option value="panel" selected>panel</option>
-          <option value="omni">omni</option>
-          <option value="patch">patch</option>
-          <option value="yagi">yagi</option>
-          <option value="dish">dish</option>
-        </select>
-      </div>
-    </div>
-    <div class="grp"><label>Tx power (dBm)</label><input id="txp" type="number" value="43" min="0" max="50" step="1"></div>
-    <div class="grp" id="covResGrp"><label>Coverage region (m across)</label>
-      <input id="covRegion" type="number" value="400" min="80" max="1200" step="20">
-      <p class="note" id="resNote">Street-level solve window around the active BS.</p></div>
-    <div class="grp" id="fdtdResGrp" style="display:none"><label>FDTD sub-volume (half-width, m)</label>
-      <select id="region"><option value="8">±8 m</option><option value="12" selected>±12 m</option><option value="20">±20 m</option></select>
-      <p class="note">Qualitative near-Tx box. Concrete core remapped to rigid class 3 for the browser FDTD worker.</p></div>
-
-    <button class="btn" id="run" disabled>▶ Generate coverage</button>
+    <button class="btn" id="run">▶ Generate field</button>
     <div id="bar"><div id="barFill"></div></div>
     <div id="warn"></div>
-    <div id="status">loading outdoor scene…</div>
+    <div id="status">ready</div>
 
-    <div class="grp" style="margin-top:16px"><label>Model view</label>
-      <div class="seg" id="modelSeg">
-        <button class="on" data-v="osm">OSM buildings</button>
-        <button data-v="cad">Real CAD</button>
-        <button data-v="voxel">Voxels</button>
-      </div>
-      <p class="note"><b>OSM buildings</b> = georeferenced footprints (same frame as Outdoor 2-D pins). Real CAD OBJ is sparse at some BS sites and can look mis-placed — use OSM to verify Forte / BS locations.</p></div>
-    <div class="grp"><label>Field view</label>
-      <div class="seg" id="viewSeg"><button class="on" data-v="heat">Heatmap |U|</button><button data-v="wave">Wavefront</button></div></div>
-    <div class="grp"><label>Field style</label>
-      <div class="seg" id="fstyleSeg"><button class="on" data-v="slice">Coverage slice</button><button data-v="cloud">Cloud</button><button data-v="voxel">Voxels</button></div>
-      <p class="note">Coverage slice = street-level cut-plane (Outdoor 2-D look in 3-D).</p></div>
+    <div class="grp" style="margin-top:16px"><label>Field style</label>
+      <div class="seg" id="fstyleSeg"><button class="on" data-v="slice">Coverage slice</button><button data-v="cloud">Cloud</button></div>
+      <p class="note">Coverage slice = a smooth horizontal cut-plane at the antenna height.</p></div>
     <div class="grp"><label>Colour scale</label>
       <div class="seg" id="cmapSeg"><button data-v="viridis">Viridis</button><button class="on" data-v="rainbow">Rainbow</button><button data-v="rdbu">Red-White-Blue</button></div></div>
     <div class="grp"><label>Field range (dBm)</label>
       <div class="row"><label>strong<input id="rangeHi" type="number" value="-40" step="5"></label>
-        <label>weak<input id="rangeLo" type="number" value="-120" step="5"></label></div></div>
-    <div class="grp"><label>Model opacity</label>
+        <label>weak<input id="rangeLo" type="number" value="-110" step="5"></label></div></div>
+    <div class="grp"><label>City opacity</label>
       <input id="modelOpacity" type="range" min="0" max="100" value="70" style="width:100%"></div>
+
+    <div class="grp"><label>NoMa render (Blender · aligned)</label>
+      <label style="font-weight:400"><input type="checkbox" id="showModel" checked> Show NoMa 3D model</label>
+      <label style="font-weight:400"><input type="checkbox" id="showVox"> Show voxel city (solver view)</label>
+      <label style="font-weight:400"><input type="checkbox" id="showGrid" checked> Show ground grid</label>
+      <div id="modelStatus" class="note">loading NoMa render…</div></div>
+    <div class="grp"><label>Alignment</label>
+      <label style="font-weight:400"><input type="checkbox" id="flipEW"> Flip E–W</label>
+      <label style="font-weight:400"><input type="checkbox" id="flipNS"> Flip N–S</label>
+      <div class="row"><label>east ΔX <input id="adjX" type="number" value="0" step="2"></label>
+        <label>north ΔZ <input id="adjZ" type="number" value="0" step="2"></label></div>
+      <div class="row"><label>height ΔY <input id="adjY" type="number" value="0" step="1"></label>
+        <label>scale × <input id="adjS" type="number" value="1" min="0.5" max="1.5" step="0.01"></label></div>
+      <p class="note">Auto-registered to the base-station Mercator georeference (buildings verified under the stations); nudge only if a re-export differs. <button class="btn ghost" id="adjReset" style="width:auto;padding:3px 8px;margin-top:4px">reset</button></p></div>
+
     <div class="grp"><label>See inside — height cut</label>
       <input id="cutY" type="range" min="8" max="100" value="100" style="width:100%">
-      <p class="note">Slide down to slice off rooftops and look into the street canyons.</p></div>
+      <p class="note">Slide down to slice off the upper structure and look between buildings.</p></div>
 
     <div class="grp"><label>Materials (legend ↔ voxels)</label><table id="legend"></table>
       <p class="note" id="scaleNote"></p></div>
-    <div class="grp"><label>FDTD full-wave budget (later)</label>
-      <p class="note" id="fdtdBudget"></p></div>
   </div>
 
   <div id="view">
     <div id="stage">
       <canvas id="gl"></canvas>
       <div id="hud">
-        <div><b>SIM V3 — outdoor full-wave · NoMa DC (3D)</b></div>
+        <div><b>SIM V3 — outdoor full-wave · NoMa city voxel grid (3D)</b></div>
         <div id="hudMeta"></div>
-        <div style="opacity:.7">drag to orbit · scroll to zoom</div>
+        <div style="opacity:.7">drag to orbit · scroll to zoom · north-up / east-right</div>
       </div>
-      <div id="cbar"><canvas id="cbarCv" width="150" height="12"></canvas><div class="lab"><span id="cbLo">−120 dBm</span><span id="cbHi">−40 dBm</span></div></div>
+      <div id="compass"><span class="n">N</span><span class="s">S</span><span class="e">E</span><span class="w">W</span></div>
+      <div id="cbar"><canvas id="cbarCv" width="150" height="12"></canvas><div class="lab"><span id="cbLo">−110 dBm</span><span id="cbHi">−40 dBm</span></div></div>
       <div id="readout"></div>
     </div>
     <div id="desc"></div>
   </div>
+
+  <!-- the baked penetrable NoMa 3-D city grid (window.SIM3D_ASSETS_OUTDOOR) -->
+  <script src="../../SIM3D/web/sim_assets_outdoor_3d.js"></script>
+  <!-- the canonical base-station registry (window.BASE_STATIONS) — single source of truth -->
+  <script src="../../Data/base_stations.js"></script>
+  <!-- onnxruntime-web for the ONNX (hybrid) solver — the trained fw_unet3d surrogate near the antenna -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
 
   <script type="module">
     import * as THREE from 'three';
@@ -146,617 +166,574 @@
     const setWarn = m => { $('warn').textContent = m || ''; };
     const setBar = f => { $('bar').style.display = f == null ? 'none' : 'block'; if (f != null) $('barFill').style.width = Math.round(f * 100) + '%'; };
 
-    const ASSET = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/outdoor_studio3d';
-    const CAD_DIR = '../../Data/models/NoMa_DC/';
-    const CAD_OBJ = 'Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.obj';
-    const CAD_MTL = 'Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.mtl';
-    const BANDS = [
-      ['617', 'LTE 617 (B71)'], ['751', 'LTE 751 (B13)'], ['869', 'LTE 869 (B5)'],
-      ['1960', 'LTE 1960'], ['2506', 'NR n41 2506'], ['3700', 'NR n77 3700'],
-    ];
-    $('band').innerHTML = BANDS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
-
-    // Antenna boresights (° from N) aligned to the canonical base-station registry
-    // (Data/base_stations.js `bearing_deg`) so the 3-D studio, the Outdoor 2-D studio and the
-    // catalog all agree on each donor's azimuth.
-    const DEFAULT_BORE = {
-      BS7_forte_hall: 237, BS2_900_nj_ave: 253, BS4_55_m_st: 308,
-      BS5_1140_n_capitol: 310, BS6_1005_n_capitol: 240,
-    };
-    const ANT_HP = { panel: 65, patch: 80, yagi: 40, dish: 20, omni: null };
-
-    // ---- load scene + grid ----
-    const sceneMeta = await fetch(`${ASSET}/scene.json`).then(r => { if (!r.ok) throw new Error('scene.json ' + r.status); return r.json(); });
-    const [X, Y, Z] = sceneMeta.grid_shape;
-    const CELL = sceneMeta.cell_size_m;
-    const [OX, OY, OZ] = sceneMeta.origin_units;
-    const MS = sceneMeta.merc_scale, ANCH = sceneMeta.merc_anchor;
-    // Blender OSM Cube marker + Forte Hall one-point CAD↔2-D align (cube-local metres).
-    const CUBE_ANCHOR = (sceneMeta.cad && sceneMeta.cad.cube_anchor_m) || [8572395.0, 4707865.5];
-    const CAD_ALIGN = (sceneMeta.cad && sceneMeta.cad.align_offset_local_m) || [0, 0, 0];
+    // ---- decode the outdoor 3-D voxel city ----
+    if (!window.SIM3D_ASSETS_OUTDOOR) { setStatus('sim_assets_outdoor_3d.js failed to load (serve from the repo root).', true); throw new Error('no SIM3D_ASSETS_OUTDOOR'); }
+    const A = window.SIM3D_ASSETS_OUTDOOR, M = A.manifest_3d;
+    const [X, Y, Z] = A.grid_shape || M.grid_shape, CELL = M.cell_size_m;
     const idx = (x, y, z) => (x * Y + y) * Z + z;
-    const GRID = new Uint8Array(await fetch(`${ASSET}/material_grid.bin`).then(r => r.arrayBuffer()));
-    if (GRID.length !== X * Y * Z) throw new Error(`grid size mismatch ${GRID.length} vs ${X * Y * Z}`);
+    function u8(b) { const s = atob(b), a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
+    const GRID = u8(A.grid_b64);
+    const SOLID = c => c !== 0;                          // everything but air is a city object
 
-    const MATS = sceneMeta.materials || [];
-    const WALL_DB = sceneMeta.wall_db_per_voxel || [0, 2.5, 18, 30, 1.5, 3];
+    // ---- georeference: lon/lat → (vx,vz) voxel — the exact port of voxelize_gpkg.lonlat_to_vox_xz.
+    //   mx = -R·rad(lon)  (X = -easting, native grid runs west);  mz = R·ln(tan(π/4+rad(lat)/2))
+    //   vx = (merc_scale·(mx-anchor.x) - ox)/cell ;  vz = (merc_scale·(mz-anchor.z) - oz)/cell
+    const R_MERC = M.merc_R || 6378137.0, MS = M.merc_scale, ANC = M.merc_anchor, OU = M.origin_units;
+    function lonlatToVox(lon, lat) {
+      const mx = -R_MERC * lon * Math.PI / 180;
+      const mz = R_MERC * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI / 180) / 2));
+      // merc_anchor is [easting, northing] (2-el); origin_units is [X,Y,Z] (3-el) — match voxelize_gpkg.
+      return { vx: (MS * (mx - ANC[0]) - OU[0]) / CELL, vz: (MS * (mz - ANC[1]) - OU[2]) / CELL };
+    }
+
+    // ---- world frame: north-up / east-right. Native +vx = WEST, +vz = NORTH, so we mirror both
+    //   axes into world space:  EAST → +X (right), NORTH → −Z (into the default south-facing camera).
+    const cX = X / 2, cY = Y / 2, cZ = Z / 2;
+    const wX = vx => (cX - vx);            // vx=0 (east edge) → +cX (right);  east = +X
+    const wY = vy => (vy - cY);            // up
+    const wZ = vz => (cZ - vz);            // vz max (north) → −cZ;  north = −Z
+    // boresight θ (° from N, CW toward E) → world direction (east=+X, north=−Z)
+    const boreDir = deg => { const t = deg * Math.PI / 180; return new THREE.Vector3(Math.sin(t), 0, -Math.cos(t)); };
+
+    const MATS = M.materials || [];
     const hex2rgb = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
-    const MATCOL = {}; MATS.forEach(m => { MATCOL[m.id] = m.color ? hex2rgb(m.color).map(v => v / 255) : [.55, .55, .55]; });
-    $('legend').innerHTML = MATS.map(m =>
-      `<tr><td><span class="sw2" style="background:${m.color}"></span></td><td>${m.name}</td><td>${m.loss || '—'}</td></tr>`).join('');
-    $('scaleNote').textContent = `${(X * CELL).toFixed(0)} × ${(Z * CELL).toFixed(0)} m · ${(Y * CELL).toFixed(0)} m tall · ${X}×${Y}×${Z} @ ${CELL} m`;
-    const bud = sceneMeta.fdtd_foundation || {};
-    const b0 = (bud.lambda_over_8 || [])[0], b1 = (bud.lambda_over_8 || [])[1];
-    $('fdtdBudget').innerHTML =
-      `Studio grid ${X}×${Y}×${Z} @ ${CELL} m.<br>` +
-      `Indoor-scale 0.3 m → <b>${bud.indoor_scale_0p3m ? (bud.indoor_scale_0p3m.n_cells / 1e9).toFixed(2) + ' Gcell' : '—'}</b>.<br>` +
-      (b0 ? `λ/8 @ ${b0.f_mhz} MHz → <b>${b0.n_cells_label}</b>.` : '') +
-      (b1 ? `<br>λ/8 @ ${b1.f_mhz} MHz → <b>${b1.n_cells_label}</b>.` : '');
+    // City look: buildings (class 3) as neutral concrete; keep the other material colours.
+    const CITY_COL = { 3: [0.60, 0.63, 0.67] };
+    const MATCOL = {}; MATS.forEach(m => { MATCOL[m.id] = CITY_COL[m.id] || (m.color ? hex2rgb(m.color).map(v => v / 255) : [.55, .55, .55]); });
+    $('legend').innerHTML = MATS.filter(m => m.id !== 0).map(m => {
+      const rgb = MATCOL[m.id].map(v => Math.round(v * 255));
+      const nm = m.id === 3 ? 'building (concrete)' : m.name.replace(/_/g, ' ');
+      return `<tr><td><span class="sw2" style="background:rgb(${rgb[0]},${rgb[1]},${rgb[2]})"></span></td><td>${nm}</td></tr>`;
+    }).join('');
+    $('scaleNote').textContent = `City ${(X * CELL).toFixed(0)} × ${(Z * CELL).toFixed(0)} m · ${(Y * CELL).toFixed(0)} m tall · ${X}×${Y}×${Z} voxels @ ${CELL} m`;
+    $('hudMeta').textContent = `${X}×${Y}×${Z} voxels · ${(X * CELL).toFixed(0)}×${(Z * CELL).toFixed(0)} m NoMa tile`;
 
-    const stations = (sceneMeta.stations || []).filter(s => s.in_grid);
-    const live = stations.filter(s => s.status === 'live');
-    const pickList = live.length ? live : stations;
-    $('station').innerHTML = pickList.map(s =>
-      `<option value="${s.site_id}">${s.name || s.site_id}</option>`).join('');
-
-    // ---- three.js ----
+    // ---- three.js scene ----
     const cv = $('gl');
     const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setPixelRatio(devicePixelRatio);
     renderer.localClippingEnabled = true;
     const scene = new THREE.Scene(); scene.background = new THREE.Color(0x0b0e14);
-    // North-up / east-right. The voxel grid's native frame is +vx = WEST, +vz = NORTH (the
-    // EPSG:3857 scaled-local, -easting frame the baker + Outdoor 2-D solver use). Placing content
-    // at (v - c) therefore renders east on the -X side — a 180° mis-orientation vs the real NoMa
-    // street grid and the Outdoor 2-D studio. Rotating ALL scene content 180° about Y fixes it for
-    // every layer at once (voxels, OSM footprints, CAD, station pins, coverage field) and is a pure
-    // rotation, so the map's chirality is preserved. The camera is independent of the scene.
-    scene.rotation.y = Math.PI;
-    const camera = new THREE.PerspectiveCamera(50, 1, 1, 50000);
-    const cX = X / 2, cY = Y / 2, cZ = Z / 2;
-    camera.position.set(cX * 0.1, Y * 10, cZ * 1.8);
-    const controls = new OrbitControls(camera, cv); controls.target.set(0, 0, 0);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-    const dl = new THREE.DirectionalLight(0xffffff, 0.65); dl.position.set(1.2, 2.4, 0.8); scene.add(dl);
-    {
-      const g = new THREE.Mesh(new THREE.PlaneGeometry(X * 1.05, Z * 1.05),
-        new THREE.MeshLambertMaterial({ color: 0x151a18 }));
-      g.rotation.x = -Math.PI / 2; g.position.set(0, -cY - 0.05, 0); scene.add(g);
-    }
-    function resize() {
-      const r = $('stage').getBoundingClientRect();
-      renderer.setSize(r.width, r.height, false);
-      camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
-    }
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 20000);
+    camera.position.set(0, Y * 9, cZ * 2.4);            // above & to the south → looks north (north up-screen)
+    const controls = new OrbitControls(camera, cv); controls.target.set(0, -cY * 0.2, 0);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+    const dl = new THREE.DirectionalLight(0xffffff, 0.6); dl.position.set(1, 2, 1); scene.add(dl);
+    function resize() { const r = $('stage').getBoundingClientRect(); renderer.setSize(r.width, r.height, false); camera.aspect = (r.width || 1) / (r.height || 1); camera.updateProjectionMatrix(); }
     addEventListener('resize', resize); resize();
 
-    const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), Y);
-    $('cutY').addEventListener('input', () => { clipPlane.constant = -cY + (+$('cutY').value / 100) * (Y + 2); });
+    // ground plane (street level) for context
+    const groundY = wY(0);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(X * 1.4, Z * 1.4),
+      new THREE.MeshStandardMaterial({ color: 0x141a22, roughness: 1.0 }));
+    ground.rotation.x = -Math.PI / 2; ground.position.set(0, groundY - 0.05, 0); scene.add(ground);
+    // ground grid — the same north-up/east-right frame the coverage + base stations use, so the
+    // NoMa render and the surveyed cells read against a common reference (like the map-coverage grid).
+    const grid = new THREE.GridHelper(Math.max(X, Z), Math.round(Math.max(X, Z) / 5), 0x4a6572, 0x2a3a44);
+    grid.position.set(0, groundY + 0.05, 0); grid.material.transparent = true; grid.material.opacity = 0.6;
+    scene.add(grid);
 
-    // ---- surface voxels (fallback / alternate view) ----
-    function isSurface(x, y, z) {
-      const c = GRID[idx(x, y, z)]; if (!c) return false;
-      if (x === 0 || x === X - 1 || y === 0 || y === Y - 1 || z === 0 || z === Z - 1) return true;
-      return !GRID[idx(x - 1, y, z)] || !GRID[idx(x + 1, y, z)] ||
-             !GRID[idx(x, y - 1, z)] || !GRID[idx(x, y + 1, z)] ||
-             !GRID[idx(x, y, z - 1)] || !GRID[idx(x, y, z + 1)];
+    // ---- ground basemap: a real map draped under the city, georeferenced to the tile ----
+    // The outdoor grid is built directly in Web Mercator (axis-aligned, no rotation), so the drape is a
+    // plain rectangular tile mosaic. worldToLonLat inverts lonlatToVox; std-mercator y == the grid's mz.
+    const R_STD = 6378137.0, HC = Math.PI * R_STD;
+    function worldToLonLat(wx, wz) {
+      const vx = cX - wx, vz = cZ - wz;
+      const mx = ANC[0] + (vx * CELL + OU[0]) / MS, mz = ANC[1] + (vz * CELL + OU[2]) / MS;
+      return { lon: -(mx / R_MERC) * 180 / Math.PI, lat: (2 * Math.atan(Math.exp(mz / R_MERC)) - Math.PI / 2) * 180 / Math.PI };
     }
+    const lonlatToStd = (lon, lat) => ({ x: R_STD * lon * Math.PI / 180, y: R_STD * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)) });
+    let basemapMesh = null, basemapToken = 0;
+    function clearBasemap() { if (basemapMesh) { scene.remove(basemapMesh); basemapMesh.geometry.dispose(); if (basemapMesh.material.map) basemapMesh.material.map.dispose(); basemapMesh.material.dispose(); basemapMesh = null; } }
+    function buildBasemap(source) {
+      clearBasemap();
+      if (source === 'off') { ground.visible = true; return; }
+      const token = ++basemapToken, EXT = 1.5;            // cover the tile + a margin under the model
+      const wx0 = -cX * EXT, wx1 = cX * EXT, wz0 = -cZ * EXT, wz1 = cZ * EXT;
+      const cs = [[wx0, wz0], [wx1, wz0], [wx0, wz1], [wx1, wz1]].map(([x, z]) => { const ll = worldToLonLat(x, z); return lonlatToStd(ll.lon, ll.lat); });
+      const mxMin = Math.min(...cs.map(c => c.x)), mxMax = Math.max(...cs.map(c => c.x));
+      const myMin = Math.min(...cs.map(c => c.y)), myMax = Math.max(...cs.map(c => c.y));
+      const worldPx = z => 256 * 2 ** z, g2x = (mx, z) => (mx + HC) / (2 * HC) * worldPx(z), g2y = (my, z) => (HC - my) / (2 * HC) * worldPx(z);
+      let z = 19; const gW = z => g2x(mxMax, z) - g2x(mxMin, z), gH = z => g2y(myMin, z) - g2y(myMax, z);
+      while (z > 12 && (gW(z) > 2048 || gH(z) > 2048 || (Math.ceil(gW(z) / 256) + 1) * (Math.ceil(gH(z) / 256) + 1) > 48)) z--;
+      const gx0 = g2x(mxMin, z), gy0 = g2y(myMax, z), CW = Math.max(2, Math.round(gW(z))), CH = Math.max(2, Math.round(gH(z)));
+      const canvas = document.createElement('canvas'); canvas.width = CW; canvas.height = CH;
+      const ctx = canvas.getContext('2d'); ctx.fillStyle = '#20262e'; ctx.fillRect(0, 0, CW, CH);
+      const tx0 = Math.floor(gx0 / 256), tx1 = Math.floor(g2x(mxMax, z) / 256), ty0 = Math.floor(gy0 / 256), ty1 = Math.floor(g2y(myMin, z) / 256);
+      const nTiles = 2 ** z, subd = ['a', 'b', 'c'];
+      const url = (tx, ty) => { const xx = ((tx % nTiles) + nTiles) % nTiles;
+        return source === 'sat'
+          ? `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${xx}`
+          : `https://${subd[(xx + ty) % 3]}.basemaps.cartocdn.com/light_all/${z}/${xx}/${ty}.png`; };
+      const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearFilter;
+      basemapMesh = new THREE.Mesh(new THREE.PlaneGeometry(wx1 - wx0, wz1 - wz0),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.96, depthWrite: false }));
+      basemapMesh.rotation.x = -Math.PI / 2; basemapMesh.position.set(0, groundY - 0.02, 0); basemapMesh.renderOrder = 0;
+      scene.add(basemapMesh); ground.visible = false;
+      for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) {
+        if (ty < 0 || ty >= nTiles) continue;
+        const img = new Image(); img.crossOrigin = 'anonymous';
+        img.onload = () => { if (token !== basemapToken) return; ctx.drawImage(img, tx * 256 - gx0, ty * 256 - gy0, 256, 256); tex.needsUpdate = true; };
+        img.onerror = () => {};
+        img.src = url(tx, ty);
+      }
+    }
+    $('basemapSrc').addEventListener('change', () => buildBasemap($('basemapSrc').value));
+    buildBasemap('sat');
+
+    // solid voxels (the city), instanced + coloured by material
     const solids = [];
-    for (let x = 0; x < X; x++) for (let y = 0; y < Y; y++) for (let z = 0; z < Z; z++) {
-      if (isSurface(x, y, z)) solids.push([x, y, z, GRID[idx(x, y, z)]]);
-    }
-    const solidMat = new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.55, clippingPlanes: [clipPlane] });
-    const solidMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.95, 0.95, 0.95), solidMat, Math.max(solids.length, 1));
+    for (let x = 0; x < X; x++) for (let y = 0; y < Y; y++) for (let z = 0; z < Z; z++) { const c = GRID[idx(x, y, z)]; if (SOLID(c)) solids.push([x, y, z, c]); }
+    const boxG = new THREE.BoxGeometry(0.98, 0.98, 0.98);
+    const solidMat = new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.70 });
+    const solidMesh = new THREE.InstancedMesh(boxG, solidMat, Math.max(1, solids.length));
     const MM = new THREE.Matrix4(), COL = new THREE.Color();
-    solids.forEach(([x, y, z, c], k) => {
-      MM.setPosition(x - cX, y - cY, z - cZ); solidMesh.setMatrixAt(k, MM);
-      const rgb = MATCOL[c] || [.55, .55, .55]; COL.setRGB(rgb[0], rgb[1], rgb[2]); solidMesh.setColorAt(k, COL);
-    });
-    if (solidMesh.instanceColor) solidMesh.instanceColor.needsUpdate = true;
-    solidMesh.count = solids.length; solidMesh.visible = false; scene.add(solidMesh);
+    solids.forEach(([x, y, z, c], k) => { MM.setPosition(wX(x), wY(y), wZ(z)); solidMesh.setMatrixAt(k, MM); const rgb = MATCOL[c] || [.55, .55, .55]; COL.setRGB(rgb[0], rgb[1], rgb[2]); solidMesh.setColorAt(k, COL); });
+    if (solidMesh.instanceColor) solidMesh.instanceColor.needsUpdate = true; scene.add(solidMesh);
+    // "see inside": horizontal clip plane (keep world-y ≤ constant)
+    const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), Y);
+    solidMat.clippingPlanes = [clipPlane];
+    $('cutY').addEventListener('input', () => { clipPlane.constant = wY(0) + (+$('cutY').value / 100) * (Y + 2); });
+    $('modelOpacity').addEventListener('input', () => { solidMat.opacity = (+$('modelOpacity').value) / 100; });
 
-    // ---- OSM extruded footprints (same EPSG:3857 frame as Outdoor 2-D / solver) ----
-    let osmRoot = null;
-    const osmMats = [];
-    setStatus('loading OSM building footprints…');
-    try {
-      const bjson = await fetch(`${ASSET}/buildings.json`).then(r => { if (!r.ok) throw new Error('buildings.json'); return r.json(); });
-      osmRoot = new THREE.Group();
-      osmRoot.name = 'osm_buildings';
-      const matOsm = new THREE.MeshLambertMaterial({
-        color: 0xc4c0b6, transparent: true, opacity: 0.82,
-        side: THREE.DoubleSide, clippingPlanes: [clipPlane],
-      });
-      osmMats.push(matOsm);
-      const matBs = new THREE.MeshLambertMaterial({
-        color: 0xd4a574, transparent: true, opacity: 0.92,
-        side: THREE.DoubleSide, clippingPlanes: [clipPlane],
-      });
-      osmMats.push(matBs);
-      // Highlight footprints nearest each live station (visual confirmation)
-      const livePins = stations.filter(s => s.status === 'live' && s.lat != null).map(s => ({
-        site_id: s.site_id,
-        xm: s.vx * CELL,
-        zm: s.vz * CELL,
-        h: s.roof_height_m || 20,
-      }));
-      for (const b of (bjson.buildings || [])) {
-        if (!b.x || b.x.length < 3 || !(b.h > 0)) continue;
-        const shape = new THREE.Shape();
-        for (let i = 0; i < b.x.length; i++) {
-          const px = b.x[i] / CELL - cX;
-          const pz = b.z[i] / CELL - cZ;
-          if (i === 0) shape.moveTo(px, pz); else shape.lineTo(px, pz);
-        }
-        const geom = new THREE.ExtrudeGeometry(shape, { depth: b.h / CELL, bevelEnabled: false });
-        geom.rotateX(-Math.PI / 2);
-        const cx = b.x.reduce((a, v) => a + v, 0) / b.x.length;
-        const cz = b.z.reduce((a, v) => a + v, 0) / b.z.length;
-        let isBs = false;
-        for (const p of livePins) {
-          const d = Math.hypot(cx - p.xm, cz - p.zm);
-          if (d < 35 && Math.abs((b.h || 0) - p.h) < 12) { isBs = true; break; }
-        }
-        const mesh = new THREE.Mesh(geom, isBs ? matBs : matOsm);
-        mesh.position.y = -cY;
-        osmRoot.add(mesh);
-      }
-      scene.add(osmRoot);
-    } catch (e) {
-      console.warn('OSM buildings load failed', e);
-      setWarn('OSM buildings.json failed — try Real CAD / Voxels.');
+    // ---- base stations from the canonical registry, placed on their real rooftops ----
+    const REG = (window.BASE_STATIONS || []).filter(b => Number.isFinite(b.lat) && Number.isFinite(b.lon));
+    const stationVox = [];       // {b, vx, vz, vy, inBounds, boresight}
+    const bsGroup = new THREE.Group(); scene.add(bsGroup);
+    const FCC = { lon: -77.00740, lat: 38.90359, name: 'FCC 7th-floor walk' };
+
+    function makeStation(b) {
+      const p = lonlatToVox(b.lon, b.lat);
+      const hM = Number.isFinite(b.building_height_m) ? b.building_height_m : 20;
+      const vy = Math.min(Y - 1, Math.max(1, hM / CELL));
+      const inB = p.vx >= 0 && p.vx < X && p.vz >= 0 && p.vz < Z;
+      const bore = Number.isFinite(b.bearing_deg) ? b.bearing_deg : 0;
+      stationVox.push({ b, vx: p.vx, vz: p.vz, vy, inBounds: inB, boresight: bore });
+      const live = b.status === 'live';
+      const wx = wX(p.vx), wz = wZ(p.vz), yTop = wY(vy);
+      // rooftop mast box
+      const col = !inB ? 0x8a6d3b : (live ? 0xc0392b : 0x7f8c8d);
+      const mast = new THREE.Mesh(new THREE.BoxGeometry(2, Math.max(vy, 1), 2),
+        new THREE.MeshStandardMaterial({ color: col, roughness: 0.6, transparent: !inB, opacity: inB ? 1 : 0.5 }));
+      mast.position.set(wx, wY(vy / 2), wz); bsGroup.add(mast);
+      // antenna dot
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(1.7, 18, 14),
+        new THREE.MeshStandardMaterial({ color: col, roughness: 0.4 }));
+      dot.position.set(wx, yTop + 1.7, wz); bsGroup.add(dot);
+      // boresight arrow (antenna azimuth)
+      const dir = boreDir(bore);
+      const arrow = new THREE.ArrowHelper(dir, new THREE.Vector3(wx, yTop + 1.7, wz), 9, 0x2fff6a, 3.2, 2.0);
+      bsGroup.add(arrow);
+      return { wx, wz, yTop };
+    }
+    REG.forEach(makeStation);
+    // FCC receiver marker (blue) for orientation reference
+    (function () { const p = lonlatToVox(FCC.lon, FCC.lat); const wx = wX(p.vx), wz = wZ(p.vz);
+      const m = new THREE.Mesh(new THREE.BoxGeometry(3, 8, 3), new THREE.MeshStandardMaterial({ color: 0x2c7fb8, roughness: 0.6 }));
+      m.position.set(wx, wY(4), wz); bsGroup.add(m); })();
+
+    // ---- selected-station highlight: an unmistakable bright-red dot marking the chosen BS location ----
+    const selDot = new THREE.Mesh(new THREE.SphereGeometry(2.8, 22, 16), new THREE.MeshBasicMaterial({ color: 0xff2a2a }));
+    selDot.renderOrder = 3; selDot.visible = false; scene.add(selDot);
+    const selRing = new THREE.Mesh(new THREE.RingGeometry(3.4, 4.4, 28),
+      new THREE.MeshBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+    selRing.rotation.x = -Math.PI / 2; selRing.visible = false; scene.add(selRing);
+    let selArrow = null;                                   // bright boresight arrow for the selected sector
+    function updateSelDot() {
+      const s = stationVox[selIdx]; if (!s) { selDot.visible = false; selRing.visible = false; return; }
+      const wx = wX(s.vx), wz = wZ(s.vz);
+      selDot.position.set(wx, wY(s.vy) + 1.7 + 3.2, wz); selDot.visible = true;
+      selRing.position.set(wx, wY(0) + 0.1, wz); selRing.visible = true;
+    }
+    function updateBoreArrow() {
+      const s = stationVox[selIdx]; if (!s) return;
+      if (selArrow) { scene.remove(selArrow); selArrow = null; }
+      if ((typeof antenna !== 'undefined' && antenna === 'omni')) return;   // omni → no lobe direction
+      const wx = wX(s.vx), wz = wZ(s.vz), yTop = wY(s.vy) + 1.7;
+      selArrow = new THREE.ArrowHelper(boreDir(s.boresight), new THREE.Vector3(wx, yTop, wz), 13, 0xffec3d, 4.2, 2.8);
+      scene.add(selArrow);
     }
 
-    // ---- Real CAD: Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D (optional) ----
-    let cadRoot = null;
-    const cadMats = [];
-    function colorForObject(name, matName) {
-      const n = (name || '').toLowerCase(), m = (matName || '').toLowerCase();
-      if (n.includes('building') || m.includes('concrete')) return 0xc8c4bc;
-      if (n.includes('natural') || n.includes('leisure') || n.includes('landuse')) return 0x2e9e3f;
-      if (n.includes('highway') || n.includes('railway') || m.includes('rast')) return 0x3a403c;
-      if (n.includes('export_google') || n.includes('sat')) return 0x1e2420;
-      return 0x8a8f8c;
+    // ---- NoMa 3D render (user's Blender OBJ) — auto-registered to the SAME Mercator georeference ----
+    // The model's local metres equal (mercator − merc_anchor); this was verified to reproduce
+    // lonlatToVox to the decimal for every base station. So the exact model→world transform is
+    //   world = position + R(180° about Y) · scale · local
+    // with horizontal scale MS/CELL (mercator-metre → voxel) and vertical scale 1/CELL (heights are
+    // true metres — no mercator stretch). That lands the render on the base-station dots by construction.
+    const S_H = MS / CELL, S_V = 1 / CELL;
+    const OXm = cX + OU[0] / CELL, OZm = cZ + OU[2] / CELL, OYm = -cY;
+    const modelGroup = new THREE.Group(); scene.add(modelGroup);
+    let modelObj = null, modelBaseY = 0; const adj = { x: 0, y: 0, z: 0, s: 1 };
+    // Axis signs (× S_H). Determined empirically by raycasting the render for a building under each
+    // surveyed base station: (+1,+1) seats buildings under 3 of 4 in-tile stations — a 180° turn from
+    // the raw import — vs ≤2 for every other combination. Flippable from the sidebar if a re-export differs.
+    const ori = { sx: +1, sz: +1 };
+    function applyModelXform() {
+      if (!modelObj) return;
+      modelObj.rotation.set(0, 0, 0);
+      modelObj.scale.set(ori.sx * S_H * adj.s, S_V * adj.s, ori.sz * S_H * adj.s);
+      // world_x = OXm + sx·OBJ_X, world_z = OZm + sz·OBJ_Z (see ori); fine-tune ΔX/ΔZ/ΔY are metres → /CELL.
+      // −S_V·modelBaseY seats the render's lowest geometry on the ground grid (its local datum isn't 0).
+      modelObj.position.set(OXm + adj.x / CELL, OYm + adj.y / CELL - S_V * adj.s * modelBaseY, OZm - adj.z / CELL);
+      modelGroup.updateMatrixWorld(true);
     }
-    function applyCadGeoref(root) {
-      // OBJ local (sx,sy,sz) = cube-relative metres → grid voxel frame → centered three.js.
-      // CAD_ALIGN is the Forte Hall control-point offset (cube-local m).
-      const sx = MS / CELL, sy = 1 / CELL, sz = MS / CELL;
-      const tx = (MS * (CUBE_ANCHOR[0] - ANCH[0] + CAD_ALIGN[0]) - OX) / CELL - cX;
-      const ty = (0 - OY) / CELL - cY + (CAD_ALIGN[1] || 0) / CELL;
-      const tz = (MS * (CUBE_ANCHOR[1] - ANCH[1] + CAD_ALIGN[2]) - OZ) / CELL - cZ;
-      root.scale.set(sx, sy, sz);
-      root.position.set(tx, ty, tz);
+    // raycast straight down at a world (x,z) → top surface Y (or null) — used to verify a building sits
+    // under each base station for a given orientation.
+    const _probeRay = new THREE.Raycaster();
+    function probeModelY(wx, wz) {
+      if (!modelObj) return null;
+      _probeRay.set(new THREE.Vector3(wx, 500, wz), new THREE.Vector3(0, -1, 0));
+      const hits = _probeRay.intersectObject(modelGroup, true);
+      return hits.length ? +hits[0].point.y.toFixed(2) : null;
     }
-    function styleCad(root) {
-      root.traverse(o => {
-        if (!o.isMesh) return;
-        const parentName = o.parent?.name || o.name || '';
-        const matName = (Array.isArray(o.material) ? o.material[0]?.name : o.material?.name) || '';
-        if (/^cube$/i.test(parentName) || /^cube$/i.test(o.name)) { o.visible = false; return; }
-        const col = colorForObject(parentName + ' ' + o.name, matName);
-        const isFoliage = /natural|leisure|landuse/i.test(parentName + o.name);
-        const isBuilding = /building|concrete/i.test(parentName + o.name + matName);
-        const mat = new THREE.MeshLambertMaterial({
-          color: col,
-          transparent: true,
-          opacity: isBuilding ? 0.78 : (isFoliage ? 0.45 : 0.55),
-          side: THREE.DoubleSide,
-          clippingPlanes: [clipPlane],
-          depthWrite: !isFoliage,
+    const MDIR = '../../Data/models/NoMa_DC/';
+    const MOBJ = 'Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.obj';
+    const MMTL = 'Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.mtl';
+    const setModelStatus = m => { const el = $('modelStatus'); if (el) el.textContent = m; };
+    function onModelLoaded(obj) {
+      // drop the two non-city objects: the stray marker Cube (8.5M units out at the raw mercator
+      // anchor) and the Google-satellite ground drape (missing .tif; the studio draws its own
+      // ground + grid + coverage). Belt-and-braces: also cull any mesh sitting absurdly far out.
+      const kill = [];
+      obj.traverse(o => {
+        if (o.name === 'Cube' || /GOOGLE_SAT/i.test(o.name)) { kill.push(o); return; }
+        if (!o.isMesh || !o.geometry) return;
+        o.geometry.computeBoundingSphere();
+        const c = o.geometry.boundingSphere && o.geometry.boundingSphere.center;
+        if (c && (Math.abs(c.x) > 5e5 || Math.abs(c.z) > 5e5)) { kill.push(o); return; }
+        if (!o.geometry.getAttribute('normal')) o.geometry.computeVertexNormals();
+        (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+          if (!m) return; m.side = THREE.DoubleSide; m.clippingPlanes = [clipPlane];
+          if (m.transparent && m.opacity === 0) { m.opacity = 1; m.transparent = false; }
         });
-        o.material = mat; cadMats.push(mat);
-        if (/export_google|sat/i.test(parentName + o.name)) o.position.y -= 0.02;
       });
+      kill.forEach(o => o.parent && o.parent.remove(o));
+      const lb = new THREE.Box3().setFromObject(obj); modelBaseY = isFinite(lb.min.y) ? lb.min.y : 0;
+      modelObj = obj; modelGroup.add(obj); applyModelXform();
+      modelGroup.visible = $('showModel').checked;
+      setModelStatus('NoMa render loaded — aligned to the base-station georeference.');
     }
-
-    setStatus('loading Real CAD city mesh…');
-    await new Promise((resolve) => {
-      const mtlLoader = new MTLLoader();
-      mtlLoader.setPath(CAD_DIR);
-      mtlLoader.load(CAD_MTL, (materials) => {
-        materials.preload();
-        const objLoader = new OBJLoader();
-        objLoader.setMaterials(materials);
-        objLoader.setPath(CAD_DIR);
-        objLoader.load(CAD_OBJ, (obj) => {
-          applyCadGeoref(obj);
-          styleCad(obj);
-          cadRoot = obj;
-          cadRoot.visible = false;
-          scene.add(obj);
-          resolve();
-        }, undefined, (err) => {
-          console.warn('OBJ load failed', err);
-          resolve();
-        });
-      }, undefined, () => {
-        const objLoader = new OBJLoader();
-        objLoader.setPath(CAD_DIR);
-        objLoader.load(CAD_OBJ, (obj) => {
-          applyCadGeoref(obj); styleCad(obj); cadRoot = obj; cadRoot.visible = false; scene.add(obj); resolve();
-        }, undefined, () => resolve());
-      });
-    });
-
-    let modelView = 'osm';
-    function applyModelView() {
-      if (osmRoot) osmRoot.visible = modelView === 'osm';
-      if (cadRoot) cadRoot.visible = modelView === 'cad';
-      solidMesh.visible = modelView === 'voxel';
+    function onModelError(e) {
+      setModelStatus('NoMa render failed to load — showing the voxel city instead.');
+      $('showVox').checked = true; solidMesh.visible = true;
+      console.error('[noma] model load failed', e);
     }
-    applyModelView();
-
-    function setOpacity(o) {
-      solidMat.opacity = o;
-      osmMats.forEach(m => { m.opacity = Math.min(0.95, o + 0.12); });
-      cadMats.forEach(m => { m.opacity = Math.min(0.9, o + 0.1); });
-    }
-    setOpacity((+$('modelOpacity').value) / 100);
-    $('modelOpacity').addEventListener('input', () => setOpacity((+$('modelOpacity').value) / 100));
-
-    // ---- Tx markers (on OSM / 2-D lon-lat rooftops) + name sprites ----
-    const txMeshes = {};
-    const txGeom = new THREE.SphereGeometry(2.2, 14, 14);
-    const SHORT = {
-      BS7_forte_hall: 'Forte Hall', BS2_900_nj_ave: 'BS2 · 900 NJ',
-      BS4_55_m_st: 'BS4 · 55 M', BS5_1140_n_capitol: 'BS5 · 1140 NCap',
-      BS6_1005_n_capitol: 'BS6 · 1005 NCap', BS3_400_ny_ave: 'BS3 · 400 NY',
-    };
-    function makeLabelSprite(text) {
-      const cv = document.createElement('canvas');
-      cv.width = 512; cv.height = 128;
-      const ctx = cv.getContext('2d');
-      ctx.clearRect(0, 0, cv.width, cv.height);
-      ctx.fillStyle = 'rgba(8,12,18,0.72)';
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-      ctx.lineWidth = 4;
-      roundRect(ctx, 12, 24, 488, 80, 16); ctx.fill(); ctx.stroke();
-      ctx.font = 'bold 44px ui-sans-serif, system-ui, sans-serif';
-      ctx.fillStyle = '#f4f7f2';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(text, 256, 66);
-      const tex = new THREE.CanvasTexture(cv);
-      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
-      const sp = new THREE.Sprite(mat);
-      sp.scale.set(28, 7, 1);
-      sp.position.y = 9.5;
-      return sp;
-    }
-    function roundRect(ctx, x, y, w, h, r) {
-      ctx.beginPath();
-      ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
-      ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r);
-      ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
-    }
-    function makeAntennaMarker(live, label) {
-      const g = new THREE.Group();
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.35, 0.45, 3.2, 8),
-        new THREE.MeshLambertMaterial({ color: live ? 0x2fff6a : 0x777777 }));
-      pole.position.y = 1.6;
-      const panel = new THREE.Mesh(
-        new THREE.BoxGeometry(2.4, 1.6, 0.35),
-        new THREE.MeshLambertMaterial({ color: live ? 0xd0ffd8 : 0x999999 }));
-      panel.position.y = 3.6;
-      const ball = new THREE.Mesh(txGeom, new THREE.MeshBasicMaterial({ color: live ? 0x2fff6a : 0x777777 }));
-      ball.position.y = 4.8; ball.scale.setScalar(0.55);
-      g.add(pole, panel, ball);
-      if (label) g.add(makeLabelSprite(label));
-      g.userData.ball = ball;
-      return g;
-    }
-    /** Place antenna at Outdoor 2-D lon/lat XZ; Y from CAD/survey roof height. */
-    function placeAntennaMarker(s) {
-      const m = txMeshes[s.site_id]; if (!m) return;
-      // cad_roof.world XZ is lon/lat-projected (Outdoor 2-D parity); Y is roof AGL.
-      if (s.cad_roof && s.cad_roof.world) {
-        const [wx, wy, wz] = s.cad_roof.world;
-        m.position.set(wx, wy + 0.2, wz);
-        return;
-      }
-      const yVox = (s.roof_height_m > 0 ? s.roof_height_m / CELL : s.vy);
-      m.position.set(s.vx - cX, yVox - cY, s.vz - cZ);
-    }
-    function roofWorldY(s) {
-      if (s.cad_roof && s.cad_roof.world) return s.cad_roof.world[1];
-      return (s.roof_height_m > 0 ? s.roof_height_m / CELL : s.vy) - cY;
-    }
-    for (const s of stations) {
-      // Align solver voxel to CAD rooftop when available
-      if (s.cad_roof && s.cad_roof.voxel) {
-        s.vx = s.cad_roof.voxel[0];
-        s.vy = s.cad_roof.voxel[1];
-        s.vz = s.cad_roof.voxel[2];
-      }
-      const m = makeAntennaMarker(s.status === 'live', SHORT[s.site_id] || s.name || s.site_id);
-      scene.add(m); txMeshes[s.site_id] = m;
-      placeAntennaMarker(s);
-    }
-
-    let tx = { x: pickList[0].vx, y: pickList[0].vy, z: pickList[0].vz };
-    let activeSite = pickList[0];
-
-    function updateBsMeta() {
-      const s = activeSite;
-      const carriers = (s.carriers || []).map(c =>
-        `${c.carrier}: PCI ${(c.pcis || []).slice(0, 6).join(',')}${(c.pcis || []).length > 6 ? '…' : ''} · bands ${(c.bands || []).join(',')}`
-      ).join('\n');
-      $('bsMeta').textContent =
-        `${s.address || ''}\n${s.lat?.toFixed?.(5)}, ${s.lon?.toFixed?.(5)} · roof ${s.roof_height_m} m (${s.height_source || 'bake'})\n` +
-        `Tx cell (${s.vx}, ${s.vy}, ${s.vz}) · ${carriers || s.status}`;
-      $('readout').textContent =
-        `Tx @ (${(tx.x * CELL).toFixed(1)}, ${(tx.y * CELL).toFixed(1)}, ${(tx.z * CELL).toFixed(1)}) m · ${s.site_id}`;
-      for (const [id, m] of Object.entries(txMeshes)) {
-        const on = id === s.site_id;
-        m.scale.setScalar(on ? 1.35 : 1.0);
-        const live = stations.find(t => t.site_id === id)?.status === 'live';
-        const col = on ? 0xffee55 : (live ? 0x2fff6a : 0x666666);
-        m.traverse(o => { if (o.isMesh && o.material && o.material.color) o.material.color.setHex(col); });
-      }
-    }
-    function selectStation(id) {
-      const s = stations.find(t => t.site_id === id) || pickList[0];
-      activeSite = s; tx = { x: s.vx, y: s.vy, z: s.vz };
-      $('bore').value = DEFAULT_BORE[s.site_id] ?? 0;
-      const bands = (s.carriers || []).flatMap(c => c.bands || []);
-      if (bands.includes(13)) $('band').value = '751';
-      else if (bands.includes(71)) $('band').value = '617';
-      else if (bands.includes(41)) $('band').value = '2506';
-      updateBsMeta();
-      const my = roofWorldY(s);
-      // scene.rotation.y = π reorients the whole scene, so a point the code computes at (mx,·,mz)
-      // in the native frame renders at (−mx,·,−mz). Negate X/Z so the camera targets the pin, and
-      // sit the camera to the south (+Z) of it so the view reads north-up / east-right.
-      const mx = -((s.cad_roof && s.cad_roof.world) ? s.cad_roof.world[0] : (s.vx - cX));
-      const mz = -((s.cad_roof && s.cad_roof.world) ? s.cad_roof.world[2] : (s.vz - cZ));
-      controls.target.set(mx, my, mz);
-      camera.position.set(mx - 40, my + 22, mz + 48);
-      updateResNote();
-    }
-    $('station').onchange = () => selectStation($('station').value);
-
-    function updateResNote() {
-      const rm = Math.max(80, parseFloat($('covRegion').value) || 400);
-      const cells = Math.round(rm / CELL);
-      $('resNote').textContent = `≈ ${cells}×${cells} cells @ ${CELL} m · ${rm} m window · street band y≤${Math.min(Y, 4) * CELL} m`;
-    }
-    $('covRegion').addEventListener('input', updateResNote);
-    $('band').addEventListener('change', updateResNote);
-
-    // ---- controls ----
-    function seg(id, cb) {
-      const el = $(id);
-      el.querySelectorAll('button').forEach(b => b.onclick = () => {
-        el.querySelectorAll('button').forEach(x => x.classList.remove('on'));
-        b.classList.add('on'); cb(b.dataset.v);
-      });
-    }
-    let solverSel = 'auto', cmapName = 'rainbow', rangeHi = -40, rangeLo = -120, fieldStyle = 'slice', viewMode = 'heat';
-    seg('solverSeg', v => {
-      solverSel = v;
-      $('fdtdResGrp').style.display = (v === 'fdtd') ? 'block' : 'none';
-      $('covResGrp').style.display = (v === 'fdtd' || v === 'onnx') ? 'none' : 'block';
-      reflectEngine();
-    });
-    seg('modelSeg', v => {
-      modelView = v; applyModelView();
-      const tag = v === 'osm' ? 'OSM buildings' : (v === 'cad' ? 'Real CAD' : 'Voxels');
-      $('hudMeta').textContent = `${X}×${Y}×${Z} · ${(X * CELL).toFixed(0)}×${(Z * CELL).toFixed(0)} m · ${tag} · ${CELL} m cells`;
-    });
-    seg('viewSeg', v => { viewMode = v; if (field) buildFieldMesh(); });
-    seg('cmapSeg', v => { cmapName = v; drawCbar(); if (field) buildFieldMesh(); });
-    seg('fstyleSeg', v => { fieldStyle = v; if (field) buildFieldMesh(); });
-    ['rangeHi', 'rangeLo'].forEach(id => $(id).addEventListener('input', () => {
-      rangeHi = +$('rangeHi').value; rangeLo = +$('rangeLo').value;
-      if (field) buildFieldMesh();
-    }));
-
-    function reflectEngine() {
-      const eff = solverSel === 'fdtd' ? 'sub-volume FDTD (near rooftop Tx)' :
-                  solverSel === 'onnx' ? 'ONNX outdoor 3-D surrogate — PLACEHOLDER (not trained yet)' :
-                  'street-level eikonal coverage (panel + O2I)';
-      $('engine').textContent = `engine: SIM V3 outdoor · ${eff}`;
-    }
-    reflectEngine();
-
-    // ---- field viz ----
-    let field = null, fieldObj = null;
-    const softSprite = (() => {
-      const c = document.createElement('canvas'); c.width = c.height = 64;
-      const g = c.getContext('2d');
-      const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-      gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.55, 'rgba(255,255,255,0.45)');
-      gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
-      return new THREE.CanvasTexture(c);
+    (function loadModel() {
+      new MTLLoader().setPath(MDIR).load(MMTL, mats => {
+        mats.preload();
+        new OBJLoader().setMaterials(mats).setPath(MDIR).load(MOBJ, onModelLoaded,
+          e => { if (e && e.lengthComputable) setModelStatus('loading NoMa render… ' + Math.round(e.loaded / e.total * 100) + '%'); },
+          onModelError);
+      }, undefined, () => { new OBJLoader().setPath(MDIR).load(MOBJ, onModelLoaded, undefined, onModelError); });
     })();
-    function drawCbar() {
-      const c = $('cbarCv'), g = c.getContext('2d');
-      for (let i = 0; i < c.width; i++) {
-        const t = i / (c.width - 1), [r, gv, b] = S.cmap(cmapName, t);
-        g.fillStyle = `rgb(${r},${gv},${b})`; g.fillRect(i, 0, 1, c.height);
-      }
-      $('cbLo').textContent = `${rangeLo} dBm`; $('cbHi').textContent = `${rangeHi} dBm`;
+    // voxel city hidden by default so the render reads clean; toggle it on to compare with the solver's view.
+    solidMesh.visible = $('showVox').checked;
+
+    // model / grid visibility + fine-tune wiring
+    $('showModel').addEventListener('change', () => { modelGroup.visible = $('showModel').checked; });
+    $('showVox').addEventListener('change', () => { solidMesh.visible = $('showVox').checked; });
+    $('showGrid').addEventListener('change', () => { grid.visible = $('showGrid').checked; });
+    const applyFlips = () => { ori.sx = $('flipEW').checked ? -1 : 1; ori.sz = $('flipNS').checked ? -1 : 1; applyModelXform(); };
+    $('flipEW').addEventListener('change', applyFlips);
+    $('flipNS').addEventListener('change', applyFlips);
+    ['adjX', 'adjY', 'adjZ', 'adjS'].forEach(id => $(id).addEventListener('input', () => {
+      adj.x = +$('adjX').value || 0; adj.y = +$('adjY').value || 0; adj.z = +$('adjZ').value || 0; adj.s = +$('adjS').value || 1;
+      applyModelXform();
+    }));
+    $('adjReset').addEventListener('click', () => {
+      $('adjX').value = 0; $('adjY').value = 0; $('adjZ').value = 0; $('adjS').value = 1;
+      adj.x = adj.y = adj.z = 0; adj.s = 1; applyModelXform();
+    });
+
+    // ---- antenna families (JS port of antenna_patterns.PATTERNS): [az HPBW°, front-to-back Am dB] ----
+    const ANT = { panel: [65, 25], sector90: [90, 20], narrow: [33, 28], omni: [360, 0] };
+    let antenna = 'panel';
+    // 3GPP sector azimuth pattern → gain (dB, ≤0) relative to the boresight peak (byte-identical to
+    // antenna_patterns.pattern_atten_db / fw_solve2d_bs.patternGain). Omni → flat 0.
+    function patternGainDb(kind, bearingDeg, boresightDeg) {
+      const [hpbw, am] = ANT[kind] || ANT.panel;
+      if (hpbw >= 359) return 0;
+      const d = (((bearingDeg - boresightDeg + 180) % 360) + 360) % 360 - 180;
+      return -Math.min(12 * (d / hpbw) ** 2, am);
     }
-    drawCbar();
-
-    function buildFieldMesh() {
-      if (fieldObj) { scene.remove(fieldObj); fieldObj.geometry?.dispose?.(); fieldObj = null; }
-      if (!field) return;
-      const { db, dims, origin, txy } = field;
-      const [sx, sy, sz] = dims;
-      const idf = (x, y, z) => (x * sy + y) * sz + z;
-      const lo = rangeLo, hi = rangeHi, span = Math.max(1e-6, hi - lo);
-      const ySlice = field.absolute ? Math.min(2, sy - 1) : Math.max(0, Math.min(sy - 1, txy ?? 1));
-
-      if (fieldStyle === 'slice') {
-        const pos = [], col = [];
-        for (let x = 0; x < sx; x++) for (let z = 0; z < sz; z++) {
-          const v = db[idf(x, ySlice, z)]; if (!isFinite(v)) continue;
-          let t = Math.min(1, Math.max(0, (v - lo) / span));
-          if (viewMode === 'wave') t = (Math.sin(x * 0.35 + z * 0.28) * 0.5 + 0.5) * t;
-          const [r, g, b] = S.cmap(cmapName, t);
-          pos.push(origin[0] + x - cX, origin[1] + ySlice - cY, origin[2] + z - cZ);
-          col.push(r / 255, g / 255, b / 255);
-        }
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-        geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-        fieldObj = new THREE.Points(geo, new THREE.PointsMaterial({
-          size: CELL * 1.15, sizeAttenuation: true, vertexColors: true, map: softSprite,
-          transparent: true, opacity: 0.88, blending: THREE.AdditiveBlending, depthWrite: false,
-        }));
-        scene.add(fieldObj);
-        return;
+    // Apply the azimuth pattern to a whole-grid RSRP field: shape the coverage into the antenna's
+    // horizontal lobe around the boresight (bearing from Tx: east=+X=tx.x−x, north=−Z=z−tx.z).
+    function applyAntenna(db, dims, tx, boresightDeg, kind) {
+      if ((ANT[kind] || ANT.panel)[0] >= 359) return;     // omni → isotropic, no-op
+      const [Xd, Yd, Zd] = dims;
+      for (let x = 0; x < Xd; x++) for (let y = 0; y < Yd; y++) for (let z = 0; z < Zd; z++) {
+        const i = (x * Yd + y) * Zd + z; if (!isFinite(db[i])) continue;
+        const east = tx.x - x, north = z - tx.z; if (east === 0 && north === 0) continue;
+        db[i] += patternGainDb(kind, (Math.atan2(east, north) * 180 / Math.PI + 360) % 360, boresightDeg);
       }
-
-      const pos = [], col = [], step = fieldStyle === 'cloud' ? 2 : 1;
-      for (let x = 0; x < sx; x += step) for (let y = 0; y < sy; y += step) for (let z = 0; z < sz; z += step) {
-        const v = db[idf(x, y, z)]; if (!isFinite(v) || v < lo) continue;
-        const t = Math.min(1, Math.max(0, (v - lo) / span));
-        const [r, g, b] = S.cmap(cmapName, t);
-        pos.push(origin[0] + x - cX, origin[1] + y - cY, origin[2] + z - cZ);
-        col.push(r / 255, g / 255, b / 255);
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-      fieldObj = new THREE.Points(geo, new THREE.PointsMaterial({
-        size: fieldStyle === 'voxel' ? 1.6 : 2.4, sizeAttenuation: true, vertexColors: true, map: softSprite,
-        transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false,
-      }));
-      scene.add(fieldObj);
     }
 
-    function updateDesc(extra) {
-      $('desc').innerHTML =
-        `<b>OSM buildings</b> (default) share the Outdoor 2-D EPSG:3857 frame — Tx pins sit on surveyed footprints ` +
-        `(Forte Hall, 900 NJ Ave, 55 M St, 1140 / 1005 N Capitol). ` +
-        `<b>Real CAD</b> OBJ is optional (<code>${CAD_OBJ}</code>); it is sparse at some BS sites. ` +
-        `Solver voxels: air/street · concrete · foliage · glass. ${extra || ''}`;
-    }
-    updateDesc(osmRoot ? 'OSM footprints loaded.' : '');
+    // ---- Tx dropdown: EVERY PCI (sector) that appears at each base station, grouped by station ----
+    const sectors = [];
+    stationVox.forEach((s, si) => {
+      const byPci = new Map();
+      (s.b.sectors || []).forEach(se => {
+        if (se.pci == null) return;
+        if (!byPci.has(se.pci)) byPci.set(se.pci, { pci: se.pci, carrier: se.carrier, net: se.network, bands: new Set(), freqs: new Set() });
+        const e = byPci.get(se.pci); if (se.band != null) e.bands.add(se.band); if (se.freq_mhz) e.freqs.add(se.freq_mhz);
+      });
+      if (byPci.size === 0) { sectors.push({ si, pci: null, carrier: '—', net: '', bands: [], freqs: [] }); return; }
+      [...byPci.values()].sort((a, b) => a.pci - b.pci).forEach(p => sectors.push({
+        si, pci: p.pci, carrier: p.carrier, net: (p.net || '').toUpperCase(),
+        bands: [...p.bands].sort((a, b) => a - b), freqs: [...p.freqs].sort((a, b) => a - b) }));
+    });
+    $('station').innerHTML = stationVox.map((s, si) => {
+      const opts = sectors.map((se, gi) => ({ se, gi })).filter(o => o.se.si === si).map(({ se, gi }) => {
+        const lab = se.pci == null ? `${s.b.name} — no live PCIs`
+          : `PCI ${se.pci} · ${se.carrier} ${se.net} B${se.bands.join('/')}`;
+        return `<option value="${gi}">${lab}${s.inBounds ? '' : ' (off-tile)'}</option>`;
+      }).join('');
+      return `<optgroup label="${s.b.site_id.split('_')[0]} · ${s.b.name}">${opts}</optgroup>`;
+    }).join('');
 
-    selectStation(pickList[0].site_id);
-    $('run').disabled = false;
-    setStatus(`ready — ${pickList.length} live BS · OSM buildings · ${X}×${Y}×${Z} @ ${CELL} m`);
-    $('hudMeta').textContent = `${X}×${Y}×${Z} · ${(X * CELL).toFixed(0)}×${(Z * CELL).toFixed(0)} m · OSM buildings · ${CELL} m cells`;
+    let selSector = sectors.findIndex(se => stationVox[se.si].inBounds && se.pci != null);
+    if (selSector < 0) selSector = sectors.findIndex(se => stationVox[se.si].inBounds);
+    if (selSector < 0) selSector = 0;
+    let selIdx = sectors[selSector].si;
+    function curStation() { return stationVox[selIdx]; }
+    function curSector() { return sectors[selSector]; }
+    function setBandForSector(se) {                         // set the solver band to the PCI's own frequency
+      if (!se || !se.freqs.length) return;                 // (BS7 PCIs carry bands but no freq → keep current)
+      const f = se.freqs[0];
+      if (![...$('band').options].some(o => +o.value === f)) { const o = document.createElement('option'); o.value = String(f); o.textContent = f + ' MHz (PCI)'; $('band').appendChild(o); }
+      $('band').value = String(f);
+    }
+    function reflectStation() {
+      const s = curStation(), se = curSector();
+      $('bore').value = Math.round(s.boresight);
+      const pci = se && se.pci != null ? `PCI ${se.pci}` : 'no live PCI';
+      $('stMeta').textContent = `${s.b.site_id.split('_')[0]} · ${pci}`
+        + (se && se.carrier !== '—' ? ` · ${se.carrier} ${se.net} B${se.bands.join('/')}` : '')
+        + ` · roof ${Math.round(Number.isFinite(s.b.building_height_m) ? s.b.building_height_m : 20)} m`
+        + (s.inBounds ? '' : ' · off-tile — coverage disabled');
+      $('run').disabled = !s.inBounds;
+      updateSelDot(); updateBoreArrow();
+    }
+    $('station').addEventListener('change', () => {
+      selSector = parseInt($('station').value, 10); selIdx = sectors[selSector].si;
+      antenna = 'panel'; $('antenna').value = 'panel';                             // default antenna = panel
+      curStation().boresight = Number.isFinite(curStation().b.bearing_deg) ? curStation().b.bearing_deg : 0;   // default orientation
+      setBandForSector(curSector());
+      field = null; buildFieldMesh(); reflectStation();
+    });
+    $('antenna').addEventListener('change', () => { antenna = $('antenna').value; updateBoreArrow(); });
+    $('bore').addEventListener('input', () => { curStation().boresight = parseFloat($('bore').value) || 0; updateBoreArrow(); });
+    $('station').value = String(selSector);
+
+    // ---- bands from the manifest ----
+    const FREQS = (M.freqs_mhz && M.freqs_mhz.length) ? M.freqs_mhz : [619, 751, 1935, 2510, 3500, 3710, 5500];
+    $('band').innerHTML = FREQS.map(f => `<option value="${f}">${f} MHz</option>`).join('');
+    $('band').value = String(FREQS.find(f => f >= 3000) || FREQS[0]);
+
+    // ---- segmented controls ----
+    function seg(id, cb) { const el = $(id); el.querySelectorAll('button').forEach(b => b.onclick = () => { el.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); cb(b.dataset.v); }); }
+    let solverSel = 'eikonal', cmapName = 'rainbow', fieldStyle = 'slice';
+    let rangeHi = -40, rangeLo = -110;
+    // ONNX (hybrid) solver state — the trained 3-D surrogate (shared with the indoor studio).
+    let onnxReady = false, onnxWhy = 'loading ONNX surrogate…', session = null, contract = null;
+    const OMODEL = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_unet3d.onnx';
+    const OCONTRACT = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_unet3d.json';
+    seg('solverSeg', v => { solverSel = v; reflectEngine(); });
+    seg('cmapSeg', v => { cmapName = v; drawCbar(); if (field) recolorField(); });
+    seg('fstyleSeg', v => { fieldStyle = v; if (field) buildFieldMesh(); });
+    ['rangeHi', 'rangeLo'].forEach(id => $(id).addEventListener('input', () => { rangeHi = +$('rangeHi').value; rangeLo = +$('rangeLo').value; if (field && isFinite(rangeHi) && isFinite(rangeLo)) { buildFieldMesh(); drawCbar(); } }));
+    function reflectEngine() {
+      const eff = solverSel === 'eikonal' ? 'eikonal RSRP (whole-city, physics)'
+                : solverSel === 'onnx' ? (onnxReady ? 'hybrid: ONNX near ⊕ eikonal far (whole-city RSRP)' : 'ONNX (hybrid) — surrogate ' + onnxWhy)
+                : 'penetrable FDTD sub-volume';
+      $('engine').textContent = `engine: SIM V3 · ${eff}` + (solverSel === 'onnx' && !onnxReady ? '  ·  use Eikonal or FDTD meanwhile' : '');
+    }
 
     // ---- generate ----
+    let field = null, fieldObj = null;
     $('run').onclick = generate;
     async function generate() {
-      setWarn('');
-      const fMHz = parseFloat($('band').value);
-      const txDbm = parseFloat($('txp').value) || 43;
-      const bore = parseFloat($('bore').value) || 0;
-      const ant = $('ant').value;
-      let solver = solverSel; if (solver === 'auto') solver = 'coverage';
+      const s = curStation(); if (!s.inBounds) { setStatus('selected station is outside the city tile.', true); return; }
+      setWarn(''); const fMHz = parseFloat($('band').value), txDbm = parseFloat($('txp').value) || 46;
+      // antenna cell: on the rooftop, snapped up into air so the source is not buried in a wall
+      let tx = { x: Math.round(s.vx), y: Math.round(s.vy), z: Math.round(s.vz) };
+      tx.x = Math.max(1, Math.min(X - 2, tx.x)); tx.z = Math.max(1, Math.min(Z - 2, tx.z));
+      for (let y = Math.min(Y - 1, tx.y + 1); y < Y; y++) { if (GRID[idx(tx.x, y, tx.z)] === 0) { tx.y = y; break; } }
 
-      if (solver === 'onnx') {
-        setWarn('ONNX outdoor 3-D surrogate is a placeholder — no fw_unet3d / fw_bs outdoor volume model is trained yet. Use Auto (eikonal) or FDTD.');
-        setStatus('ONNX placeholder — switch to Auto or FDTD.', true);
-        return;
-      }
+      if (solverSel === 'fdtd') return generateFdtd(fMHz, tx);
+      if (solverSel === 'onnx') return generateHybrid(fMHz, tx, txDbm, s);
 
-      if (solver === 'coverage') {
-        const regionM = Math.max(80, parseFloat($('covRegion').value) || 400);
-        const half = Math.round((regionM / 2) / CELL);
-        const xLo = Math.max(0, tx.x - half), xHi = Math.min(X, tx.x + half + 1);
-        const zLo = Math.max(0, tx.z - half), zHi = Math.min(Z, tx.z + half + 1);
-        $('run').disabled = true;
-        setWarn(`⚙ Street-level eikonal · ${regionM} m window · ${ant} @ ${bore}°`);
-        setStatus('solving street-level coverage…'); setBar(0.05);
-        const t0 = performance.now();
-        await new Promise(r => setTimeout(r, 20));
-        const opts = {
-          wallDb: WALL_DB, pathExp: 2.4, gainDbi: ant === 'omni' ? 2.0 : 8.0,
-          yLo: 0, yHi: Math.min(Y, 4), xLo, xHi, zLo, zHi,
-        };
-        if (ant !== 'omni' && ANT_HP[ant] != null) {
-          opts.boresightDeg = bore;
-          opts.halfPowerDeg = ANT_HP[ant];
-        }
-        const db = S.eikonalRsrp3d(GRID, [X, Y, Z], CELL, fMHz, tx, txDbm, opts);
-        setBar(1);
-        const secs = (performance.now() - t0) / 1000;
-        let peak = -Infinity;
-        for (let i = 0; i < db.length; i++) if (db[i] > peak) peak = db[i];
-        field = { db, dims: [X, Y, Z], origin: [0, 0, 0], txy: 1, absolute: true, fMHz };
-        rangeHi = -40; rangeLo = -120; $('rangeHi').value = rangeHi; $('rangeLo').value = rangeLo;
-        drawCbar();
-        fieldStyle = 'slice';
-        document.querySelectorAll('#fstyleSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === 'slice'));
-        setOpacity(0.35); $('modelOpacity').value = 35;
-        $('hudMeta').textContent =
-          `${X}×${Y}×${Z} · ${ant} coverage · ${activeSite.site_id} · ${fMHz} MHz · ${regionM} m · ${secs.toFixed(1)} s`;
-        setStatus(`done — coverage in ${secs.toFixed(1)} s (peak ${peak.toFixed(0)} dBm).`);
-        setWarn(''); $('run').disabled = false;
-        buildFieldMesh();
-        updateDesc(`Active Tx: <b>${activeSite.name}</b> · ${ant} boresight ${bore}°.`);
-        return;
-      }
-
-      const half = parseInt($('region').value, 10);
-      const plan = S.planFdtd3d(CELL, fMHz, 8.0, Math.round(half / CELL), [X, Y, Z]);
-      const sv = S.extractSubvolume(GRID, X, Y, Z, tx, plan.halfCells);
-      for (let i = 0; i < sv.sub.length; i++) if (sv.sub[i] === 2) sv.sub[i] = 3;
-      const { cells, steps } = S.estimateFdtd3d(sv.dims, plan.up);
-      $('run').disabled = true;
-      try {
-        const mcps = S.calibrateFdtd3dMcps();
-        const estS = S.estimateFdtdSeconds3d(sv.dims, plan.up, mcps);
-        const warnLine = `⏱ FDTD sub-volume ~${S.fmtEta(estS)}\n${(cells / 1e6).toFixed(2)} M cells × ${steps} steps`;
-        setWarn(warnLine);
-        if (estS > 8 && !confirm(`${warnLine}\n\nRun now?`)) {
-          setStatus('cancelled.'); $('run').disabled = false; return;
-        }
-      } catch (e) {
-        setStatus('estimate failed: ' + e.message, true); $('run').disabled = false; return;
-      }
-      setStatus('solving (FDTD sub-volume)…'); setBar(0);
+      $('run').disabled = true; setStatus('solving (eikonal RSRP over the city)…'); setBar(0.1);
       const t0 = performance.now();
-      let res;
-      try {
-        res = await S.fdtdSolve3d({
-          grid: sv.sub, X0: sv.dims[0], Y0: sv.dims[1], Z0: sv.dims[2],
-          cell: CELL, fMHz, tx0: sv.txLocal, up: plan.up,
-        }, setBar);
-      } catch (e) {
-        setBar(null); setStatus('solve failed: ' + e.message, true); $('run').disabled = false; return;
-      }
-      const secs = (performance.now() - t0) / 1000; setBar(null); $('run').disabled = false;
-      const env = S.envelopeDb3d(res.re, res.im, sv.sub);
-      field = { db: env.db, dims: sv.dims, origin: sv.origin, txy: sv.txLocal.y, absolute: false, fMHz };
-      rangeHi = 0; rangeLo = -40; $('rangeHi').value = rangeHi; $('rangeLo').value = rangeLo;
-      drawCbar();
-      fieldStyle = 'cloud';
-      document.querySelectorAll('#fstyleSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === 'cloud'));
-      $('hudMeta').textContent =
-        `${sv.dims.join('×')} sub-volume · FDTD · ${fMHz} MHz · ${secs < 1 ? (secs * 1e3).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}`;
-      setStatus(`done — FDTD in ${secs < 1 ? (secs * 1e3).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}.`);
-      setWarn(''); buildFieldMesh();
+      let db;
+      try { db = S.eikonalRsrp3d(GRID, [X, Y, Z], CELL, fMHz, tx, txDbm); }
+      catch (e) { setBar(null); setStatus('eikonal failed: ' + e.message, true); $('run').disabled = false; return; }
+      applyAntenna(db, [X, Y, Z], tx, curStation().boresight, antenna);   // shape into the antenna lobe
+      setBar(1); const secs = (performance.now() - t0) / 1000;
+      let dbMax = -Infinity; for (let i = 0; i < db.length; i++) { if (db[i] > dbMax) dbMax = db[i]; if (!isFinite(db[i])) db[i] = -200; }
+      field = { db, dims: [X, Y, Z], origin: [0, 0, 0], sub: GRID, fMHz, txy: tx.y, absolute: true };
+      setBar(null); $('run').disabled = false;
+      $('hudMeta').textContent = `${X}×${Y}×${Z} whole-city · eikonal RSRP · ${s.b.site_id.split('_')[0]} · ${fMHz} MHz · ${secs.toFixed(2)} s`;
+      setStatus(`done — coverage in ${secs.toFixed(2)} s (peak ${dbMax.toFixed(0)} dBm).`);
+      solidMat.opacity = 0.32; $('modelOpacity').value = 32;
+      drawCbar(); buildFieldMesh(); updateDesc();
     }
 
-    (function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
+    // ONNX (hybrid): the trained surrogate in the box around the antenna ⊕ eikonal for the rest of the
+    // city → one absolute-RSRP whole-city map. Same engine as the indoor studio's hybrid, over the city grid.
+    async function generateHybrid(fMHz, tx, txDbm, s) {
+      if (!onnxReady) { setStatus(`ONNX (hybrid) unavailable — surrogate ${onnxWhy}. Use Eikonal or FDTD.`, true); return; }
+      $('run').disabled = true;
+      setWarn('⚙ Hybrid — ONNX surrogate near the antenna ⊕ eikonal path-loss + building shadows for the rest of the city (absolute RSRP).');
+      setStatus('solving (hybrid: ONNX near ⊕ eikonal far)…'); setBar(0);
+      const t0 = performance.now();
+      let res;
+      try { res = await S.hybridField3d(session, GRID, [X, Y, Z], CELL, fMHz, tx, txDbm, contract, setBar); }
+      catch (e) { setBar(null); setStatus('hybrid failed: ' + e.message, true); $('run').disabled = false; return; }
+      const secs = (performance.now() - t0) / 1000; setBar(null); $('run').disabled = false;
+      applyAntenna(res.db, [X, Y, Z], tx, curStation().boresight, antenna);   // shape into the antenna lobe
+      for (let i = 0; i < res.db.length; i++) if (!isFinite(res.db[i])) res.db[i] = -200;
+      field = { re: res.re, im: res.im, db: res.db, dims: [X, Y, Z], origin: [0, 0, 0], sub: GRID, fMHz, txy: tx.y, absolute: true };
+      $('hudMeta').textContent = `${X}×${Y}×${Z} whole-city · hybrid (ONNX ${res.tiles} tiles ⊕ eikonal) · ${s.b.site_id.split('_')[0]} · ${fMHz} MHz · ${secs.toFixed(1)} s`;
+      setStatus(`done — hybrid RSRP in ${secs.toFixed(1)} s (peak ${res.dbMax.toFixed(0)} dBm).`);
+      solidMat.opacity = 0.32; $('modelOpacity').value = 32;
+      drawCbar(); buildFieldMesh(); updateDesc();
+    }
+
+    const fmtEta = s => s == null ? '—' : (s < 60 ? Math.round(s) + 's' : Math.floor(s / 60) + 'm ' + Math.round(s % 60) + 's');
+    async function generateFdtd(fMHz, tx) {
+      $('run').disabled = true;
+      try {
+        const half = 20;                                                        // metres — the true-field box; the budget sets speed
+        const budget = parseInt($('fdtdBudget').value, 10) || 1.2e6;
+        const plan = S.planFdtd3d(CELL, fMHz, 8.0, Math.round(half / CELL), [X, Y, Z], budget);
+        const sv = S.extractSubvolume(GRID, X, Y, Z, tx, plan.halfCells);
+        // "time to calculate grid" estimate — FDTD at λ/8 is heavy; show the true cost (cells × steps)
+        // and let the user bail before a long solve, mirroring the indoor 3-D studio.
+        const { cells, steps } = S.estimateFdtd3d(sv.dims, plan.up);
+        let estS = null; try { estS = S.estimateFdtdSeconds3d(sv.dims, plan.up, S.calibrateFdtd3dMcps()); } catch (e) {}
+        const warnLine = `⏱ TIME TO CALCULATE GRID  ~${fmtEta(estS)}   [FDTD · ${fMHz} MHz · up ${plan.up}]\n`
+          + `${(cells / 1e6).toFixed(2)} M cells (${sv.dims.map(d => d * plan.up).join('×')}) × ${steps} steps`;
+        setWarn(warnLine);
+        if (estS != null && estS > 6 && !confirm(`${warnLine}\n\nRun the sub-volume FDTD now?`)) { setStatus('cancelled — pick a lower FDTD detail for a faster solve.'); $('run').disabled = false; return; }
+        setStatus('solving (FDTD sub-volume)…'); setBar(0);
+        const t0 = performance.now();
+        const res = await S.fdtdSolve3d({ grid: sv.sub, X0: sv.dims[0], Y0: sv.dims[1], Z0: sv.dims[2], cell: CELL, fMHz, tx0: sv.txLocal, up: plan.up }, setBar);
+        const secs = (performance.now() - t0) / 1000;
+        const env = S.envelopeDb3d(res.re, res.im, sv.sub);
+        field = { re: res.re, im: res.im, db: env.db, dims: sv.dims, origin: sv.origin, sub: sv.sub, fMHz, txy: sv.txLocal.y };
+        setBar(null); $('run').disabled = false;
+        $('hudMeta').textContent = `${sv.dims.join('×')} sub-volume · FDTD · ${fMHz} MHz · ${secs.toFixed(1)} s`;
+        setStatus(`done — FDTD field in ${secs.toFixed(1)} s.`);
+        solidMat.opacity = 0.32; $('modelOpacity').value = 32;
+        rangeHi = 0; rangeLo = -40; $('rangeHi').value = 0; $('rangeLo').value = -40;
+        drawCbar(); buildFieldMesh(); updateDesc();
+      } catch (e) { setBar(null); setStatus('FDTD failed: ' + e.message, true); $('run').disabled = false; }
+    }
+
+    // ---- field render (coverage slice at antenna height · or cloud) ----
+    const softSprite = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(255,255,255,0.5)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
+    function fieldCells() {
+      const [sx, sy, sz] = field.dims, db = field.db, sub = field.sub, cells = [];
+      for (let x = 0; x < sx; x++) for (let y = 0; y < sy; y++) for (let z = 0; z < sz; z++) { const li = (x * sy + y) * sz + z, c = sub[li]; if ((c === 0 || c === 4) && db[li] > rangeLo) cells.push(li); }
+      return cells;
+    }
+    function buildFieldMesh() {
+      if (fieldObj) { scene.remove(fieldObj); if (fieldObj.geometry) fieldObj.geometry.dispose(); if (fieldObj.userData && fieldObj.userData.tex) fieldObj.userData.tex.dispose(); fieldObj = null; }
+      if (!field) return;
+      const [sx, sy, sz] = field.dims, [ox, oy, oz] = field.origin;
+      const worldOf = li => { const z = li % sz, y = ((li - z) / sz) % sy, x = ((li - z) / sz - y) / sy; return [wX(ox + x), wY(oy + y), wZ(oz + z)]; };
+      if (fieldStyle === 'slice') {
+        // filled horizontal coverage plane at the antenna height — tiles placed by worldOf (the
+        // same transform as the city + cloud), so the slice registers with the buildings by
+        // construction (no texture-UV/flip guessing).
+        const yS = Math.max(0, Math.min(sy - 1, field.txy));
+        const cells = [];
+        for (let x = 0; x < sx; x++) for (let z = 0; z < sz; z++) { const li = (x * sy + yS) * sz + z; const c = field.sub[li]; if (c === 0 || c === 4) cells.push(li); }
+        const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1.0, 0.25, 1.0), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.9, depthWrite: false }), Math.max(1, cells.length));
+        im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, cells.length) * 3), 3);
+        cells.forEach((li, k) => { const w = worldOf(li); MM.setPosition(w[0], w[1], w[2]); im.setMatrixAt(k, MM); });
+        fieldObj = im; fieldObj.userData = { kind: 'slice', cells };
+        recolorField(); scene.add(fieldObj); return;
+      }
+      const cells = fieldCells();
+      const g = new THREE.BufferGeometry(), pos = new Float32Array(cells.length * 3), col = new Float32Array(cells.length * 3);
+      cells.forEach((li, k) => { const w = worldOf(li); pos[k * 3] = w[0]; pos[k * 3 + 1] = w[1]; pos[k * 3 + 2] = w[2]; });
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      fieldObj = new THREE.Points(g, new THREE.PointsMaterial({ size: 3.2, sizeAttenuation: true, vertexColors: true, map: softSprite, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false }));
+      fieldObj.userData = { kind: 'cloud', cells, sz, sy };
+      recolorField(); scene.add(fieldObj);
+    }
+    function recolorField() {
+      if (!fieldObj || !field) return;
+      const cells = fieldObj.userData.cells, db = field.db, lo = rangeLo, span = (rangeHi - rangeLo) || 1;
+      const isPoints = !!fieldObj.isPoints;
+      const carr = isPoints ? fieldObj.geometry.attributes.color.array : null;
+      cells.forEach((li, k) => {
+        const rgb = S.cmap(cmapName, (db[li] - lo) / span);
+        if (isPoints) { carr[k * 3] = rgb[0] / 255; carr[k * 3 + 1] = rgb[1] / 255; carr[k * 3 + 2] = rgb[2] / 255; }
+        else { COL.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255); fieldObj.setColorAt(k, COL); }
+      });
+      if (isPoints) fieldObj.geometry.attributes.color.needsUpdate = true;
+      else if (fieldObj.instanceColor) fieldObj.instanceColor.needsUpdate = true;
+    }
+    function drawCbar() {
+      const cb = $('cbarCv'), c = cb.getContext('2d');
+      for (let x = 0; x < cb.width; x++) { const t = x / (cb.width - 1); const [r, g, b] = S.cmap(cmapName, t); c.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`; c.fillRect(x, 0, 1, cb.height); }
+      $('cbLo').textContent = `${rangeLo} dBm`; $('cbHi').textContent = `${rangeHi} dBm`;
+    }
+    function updateDesc() {
+      const s = curStation(), se = curSector();
+      $('desc').innerHTML = `<b>What this shows.</b> The NoMa DC city as your Blender render, auto-registered to the base-station Mercator georeference over a real <b>satellite/street basemap</b> (north-up, east-right). The Tx picker lists <b>every PCI</b> at each base station; a picked PCI defaults to its station bearing + a <b>panel</b> antenna, whose ${se && se.pci != null ? `PCI ${se.pci}` : ''} lobe (boresight ${Math.round(curStation().boresight)}° · green arrow) shapes the coverage. The selected station carries a bright-red dot + ring; the blue block is the FCC receiver. Toggle <b>voxel city</b> to see what the solver reads (${X}×${Y}×${Z} @ ${CELL} m). <b>Generate</b> radiates the selected station (<b>${s.b.name}</b>) as an absolute-RSRP coverage field with the chosen solver: <b>Eikonal</b> spreads free-space path loss and accumulates real building/foliage loss along each ray (the iBwave/WinProp coverage look); <b>ONNX (hybrid)</b> runs the trained full-wave surrogate in the box around the antenna ⊕ eikonal for the rest of the city; <b>FDTD</b> solves the true sub-volume field around the station at λ/8.`;
+    }
+
+    // ---- render loop ----
+    function loop() { controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); }
+    reflectEngine(); reflectStation(); drawCbar(); updateDesc(); requestAnimationFrame(loop);
+    setStatus('ready — pick a base station and Generate.');
+
+    // ---- init the ONNX (hybrid) surrogate — best-effort; Eikonal + FDTD work regardless ----
+    (async function initOnnx() {
+      try { contract = await S.loadContract3d(OCONTRACT); } catch (e) { onnxWhy = 'contract not found'; reflectEngine(); return; }
+      if (location.protocol === 'file:') { onnxWhy = 'needs http (file:// blocks the model fetch)'; reflectEngine(); return; }
+      if (!window.ort) { onnxWhy = 'onnxruntime-web not loaded'; reflectEngine(); return; }
+      try {
+        const head = await fetch(OMODEL, { method: 'HEAD' }); if (!head.ok) throw new Error('not found');
+        session = await ort.InferenceSession.create(OMODEL, { executionProviders: [['webgpu'], ['wasm']].flat() });
+        onnxReady = true; onnxWhy = 'ready';
+      } catch (e) { onnxWhy = 'not reachable (fw_unet3d.onnx)'; }
+      reflectEngine();
     })();
 
-    // headless verification hook (the 3-D canvas is awkward to drive from tooling), matching the
-    // indoor studio's window.__fw3d. pinWorld() returns each pin's ACTUAL rendered world XZ (i.e.
-    // after scene.rotation.y) so orientation can be checked: east → +X, north stations up-screen.
-    window.__fwout = {
-      THREE, get scene() { return scene; }, get camera() { return camera; }, get controls() { return controls; },
-      get cadRoot() { return cadRoot; }, get osmRoot() { return osmRoot; },
-      get field() { return field; }, stations, X, Y, Z, CELL, cX, cY, cZ,
-      pinWorld() {
-        const v = new THREE.Vector3();
-        return stations.filter(s => s.in_grid).map(s => {
-          const m = txMeshes[s.site_id]; const p = m ? m.getWorldPosition(v) : null;
-          return { site: s.site_id, wx: p ? +p.x.toFixed(1) : null, wz: p ? +p.z.toFixed(1) : null, lat: s.lat, lon: s.lon };
-        });
-      },
+    // ---- headless verification hook (the WebGL canvas is awkward to drive from tooling) ----
+    window.__fwout3d = {
+      S, GRID, CELL, generate, lonlatToVox,
+      get dims() { return [X, Y, Z]; },
+      get nSolids() { return solids.length; },
+      get onnxReady() { return onnxReady; }, get onnxWhy() { return onnxWhy; },
+      get solver() { return solverSel; },
+      setSolver(v) { solverSel = v; document.querySelectorAll('#solverSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); reflectEngine(); return solverSel; },
+      get selIdx() { return selIdx; },
+      get antenna() { return antenna; }, set antenna(v) { antenna = v; $('antenna').value = v; updateBoreArrow(); },
+      worldToLonLat,
+      get selSector() { return selSector; },
+      sectors: () => sectors.map((se, i) => ({ i, site: stationVox[se.si].b.site_id, pci: se.pci, carrier: se.carrier, net: se.net, bands: se.bands, inBounds: stationVox[se.si].inBounds })),
+      setSector(gi) { selSector = gi; selIdx = sectors[gi].si; antenna = 'panel'; $('antenna').value = 'panel';
+        curStation().boresight = Number.isFinite(curStation().b.bearing_deg) ? curStation().b.bearing_deg : 0;
+        setBandForSector(curSector()); field = null; buildFieldMesh(); reflectStation(); $('station').value = String(gi);
+        return { pci: sectors[gi].pci, site: stationVox[sectors[gi].si].b.site_id, boresight: curStation().boresight, band: $('band').value }; },
+      // station voxel + world coords for placement verification
+      stations: stationVox.map(s => ({ site: s.b.site_id, lon: s.b.lon, lat: s.b.lat, vx: +s.vx.toFixed(2), vz: +s.vz.toFixed(2), vy: +s.vy.toFixed(2), inBounds: s.inBounds, boresight: s.boresight, worldX: +wX(s.vx).toFixed(2), worldZ: +wZ(s.vz).toFixed(2) })),
+      get field() { return field; },
+      // NoMa-render alignment check: model status + its world-space bounding box (voxel units).
+      get modelLoaded() { return !!modelObj; },
+      get modelBox() { if (!modelObj) return null; const b = new THREE.Box3().setFromObject(modelGroup); return { min: b.min.toArray().map(v => +v.toFixed(2)), max: b.max.toArray().map(v => +v.toFixed(2)) }; },
+      // world position a given lon/lat should land at under the model transform (should match `stations`)
+      modelXform: { S_H, S_V, OXm, OZm, OYm },
+      get ori() { return { ...ori }; },
+      setOri(sx, sz) { ori.sx = sx; ori.sz = sz; applyModelXform(); return { ...ori }; },
+      probeY: probeModelY,
+      adjust(o) { Object.assign(adj, o || {}); applyModelXform(); return { ...adj }; },
     };
   </script>
 </body>
