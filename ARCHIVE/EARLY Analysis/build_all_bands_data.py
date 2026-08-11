@@ -21,10 +21,10 @@ from datetime import datetime, timezone
 from collections import defaultdict
 import numpy as np
 
-ROOT = "/Users/cameronmickle/Documents/Indoor_Walk_Test_7-7"
-CSV_DIR = os.path.join(ROOT, "Data/raw_walk_data/CSV")
-OUT_RECORDS = os.path.join(ROOT, "Data/records_data.js")
-OUT_TIMESERIES = os.path.join(ROOT, "Data/timeseries_data.js")
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+CSV_DIR = os.path.join(ROOT, "ARCHIVE", "raw_walk_data", "CSV")
+OUT_RECORDS = os.path.join(ROOT, "Data", "records_data.js")
+OUT_TIMESERIES = os.path.join(ROOT, "Data", "timeseries_data.js")
 
 # --- georeference: 3 ground-control points from floorplan_meta.js -------------
 GCPS = [(-77.0070535, 38.9036891, 974.0, 47.0),

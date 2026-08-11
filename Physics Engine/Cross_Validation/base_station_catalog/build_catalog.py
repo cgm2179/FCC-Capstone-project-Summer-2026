@@ -16,7 +16,7 @@ RSRP/RSRQ/SINR/RSSI stats attributed to that cell, and the site->floorplan geome
 SIM V1 3D/modes_3d.forte_hall_geometry, so it drops straight into the O2I engine.
 
 Reuses:
-  Backend/early_analysis/build_all_bands_data.py  (scan parsing + georeference)
+  ARCHIVE/EARLY Analysis/build_all_bands_data.py  (scan parsing + georeference)
   Physics Engine/3D Map Physics/SIM V1 3D/osm_building_height.py  (height resolver)
 
 Usage:
@@ -37,7 +37,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]                                  # -> repo root
-BACKEND = REPO / "Backend" / "early_analysis"
+BACKEND = REPO / "ARCHIVE" / "EARLY Analysis"
 SIM3D = REPO / "Physics Engine" / "3D Map Physics" / "SIM V1 3D"
 REGISTRY = HERE / "sites_registry.json"
 FLOORPLAN_META_JS = REPO / "Data" / "floorplan_meta.js"

@@ -16,7 +16,8 @@ Stays elsewhere (referenced by the backend at those paths — don't move):
 
 | Data | Location | Read by |
 |---|---|---|
-| Source ground truth | `../7th_Floor_2nd_Indoor_Walk_Test_V2.2.{png,TAB,aux.xml,csv}` | SIM / STEP scripts |
+| Source ground truth | `../Essentials + HTML/floorplan/7th_Floor_2nd_Indoor_Walk_Test_V2.2.{png,TAB,aux.xml,csv}` | SIM / STEP scripts |
+| Raw scanner exports | `../ARCHIVE/raw_walk_data/` | MATLAB exporter / early analysis |
 | Material grid + meta | `../STEP_1/*.npy`, `../STEP_1/*.json` | SIM physics |
 | Training shards | `../SIM/dataset/` (fetch via `make dataset-fetch`) | Phase C training |
 | Physics constants (source of truth) | `../SIM/manifest.json` | Python + JS (Rule R6) |
