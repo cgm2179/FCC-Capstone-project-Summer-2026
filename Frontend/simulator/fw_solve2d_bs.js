@@ -327,11 +327,6 @@ export function BAND_BW_MHZ(fMHz) {
 const LTE_RB = { 1.4: 6, 3: 15, 5: 25, 10: 50, 15: 75, 20: 100 };
 export function nRBforBw(bwMHz) { return LTE_RB[bwMHz] || Math.max(1, Math.round(bwMHz * 5)); }
 
-// Free-space PL (n=2) — used to re-anchor the relative surrogate envelope to absolute RSRP.
-export function fsplDb(fMHz, d_m) {
-  return 20 * Math.log10(fMHz) - 27.55 + 20 * Math.log10(Math.max(d_m, 1));
-}
-
 // Analytic point link budget from GEOMETRIC distance (matches hybrid_city.far_pl /
 // run_outdoor2d): PL = 20log10(f) − 27.55 + 10·n·log10(d); RSRP = EIRP − PL (per-RE).
 // RSSI = wideband power over the 12·N_RB subcarriers (signal + thermal noise, unloaded);
@@ -345,31 +340,4 @@ export function linkBudget({ fMHz, d_m, n = 3.2, eirpDbm = 63, bwMHz, scsKHz = 1
   const rssi = 10 * Math.log10(12 * nRB * (lin(rsrp) + lin(noiseRe)));
   const rsrq = 10 * Math.log10(nRB) + rsrp - rssi;
   return { PL, rsrp, rssi, rsrq, nRB, bw };
-}
-
-// Spearman rank correlation (average ranks for ties) — same definition as outdoor_view.html
-// and Physics Engine validate_outdoor.py.
-export function spearmanRho(a, b) {
-  const n = a.length; if (n < 3) return NaN;
-  const ranks = arr => {
-    const ix = arr.map((v, i) => [v, i]).sort((p, q) => p[0] - q[0]);
-    const r = new Array(arr.length);
-    for (let i = 0; i < ix.length;) {
-      let j = i; while (j + 1 < ix.length && ix[j + 1][0] === ix[i][0]) j++;
-      const avg = (i + j) / 2 + 1;
-      for (let k = i; k <= j; k++) r[ix[k][1]] = avg;
-      i = j + 1;
-    }
-    return r;
-  };
-  const ra = ranks(a), rb = ranks(b);
-  let ma = 0, mb = 0;
-  for (let i = 0; i < n; i++) { ma += ra[i]; mb += rb[i]; }
-  ma /= n; mb /= n;
-  let num = 0, da = 0, db = 0;
-  for (let i = 0; i < n; i++) {
-    const x = ra[i] - ma, y = rb[i] - mb;
-    num += x * y; da += x * x; db += y * y;
-  }
-  return (da && db) ? num / Math.sqrt(da * db) : NaN;
 }
