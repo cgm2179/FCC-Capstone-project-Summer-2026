@@ -654,8 +654,8 @@
           </script>
 
           <div class="sim-bar" id="simFw3dBarOut" style="display:none; align-items:center; gap:10px; flex-wrap:wrap;">
-            <button type="button" class="sim-btn" id="simFw3dToggleOut">▶ Outdoor 3-D Full-Wave (SIM&nbsp;V3 · NoMa city · BS)</button>
-            <span class="sim-note">NoMa OSM buildings as 3-D polyhedra + penetrable materials (air / concrete core / foliage / glass). Transmitters are the known base stations. Street-level eikonal coverage or sub-volume FDTD; whole-city λ/8 is the later foundation job.</span>
+            <button type="button" class="sim-btn" id="simFw3dToggleOut">▶ Outdoor 3-D Full-Wave (SIM&nbsp;V3 · NoMa render + basemap)</button>
+            <span class="sim-note">The NoMa DC render georeferenced over a real satellite/street basemap, with every surveyed base station selectable <b>by PCI</b> (default panel antenna + station bearing → a directional coverage lobe). Solve whole-city coverage with <b>Eikonal</b>, the <b>ONNX hybrid</b> surrogate, or the sub-volume <b>FDTD</b>.</span>
           </div>
           <div id="simFw3dWrapOut" style="display:none; margin:6px 0 16px;">
             <iframe id="simFw3dFrameOut" title="SIM V3 Full-Wave 3D Outdoor"
@@ -667,7 +667,7 @@
                   w = document.getElementById('simFw3dWrapOut'),
                   f = document.getElementById('simFw3dFrameOut');
               if (!b) return;
-              var LABEL = ' Outdoor 3-D Full-Wave (SIM V3 \u00b7 NoMa city \u00b7 BS)';
+              var LABEL = ' Outdoor 3-D Full-Wave (SIM V3 \u00b7 NoMa render + basemap)';
               b.addEventListener('click', function () {
                 var open = w.style.display === 'none';
                 if (open && !f.getAttribute('src')) f.setAttribute('src', 'Frontend/simulator/fw_studio3d_outdoor.html');
