@@ -19,7 +19,8 @@ this section only captures the non-obvious, durable gotchas for future cloud age
 - `SIM3D/` → `Physics Engine/3D Map Physics/SIM V1 3D/` (symlink) — the Python engine.
 - `TESTS3D/` → the engine's `tests3d/` (symlink) — pytest harness.
 - `docs/` — plans and roadmaps (`AGENTS.md` / `QUICKSTART.md` also symlinked at repo root).
-- `Backend/` is a staging area only; it has no runtime service.
+- One-off / provenance folders live under `ARCHIVE/` (including `ARCHIVE/One-offs/`).
+  There is no runtime backend service.
 
 ### Python environment
 - A prebuilt virtualenv lives at `/workspace/.venv` (created/refreshed by the startup update

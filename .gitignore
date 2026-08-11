@@ -13,6 +13,7 @@
 *.onnx
 !Physics Engine/3D Map Physics/SIM V1 3D/web/pl_unet3d.onnx
 !SIM3D/web/pl_unet3d.onnx
+!ARCHIVE/One-offs/artifacts/pl_unet3d.onnx
 # Indoor 2-D full-wave surrogate (SIM V3). The Simulation tab's "Full-Wave (ONNX / FDTD)"
 # option fetches this from Simulation/fw_studio2d.html at
 # ../Physics Engine/3D Map Physics/SIM V1 3D/web/fw_unet2d.onnx — so it MUST clone with the repo.
