@@ -24,6 +24,33 @@
   color: #fff; font-weight: 600; border-radius: 8px; padding: 7px 14px; cursor: pointer; }
 .sim-btn:disabled { background: #b9c9c4; border-color: #b9c9c4; cursor: not-allowed; }
 .sim-btn.ghost { background: #fff; color: var(--accent); }
+.sim-btn.on { background: #1f2a2a; border-color: #1f2a2a; color: #fff; }
+
+/* Full screen toolbar above each Simulation studio window */
+.sim-fs-toolbar { display: flex; align-items: center; gap: 10px; margin: 0 0 8px;
+  padding: 6px 2px; }
+.sim-fs-toolbar .sim-note { font-size: 0.76rem; }
+.sim-fs-wrap:fullscreen,
+.sim-fs-wrap:-webkit-full-screen,
+.sim-fs-wrap.sim-fs-on {
+  width: 100vw !important; height: 100vh !important; margin: 0 !important;
+  padding: 10px; box-sizing: border-box; background: #0b0e14;
+  display: flex !important; flex-direction: column; z-index: 10000;
+}
+.sim-fs-wrap.sim-fs-on { position: fixed; inset: 0; }
+body.sim-fs-body { overflow: hidden; }
+.sim-fs-wrap:fullscreen iframe,
+.sim-fs-wrap:-webkit-full-screen iframe,
+.sim-fs-wrap.sim-fs-on iframe,
+.sim-fs-wrap:fullscreen #simCanvas,
+.sim-fs-wrap:-webkit-full-screen #simCanvas,
+.sim-fs-wrap.sim-fs-on #simCanvas {
+  flex: 1 1 auto; width: 100% !important; height: 100% !important;
+  min-height: 0; border: 0 !important; border-radius: 0 !important;
+}
+.sim-fs-wrap:fullscreen .sim-fs-toolbar,
+.sim-fs-wrap:-webkit-full-screen .sim-fs-toolbar,
+.sim-fs-wrap.sim-fs-on .sim-fs-toolbar { flex: none; }
 
 /* --- 3D Simulation tab (#sim3dPanel) — construction rail + viewport --- */
 .sim3d-layout { display: grid; grid-template-columns: 264px 1fr; gap: 14px; }
