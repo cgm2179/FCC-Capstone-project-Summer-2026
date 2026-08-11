@@ -225,6 +225,47 @@ body {
 }
 #histTab { display: grid; gap: 14px; }
 #histMetric, #histTime { width: 100%; min-height: 360px; }
+
+/* Statistics sub-tabs (Distributions · Antenna Pattern) — pill toggle mirrors .sim-subtab */
+.hist-subtabs { display: flex; gap: 6px; margin: 2px 0 4px; flex-wrap: wrap; }
+.hist-subtab {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.88rem;
+  padding: 7px 13px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.hist-subtab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ant-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  font-size: 0.84rem;
+  color: var(--muted);
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfdfc;
+}
+.ant-controls label { display: flex; align-items: center; gap: 6px; }
+.ant-controls select, .ant-controls input[type="number"] {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 0.88rem;
+  background: #fff;
+  color: var(--ink);
+}
+.ant-controls input[type="number"] { width: 72px; }
+.ant-controls .ant-check { cursor: pointer; }
+#antPatternPlot { width: 100%; min-height: 520px; }
+#histAntPane .stats { margin-top: 4px; }
 .playback-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
