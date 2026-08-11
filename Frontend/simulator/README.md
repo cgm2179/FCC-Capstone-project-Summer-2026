@@ -73,9 +73,10 @@ Two solvers behind the switch (`fw_solve2d_bs.js`):
 Data: `Data/noma_city2d.js` (`window.NOMA_CITY_2D`) — the baked penetrable NoMa
 grid + stations, produced by `scripts/bake_noma_city2d.py` from the OSM grid
 (`SIM V1 3D/city/NoMa_DC_osm`). The model + contract live in `SIM V1 3D/web/`
-(`fw_bs.onnx` + `fw_bs.json`); **`fw_bs.onnx` is git-ignored** (30 MB) — export it
-with `fw_export.py --model bs` (see `EXPORT_ONNX.md`). Without it, **Auto → FDTD**
-and **ONNX → a clear error** (no silent fallback).
+(`fw_bs.onnx` + `fw_bs.json`); **`fw_bs.onnx` ships with the repo** (~30 MB,
+allow-listed like `fw_unet2d.onnx`). Re-export after retraining with
+`fw_export.py --model bs` (see `EXPORT_ONNX.md`). Without the weights,
+**Auto → FDTD** and **ONNX → a clear error** (no silent fallback).
 
 It embeds in the dashboard via the **"Outdoor Full-Wave (SIM V3)"** toggle in
 `Frontend_Data_Display.html` (`#sim2dPanel`), revealed by `Frontend/landing/landing.js`
