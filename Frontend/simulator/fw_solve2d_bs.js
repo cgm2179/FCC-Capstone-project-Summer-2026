@@ -82,7 +82,34 @@ export function bandRegionM(fMHz) {
 // npw so (region/h)^2 ~ budget, clamped to the surrogate's trained range.
 export function chooseNpw(regionM, wavelengthM, budget) {
   const npw = (Math.sqrt(budget) * wavelengthM) / regionM;
-  return Math.max(1.5, Math.min(8, npw));
+  return Math.max(NPW_FLOOR, Math.min(8, npw));
+}
+
+// Solver cell budgets — single source of truth for the "TIME TO CALCULATE GRID"
+// estimate AND the drawn calc-box / solver-limit outlines in the studio. NPW_FLOOR
+// mirrors the coarsest pts/λ chooseNpw() clamps to (so maxRegionM is honest).
+export const ONNX_BUDGET = 3_000_000;   // ONNX surrogate fine-grid cell cap
+export const FDTD_BUDGET = 130_000;     // single-thread penetrable FDTD cell cap
+export const NPW_FLOOR = 1.5;
+
+// Coarse-city crop {x0,x1,z0,z1} (cells) the solve uses for `regionM` around a
+// station. buildRegion() calls this so the studio's red outline == the actual crop.
+export function regionBoxCells(city, st, regionM) {
+  const cs = city.cell_m, nx = city.nx, nz = city.nz;
+  const rm = regionM || bandRegionM(st.f_mhz || 617);
+  const halfC = Math.max(6, Math.round(rm / cs / 2));
+  return {
+    x0: Math.max(0, Math.round(st.vx - halfC)), x1: Math.min(nx, Math.round(st.vx + halfC)),
+    z0: Math.max(0, Math.round(st.vz - halfC)), z1: Math.min(nz, Math.round(st.vz + halfC)),
+  };
+}
+
+// Largest region (m across) a solver can resolve within `budget`: at the coarsest
+// allowed grid (npw = NPW_FLOOR), cells = (regionM·npw/λ)² = budget → regionM =
+// √budget·λ/npw. Frequency-dependent (λ), so the drawn limit boxes shrink at high band.
+export function maxRegionM(fMHz, budget) {
+  const wl = C0 / (fMHz * 1e6);
+  return (Math.sqrt(budget) * wl) / NPW_FLOOR;
 }
 
 // Snap the source to air and, for DIRECTIONAL families, add a short rigid backplane
@@ -118,12 +145,10 @@ export function buildRegion(city, st, fMHz, opts = {}) {
   const cs = city.cell_m, nx = city.nx, nz = city.nz, grid = city.grid;
   const wl = C0 / (fMHz * 1e6);
   const regionM = opts.regionM || bandRegionM(fMHz);
-  const budget = opts.budget || 3_000_000;
+  const budget = opts.budget || ONNX_BUDGET;
   const npw = opts.npw || chooseNpw(regionM, wl, budget);
   const h = wl / npw, zoom = cs / h;
-  const halfC = Math.max(6, Math.round(regionM / cs / 2));
-  const x0 = Math.max(0, Math.round(st.vx - halfC)), x1 = Math.min(nx, Math.round(st.vx + halfC));
-  const z0 = Math.max(0, Math.round(st.vz - halfC)), z1 = Math.min(nz, Math.round(st.vz + halfC));
+  const { x0, x1, z0, z1 } = regionBoxCells(city, st, regionM);   // == the outline drawn in the studio
   const cw = Math.max(1, x1 - x0), ch = Math.max(1, z1 - z0);
   const H = Math.max(16, Math.round(cw * zoom)), W = Math.max(16, Math.round(ch * zoom));
   const classes = new Uint8Array(H * W);
@@ -290,4 +315,61 @@ export async function fdtdSolvePenetrable(region, phys, opts, onProg) {
   for (let i = 0; i < N; i++) { re[i] = accRe[i] * sc; im[i] = accIm[i] * sc; }
   if (onProg) onProg(1);
   return { re, im, steps };
+}
+
+// ------------------------------------------------------------------ receiver link budget
+// Assumed FIXED channel bandwidth (MHz) per frequency tier — the studio auto-fills this
+// from the selected band and lets the user override it (real deployments vary the width).
+export function BAND_BW_MHZ(fMHz) {
+  return fMHz < 900 ? 10 : fMHz < 2000 ? 15 : fMHz < 3000 ? 20 : fMHz < 6000 ? 40 : 20;
+}
+// LTE resource-block count for a channel bandwidth (MHz); ~5 RB/MHz off the table.
+const LTE_RB = { 1.4: 6, 3: 15, 5: 25, 10: 50, 15: 75, 20: 100 };
+export function nRBforBw(bwMHz) { return LTE_RB[bwMHz] || Math.max(1, Math.round(bwMHz * 5)); }
+
+// Free-space PL (n=2) — used to re-anchor the relative surrogate envelope to absolute RSRP.
+export function fsplDb(fMHz, d_m) {
+  return 20 * Math.log10(fMHz) - 27.55 + 20 * Math.log10(Math.max(d_m, 1));
+}
+
+// Analytic point link budget from GEOMETRIC distance (matches hybrid_city.far_pl /
+// run_outdoor2d): PL = 20log10(f) − 27.55 + 10·n·log10(d); RSRP = EIRP − PL (per-RE).
+// RSSI = wideband power over the 12·N_RB subcarriers (signal + thermal noise, unloaded);
+// RSRQ = N·RSRP/RSSI → ≈ −10.8 dB when signal ≫ noise, dropping toward the noise floor.
+export function linkBudget({ fMHz, d_m, n = 3.2, eirpDbm = 63, bwMHz, scsKHz = 15, nfDb = 9 }) {
+  const bw = bwMHz || BAND_BW_MHZ(fMHz), nRB = nRBforBw(bw);
+  const PL = 20 * Math.log10(fMHz) - 27.55 + 10 * n * Math.log10(Math.max(d_m, 1));
+  const rsrp = eirpDbm - PL;
+  const noiseRe = -174 + 10 * Math.log10(scsKHz * 1e3) + nfDb;   // dBm per subcarrier (RE)
+  const lin = d => Math.pow(10, d / 10);
+  const rssi = 10 * Math.log10(12 * nRB * (lin(rsrp) + lin(noiseRe)));
+  const rsrq = 10 * Math.log10(nRB) + rsrp - rssi;
+  return { PL, rsrp, rssi, rsrq, nRB, bw };
+}
+
+// Spearman rank correlation (average ranks for ties) — same definition as outdoor_view.html
+// and Physics Engine validate_outdoor.py.
+export function spearmanRho(a, b) {
+  const n = a.length; if (n < 3) return NaN;
+  const ranks = arr => {
+    const ix = arr.map((v, i) => [v, i]).sort((p, q) => p[0] - q[0]);
+    const r = new Array(arr.length);
+    for (let i = 0; i < ix.length;) {
+      let j = i; while (j + 1 < ix.length && ix[j + 1][0] === ix[i][0]) j++;
+      const avg = (i + j) / 2 + 1;
+      for (let k = i; k <= j; k++) r[ix[k][1]] = avg;
+      i = j + 1;
+    }
+    return r;
+  };
+  const ra = ranks(a), rb = ranks(b);
+  let ma = 0, mb = 0;
+  for (let i = 0; i < n; i++) { ma += ra[i]; mb += rb[i]; }
+  ma /= n; mb /= n;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) {
+    const x = ra[i] - ma, y = rb[i] - mb;
+    num += x * y; da += x * x; db += y * y;
+  }
+  return (da && db) ? num / Math.sqrt(da * db) : NaN;
 }

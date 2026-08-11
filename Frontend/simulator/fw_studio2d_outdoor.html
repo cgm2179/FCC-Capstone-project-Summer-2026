@@ -20,8 +20,9 @@
     #engine { font-size:0.76rem; color:var(--muted); margin-top:6px; }
     #warn { margin-top:10px; font-size:0.8rem; color:var(--warn); min-height:16px; white-space:pre-line; }
     #status { margin-top:8px; font-size:0.8rem; color:var(--muted); min-height:16px; } #status.err { color:var(--err); font-weight:600; }
-    #bar { height:8px; background:rgba(10,127,122,.15); border-radius:4px; overflow:hidden; margin-top:8px; display:none; }
-    #barFill { height:100%; width:0%; background:var(--accent); transition:width .12s linear; }
+    #bar { position:relative; height:18px; background:rgba(10,127,122,.15); border-radius:5px; overflow:hidden; margin-top:8px; display:none; }
+    #barFill { height:100%; width:0%; background:var(--accent); transition:width .18s linear; }
+    #barPct { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:0.72rem; font-weight:700; color:var(--ink); letter-spacing:.02em; }
     #view { flex:1; display:flex; flex-direction:column; background:#eceef0; overflow:hidden; }
     #stage { flex:1; position:relative; display:flex; align-items:center; justify-content:center; min-height:0; }
     #desc { flex:none; padding:9px 16px 11px; border-top:1px solid var(--line); background:var(--panel);
@@ -41,6 +42,38 @@
     #scale { position:absolute; bottom:12px; right:16px; display:flex; flex-direction:column; align-items:center; font-size:0.72rem; color:var(--ink); text-shadow:0 1px 2px #fff; }
     #scaleBar { height:7px; border:1.5px solid var(--ink); border-top:0; box-sizing:border-box; }
     .note { font-size:0.74rem; color:var(--muted); margin:2px 0 0; }
+    .chk { display:flex; align-items:center; gap:7px; font-size:0.8rem; color:var(--muted); margin-top:7px; cursor:pointer; }
+    .chk input { width:auto; }
+    /* overlay for the calc box / solver-limit outlines + receiver dot (sits on #cv) */
+    #ov { position:absolute; pointer-events:none; z-index:3; }
+    /* receiver-point toolbar above the map */
+    #probeBar { flex:none; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+                padding:8px 14px; border-bottom:1px solid var(--line); background:var(--panel); }
+    #probeBar .lab { font-weight:600; color:var(--muted); font-size:0.8rem; }
+    #probeBar select, #probeBar input { width:auto; padding:5px 8px; }
+    #probeBar input[type=number] { width:118px; }
+    .btn2 { padding:6px 11px; border:0; border-radius:9px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+    .btn2.ghost { background:#eef2ef; color:var(--muted); }
+    #probeMsg { font-size:0.78rem; color:var(--muted); }
+    /* action bar under the map */
+    #actionBar { flex:none; display:flex; align-items:center; gap:10px; padding:8px 14px;
+                 border-top:1px solid var(--line); background:var(--panel); }
+    #actionBar .spacer { flex:1; }
+    /* receiver hover tooltip */
+    #rxTip { position:fixed; z-index:20; display:none; min-width:200px; background:#fff; color:var(--ink);
+             border:1px solid var(--line); border-radius:10px; box-shadow:0 6px 26px rgba(0,0,0,.18);
+             padding:9px 11px; font-size:0.78rem; pointer-events:none; }
+    #rxTip .rxHead { font-weight:700; color:var(--accent); margin-bottom:5px; }
+    #rxTip .rxRow { display:flex; justify-content:space-between; gap:14px; padding:1px 0; }
+    #rxTip .rxRow span { color:var(--muted); } #rxTip .rxRow b { font-family:ui-monospace,monospace; }
+    /* surrogate vs walk-test RSRP scatter */
+    #walkPanel { flex:none; display:none; padding:10px 14px 12px; border-top:1px solid var(--line);
+                 background:var(--panel); gap:14px; align-items:flex-start; }
+    #walkPanel.on { display:flex; }
+    #walkScatter { width:220px; height:160px; border:1px solid var(--line); border-radius:8px; background:#fafbfa; flex:none; }
+    #walkMeta { font-size:0.78rem; color:var(--muted); line-height:1.45; max-width:420px; }
+    #walkMeta b { color:var(--ink); }
+    #walkMeta .rho { font-size:1.05rem; font-weight:700; }
   </style>
 </head>
 <body>
@@ -63,10 +96,11 @@
     </div>
     <div class="grp"><label>Coverage region (m across)</label>
       <input id="region" type="number" value="250" min="60" max="800" step="20">
-      <p class="note" id="resNote"></p></div>
+      <p class="note" id="resNote"></p>
+      <label class="chk"><input type="checkbox" id="boxToggle" checked> Show calc box + solver limits</label></div>
 
     <button class="btn" id="run">▶ Generate coverage</button>
-    <div id="bar"><div id="barFill"></div></div>
+    <div id="bar"><div id="barFill"></div><div id="barPct"></div></div>
     <div id="warn"></div>
     <div id="status">ready</div>
 
@@ -81,11 +115,36 @@
 
     <div class="grp"><label>Materials (legend ↔ map)</label><table id="legend"></table>
       <p class="note" id="scaleNote"></p></div>
+
+    <div class="grp" id="rxGroup" style="display:none">
+      <label>Receiver link budget</label>
+      <div class="row">
+        <label>EIRP (dBm)<input id="eirp" type="number" value="63" step="1"></label>
+        <label>PL exponent n<input id="ple" type="number" value="3.2" step="0.1"></label>
+      </div>
+      <div class="row"><label>Channel BW (MHz)<input id="bw" type="number" value="10" step="1" min="1"></label></div>
+      <p class="note">RSRP = EIRP − PL(geometric distance). RSSI/RSRQ assume 15&nbsp;kHz SCS, NF&nbsp;9&nbsp;dB, unloaded cell.</p>
+    </div>
   </div>
 
   <div id="view">
+    <div id="probeBar">
+      <span class="lab">Get a Point</span>
+      <select id="crs" title="Coordinate reference system">
+        <option value="merc">Mercator (EPSG:3857)</option>
+        <option value="lonlat">Lat / Long</option>
+        <option value="grid">Current Fix Grid</option>
+      </select>
+      <input id="c0" type="number" step="any" placeholder="X (m, EPSG:3857)">
+      <input id="c1" type="number" step="any" placeholder="Y (m, EPSG:3857)">
+      <input id="c2" type="number" step="any" placeholder="Z / height (m, opt)" title="3D height — recorded but not used by the 2D plane field">
+      <button class="btn2" id="place">◉ Place receiver</button>
+      <button class="btn2 ghost" id="clearRx">Clear</button>
+      <span id="probeMsg"></span>
+    </div>
     <div id="stage">
       <canvas id="cv"></canvas>
+      <canvas id="ov"></canvas>
       <div id="hud">
         <div><b style="color:#0a7f7a">SIM V3 — outdoor full-wave · NoMa DC (2D)</b></div>
         <div id="hudMeta"></div>
@@ -95,13 +154,25 @@
       <div id="readout"></div>
       <div id="scale"><div id="scaleBar"></div><span id="scaleLab"></span></div>
     </div>
+    <div id="actionBar">
+      <button class="btn2" id="dlPng">⬇ Download PNG</button>
+      <span class="note" id="dlNote">Saves the map + coverage + calc boxes + receiver dot.</span>
+      <span class="spacer"></span>
+    </div>
+    <div id="walkPanel">
+      <canvas id="walkScatter" width="220" height="160" title="surrogate_predicted_RSRP vs walk-test_RSRP"></canvas>
+      <div id="walkMeta">Generate coverage to score surrogate vs walk-test RSRP.</div>
+    </div>
     <div id="desc"></div>
   </div>
+  <div id="rxTip"></div>
 
   <!-- onnxruntime-web (same CDN build the dashboard uses) -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
   <!-- the baked penetrable NoMa city grid + stations; sets window.NOMA_CITY_2D -->
   <script src="../../Data/noma_city2d.js"></script>
+  <!-- FCC outdoor walk-test points (lon,lat,rsrp,pci,…) for Spearman scoring -->
+  <script src="../../Data/outdoor_walk.js"></script>
 
   <script type="module">
     import * as S from './fw_solve2d_bs.js';
@@ -109,7 +180,21 @@
     const $ = id => document.getElementById(id);
     const setStatus = (m, e) => { $('status').textContent = m; $('status').className = e ? 'err' : ''; };
     const setWarn = m => { $('warn').textContent = m || ''; };
-    const setBar = f => { $('bar').style.display = f == null ? 'none' : 'block'; if (f != null) $('barFill').style.width = Math.round(f * 100) + '%'; };
+    let genT0 = 0, genEst = 0;                                  // solve start + up-front estimate (s)
+    const fmtSecs = s => (s < 1 ? '<1s' : s < 90 ? `${Math.round(s)}s` : `${(s / 60).toFixed(1)}min`);
+    const setBar = f => {
+      const bar = $('bar');
+      if (f == null) { bar.style.display = 'none'; return; }
+      bar.style.display = 'block';
+      const p = Math.max(0, Math.min(1, f));
+      $('barFill').style.width = Math.round(p * 100) + '%';
+      let lab = Math.round(p * 100) + '%';
+      if (genT0 && p > 0.03) {                                  // ETA from the measured rate so far
+        const el = (performance.now() - genT0) / 1000;
+        lab += ` · ~${fmtSecs(el / p - el)} left`;
+      } else if (genEst) { lab += ` · ~${fmtSecs(genEst)}`; }
+      $('barPct').textContent = lab;
+    };
 
     const MODEL = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_bs.onnx';
     const CONTRACT_URL = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_bs.json';
@@ -129,6 +214,7 @@
     const cv = $('cv'); cv.width = NX; cv.height = NZ;
     cv.style.width = Math.min(NX * 1.15, 900) + 'px';
     const cx = cv.getContext('2d');
+    const ov = $('ov'), ovcx = ov.getContext('2d');   // transparent overlay: calc boxes + Rx dot
     const EXT_X = NX * CS, EXT_Z = NZ * CS;          // real extent (m)
     // native city cell (x=X row, z=Z col) -> flipped canvas pixel index (north up, east right)
     const dstCity = (x, z) => ((NZ - 1 - z) * NX + (NX - 1 - x));
@@ -158,6 +244,7 @@
     let contract = null, session = null, onnxReady = false, onnxWhy = 'not loaded';
     let solverSel = 'auto', viewMode = 'heat', cmapName = 'viridis', rangeHi = 0, rangeLo = -40;
     let field = null;
+    let showBoxes = true, rx = null, rxMetrics = null;   // calc-box toggle + placed receiver + its metrics
 
     // band + antenna dropdowns populated from the contract (fallback to station bands)
     function fillBands() {
@@ -193,10 +280,11 @@
     }));
     $('station').addEventListener('change', () => {
       sel = STA[parseInt($('station').value, 10)]; $('bore').value = Math.round(sel.boresight);
-      selectStationBand(); field = null; updateResNote(); drawCity();
+      selectStationBand(); field = null; autofillBw(); updateResNote(); if (rx) updateRxReadout();
+      $('walkPanel').classList.remove('on'); drawCity();
     });
     $('bore').addEventListener('input', () => { sel = { ...sel, boresight: parseFloat($('bore').value) || 0 }; });
-    $('band').addEventListener('change', updateResNote);
+    $('band').addEventListener('change', () => { autofillBw(); updateResNote(); });
     $('region').addEventListener('input', updateResNote);
     $('bore').value = Math.round(sel.boresight);
 
@@ -209,10 +297,13 @@
     function curRegionM() { return Math.max(60, parseFloat($('region').value) || S.bandRegionM(curFMHz())); }
     function updateResNote() {
       const f = curFMHz(), wl = S.C0 / (f * 1e6), rm = curRegionM();
-      const npw = S.chooseNpw(rm, wl, 3_000_000), h = wl / npw;
-      const cells = Math.round((rm / h)) ** 2;
-      $('resNote').textContent = `≈ ${(rm / h | 0)}×${(rm / h | 0)} cells · ${(h * 100).toFixed(1)} cm/cell · ${npw.toFixed(1)} pts/λ`;
+      const npw = S.chooseNpw(rm, wl, S.ONNX_BUDGET), h = wl / npw;
+      $('resNote').textContent =
+        `≈ ${(rm / h | 0)}×${(rm / h | 0)} cells · ${(h * 100).toFixed(1)} cm/cell · ${npw.toFixed(1)} pts/λ  ·  ` +
+        `max region: ONNX ${Math.round(S.maxRegionM(f, S.ONNX_BUDGET))} m / FDTD ${Math.round(S.maxRegionM(f, S.FDTD_BUDGET))} m`;
+      drawOverlay();
     }
+    const autofillBw = () => { $('bw').value = S.BAND_BW_MHZ(curFMHz()); if (rx) updateRxReadout(); };
 
     // ---- generate ----
     $('run').onclick = generate;
@@ -236,7 +327,7 @@
       //    fallback runs single-threaded so it gets a much smaller grid — coarse but
       //    tractable; the TIME estimate + confirm still guards it).
       $('run').disabled = true;
-      const budget = solver === 'onnx' ? 3_000_000 : 130_000;
+      const budget = solver === 'onnx' ? S.ONNX_BUDGET : S.FDTD_BUDGET;
       const region = S.buildRegion(CITY, st, fMHz, { regionM, budget });
       const fdtdOpts = { crossings: 1.3 };
 
@@ -264,8 +355,9 @@
       }
 
       // 5) solve
-      setStatus(`generating (${solver.toUpperCase()})…`); setBar(0);
-      const t0 = performance.now();
+      genEst = estS; genT0 = performance.now();
+      setStatus(`generating (${solver.toUpperCase()})…`); setBar(0.001);   // show the bar + estimate at once
+      const t0 = genT0;
       let U;
       try {
         if (solver === 'onnx') U = await S.onnxTiledPredictBs(session, region, contract, st, setBar);
@@ -280,6 +372,7 @@
       $('hudMeta').textContent = `${sel.site.split('_')[0]} · ${solver.toUpperCase()} · ${fMHz} MHz · ${kind} · ${secs < 1 ? (secs * 1000).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}`;
       setStatus(`done — ${solver.toUpperCase()} coverage in ${secs < 1 ? (secs * 1000).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}.`);
       render();
+      scoreWalkRsrp();
     }
 
     // ---- rendering: base city, then the coverage patch, then Tx ----
@@ -307,6 +400,7 @@
       stopWave();
       const img = cx.createImageData(NX, NZ);
       paintCityBase(img); paintStations(img); cx.putImageData(img, 0, 0);
+      drawOverlay();
     }
     // sample the fine region field at city cell (x,z); returns fine index or -1 (outside crop)
     function fineIdx(region, x, z) {
@@ -317,7 +411,7 @@
     function render() {
       if (!field) { drawCity(); return; }
       if (viewMode === 'heat') renderHeat(); else renderWave();
-      drawCbar(); updateDesc();
+      drawCbar(); updateDesc(); drawOverlay();
     }
     function renderHeat() {
       stopWave();
@@ -377,11 +471,277 @@
       const pxPerM = rect.width / EXT_X; let Lm = 10;
       for (const n of [10, 20, 50, 100, 200, 500]) if (n * pxPerM <= 120) Lm = n;
       $('scaleBar').style.width = (Lm * pxPerM) + 'px'; $('scaleLab').textContent = Lm + ' m';
+      syncOverlay();
     }
     addEventListener('resize', updateScale);
 
+    // ---- overlay: calc bounding box + FDTD/ONNX solver-limit outlines + receiver dot ----
+    // Keep #ov exactly over #cv (which is flex-centred and CSS-scaled), drawing in CSS px.
+    function syncOverlay() {
+      const s = $('stage').getBoundingClientRect(), r = cv.getBoundingClientRect();
+      if (!r.width) return;
+      const dpr = window.devicePixelRatio || 1;
+      ov.style.left = (r.left - s.left) + 'px'; ov.style.top = (r.top - s.top) + 'px';
+      ov.style.width = r.width + 'px'; ov.style.height = r.height + 'px';
+      ov.width = Math.max(1, Math.round(r.width * dpr)); ov.height = Math.max(1, Math.round(r.height * dpr));
+      ovcx.setTransform(dpr, 0, 0, dpr, 0, 0);   // draw in CSS px regardless of DPR
+      drawOverlay();
+    }
+    // cell-space rect {x0,x1,z0,z1} -> CSS-px rect (canvas col = NX-1-x, row = NZ-1-z)
+    function boxToCss(b, W, H) {
+      const left = (NX - b.x1) / NX * W, right = (NX - b.x0) / NX * W;
+      const top = (NZ - b.z1) / NZ * H, bot = (NZ - b.z0) / NZ * H;
+      return { x: left, y: top, w: right - left, h: bot - top };
+    }
+    // fractional cell (x,z) -> CSS-px centre
+    const cellToCss = (x, z, W, H) => ({ x: (NX - 0.5 - x) / NX * W, y: (NZ - 0.5 - z) / NZ * H });
+
+    function drawOverlay() {
+      const W = parseFloat(ov.style.width) || 0, H = parseFloat(ov.style.height) || 0;
+      if (!W || !H) return;
+      ovcx.clearRect(0, 0, W, H);
+      if (showBoxes) {
+        const f = curFMHz();
+        const drawLimit = (budget, color, label) => {
+          const lim = S.maxRegionM(f, budget);
+          const c = boxToCss(S.regionBoxCells(CITY, sel, lim), W, H);
+          ovcx.save();
+          ovcx.setLineDash([6, 4]); ovcx.lineWidth = 1.5; ovcx.strokeStyle = color;
+          ovcx.strokeRect(c.x, c.y, c.w, c.h);
+          ovcx.setLineDash([]); ovcx.fillStyle = color;
+          ovcx.font = '11px ui-monospace, monospace';
+          ovcx.fillText(`${label} ≤ ${Math.round(lim)} m`, c.x + 4, Math.max(12, c.y + 13));
+          ovcx.restore();
+        };
+        drawLimit(S.ONNX_BUDGET, 'rgba(10,127,122,0.95)', 'ONNX');
+        drawLimit(S.FDTD_BUDGET, 'rgba(178,106,0,0.98)', 'FDTD');
+        const rc = boxToCss(S.regionBoxCells(CITY, sel, curRegionM()), W, H);   // solid = the actual crop
+        ovcx.save(); ovcx.lineWidth = 2; ovcx.strokeStyle = 'rgba(220,30,30,0.98)';
+        ovcx.strokeRect(rc.x, rc.y, rc.w, rc.h); ovcx.restore();
+      }
+      if (rx) {
+        const p = cellToCss(rx.x, rx.z, W, H);
+        ovcx.save();
+        ovcx.beginPath(); ovcx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+        ovcx.fillStyle = 'rgba(220,30,30,0.98)'; ovcx.fill();
+        ovcx.lineWidth = 1.6; ovcx.strokeStyle = '#fff'; ovcx.stroke();
+        ovcx.restore();
+      }
+    }
+    $('boxToggle').addEventListener('change', e => { showBoxes = e.target.checked; drawOverlay(); });
+
+    // ---- receiver point: CRS entry -> city cell, red dot, link-budget readout ----
+    const CRS_PH = {
+      grid:   ['E (m from W edge)', 'N (m from S edge)'],   // Current Fix Grid (city sim-plane)
+      lonlat: ['longitude (°)', 'latitude (°)'],
+      merc:   ['X (m, EPSG:3857)', 'Y (m, EPSG:3857)'],
+    };
+    $('crs').addEventListener('change', () => {
+      const [a, b] = CRS_PH[$('crs').value]; $('c0').placeholder = a; $('c1').placeholder = b;
+    });
+    // typed coordinate in the chosen CRS -> fractional city cell {x,z} (geo corners are
+    // axis-aligned: lon depends only on x, lat only on z, so the inverse is analytic).
+    function coordToCell(crs, a, b) {
+      if (crs === 'grid') return { x: (NX - 1) - a / CS, z: b / CS };
+      let lon = a, lat = b;
+      if (crs === 'merc') {
+        const Rm = 6378137;
+        lon = (a / Rm) * 180 / Math.PI;
+        lat = (2 * Math.atan(Math.exp(b / Rm)) - Math.PI / 2) * 180 / Math.PI;
+      }
+      const lon0 = CN.x0z0[0], lon1 = CN.x1z0[0], lat0 = CN.x0z0[1], lat1 = CN.x0z1[1];
+      return { x: (lon - lon0) / (lon1 - lon0) * (NX - 1), z: (lat - lat0) / (lat1 - lat0) * (NZ - 1) };
+    }
+    function updateRxReadout() {
+      if (!rx) { rxMetrics = null; return; }
+      const f = curFMHz(), d = Math.hypot(rx.x - sel.vx, rx.z - sel.vz) * CS;
+      const lb = S.linkBudget({
+        fMHz: f, d_m: d,
+        n: parseFloat($('ple').value) || 3.2,
+        eirpDbm: parseFloat($('eirp').value) || 63,
+        bwMHz: parseFloat($('bw').value) || undefined,
+      });
+      rxMetrics = { d, f, ...lb };
+      $('readout').textContent =
+        `RX ${d.toFixed(0)} m · PL ${lb.PL.toFixed(1)} dB · RSRP ${lb.rsrp.toFixed(1)} dBm · ` +
+        `RSSI ${lb.rssi.toFixed(1)} dBm · RSRQ ${lb.rsrq.toFixed(1)} dB`;
+    }
+    const rxRow = (k, v) => `<div class="rxRow"><span>${k}</span><b>${v}</b></div>`;
+    function showRxTip(px, py) {
+      const m = rxMetrics; if (!m) return;
+      const t = $('rxTip');
+      t.innerHTML =
+        `<div class="rxHead">Receiver — ${sel.site.split('_')[0]} · ${Math.round(m.f)} MHz</div>` +
+        rxRow('Distance to Tx', m.d.toFixed(1) + ' m') +
+        rxRow('Path loss (geom)', m.PL.toFixed(1) + ' dB') +
+        rxRow('RSRP', m.rsrp.toFixed(1) + ' dBm') +
+        rxRow('Channel BW', m.bw + ' MHz · ' + m.nRB + ' RB') +
+        rxRow('RSSI', m.rssi.toFixed(1) + ' dBm') +
+        rxRow('RSRQ', m.rsrq.toFixed(1) + ' dB');
+      t.style.display = 'block';
+      t.style.left = Math.min(px + 14, innerWidth - t.offsetWidth - 6) + 'px';
+      t.style.top = Math.min(py + 14, innerHeight - t.offsetHeight - 6) + 'px';
+    }
+    const hideRxTip = () => { $('rxTip').style.display = 'none'; };
+
+    $('place').onclick = () => {
+      const crs = $('crs').value, a = parseFloat($('c0').value), b = parseFloat($('c1').value);
+      if (!isFinite(a) || !isFinite(b)) { $('probeMsg').textContent = 'enter both coordinates'; return; }
+      const { x, z } = coordToCell(crs, a, b);
+      if (x < 0 || z < 0 || x >= NX || z >= NZ) {
+        rx = null; drawOverlay(); $('probeMsg').textContent = '⚠ point is outside the mapped city'; return;
+      }
+      rx = { x, z, h: parseFloat($('c2').value) };
+      const box = S.regionBoxCells(CITY, sel, curRegionM());
+      const inside = x >= box.x0 && x < box.x1 && z >= box.z0 && z < box.z1;
+      $('probeMsg').textContent = inside ? '✓ inside calc box — valid receiver' : '⚠ outside the calc box';
+      $('rxGroup').style.display = ''; updateRxReadout(); drawOverlay();
+    };
+    $('clearRx').onclick = () => {
+      rx = null; rxMetrics = null; hideRxTip(); drawOverlay();
+      $('probeMsg').textContent = ''; $('readout').textContent = '';
+    };
+    ['eirp', 'ple', 'bw'].forEach(id => $(id).addEventListener('input', () => { updateRxReadout(); if (field) scoreWalkRsrp(); }));
+
+    // ---- surrogate_predicted_RSRP vs walk-test_RSRP + Spearman ρ ----
+    // Re-anchor the relative |U| envelope to absolute RSRP via free-space at a near-Tx
+    // reference cell (contract: "re-anchor to FSPL for absolute dB"), then sample at
+    // walk points whose PCI matches the selected station and that fall inside the calc box.
+    function lonLatToCell(lon, lat) {
+      const lon0 = CN.x0z0[0], lon1 = CN.x1z0[0], lat0 = CN.x0z0[1], lat1 = CN.x0z1[1];
+      return { x: (lon - lon0) / (lon1 - lon0) * (NX - 1), z: (lat - lat0) / (lat1 - lat0) * (NZ - 1) };
+    }
+    function fieldAnchor(R, db, fMHz, eirpDbm) {
+      // Prefer an air cell ~8–20 m from Tx on the fine grid; fall back to Tx itself.
+      const targets = [12, 8, 16, 20, 6, 4];
+      for (const dm of targets) {
+        const cells = Math.max(1, Math.round(dm / R.h_m));
+        for (const [di, dj] of [[cells, 0], [0, cells], [-cells, 0], [0, -cells], [cells, cells]]) {
+          const i = R.tx.i + di, j = R.tx.j + dj;
+          if (i < 0 || j < 0 || i >= R.H || j >= R.W) continue;
+          const fi = i * R.W + j;
+          if (SOLID(R.classes[fi]) || !isFinite(db[fi])) continue;
+          const d = Math.hypot(di, dj) * R.h_m;
+          return { db0: db[fi], rsrp0: eirpDbm - S.fsplDb(fMHz, d) };
+        }
+      }
+      const fi = R.tx.i * R.W + R.tx.j;
+      return { db0: db[fi] || 0, rsrp0: eirpDbm - S.fsplDb(fMHz, Math.max(R.h_m, 1)) };
+    }
+    function scoreWalkRsrp() {
+      const panel = $('walkPanel'), meta = $('walkMeta'), sc = $('walkScatter');
+      if (!field) { panel.classList.remove('on'); return; }
+      const WALK = window.OUTDOOR_WALK;
+      if (!WALK || !WALK.pts || !WALK.pts.length) {
+        panel.classList.add('on');
+        meta.innerHTML = 'Walk-test data missing (<code>Data/outdoor_walk.js</code>).';
+        return;
+      }
+      const pci = String(sel.pci || '');
+      if (!pci) {
+        panel.classList.add('on');
+        meta.innerHTML = `<b>Walk-test score</b><br>Station ${sel.site.split('_')[0]} has no PCI — cannot match walk points.`;
+        return;
+      }
+      const eirp = parseFloat($('eirp').value) || 63;
+      const R = field.region, db = field.db, fMHz = field.fMHz;
+      const box = S.regionBoxCells(CITY, sel, curRegionM());
+      const anchor = fieldAnchor(R, db, fMHz, eirp);
+      const pred = [], meas = [];
+      // pts: [lon, lat, rsrp, pci, opIdx, netIdx, bandIdx, chIdx]
+      for (let i = 0; i < WALK.pts.length; i++) {
+        const p = WALK.pts[i];
+        if (String(p[3]) !== pci) continue;
+        const { x, z } = lonLatToCell(p[0], p[1]);
+        if (x < box.x0 || x >= box.x1 || z < box.z0 || z >= box.z1) continue;
+        const fi = fineIdx(R, x, z);
+        if (fi < 0 || SOLID(R.classes[fi]) || !isFinite(db[fi])) continue;
+        const rsrpHat = anchor.rsrp0 + (db[fi] - anchor.db0);
+        if (!isFinite(rsrpHat) || !isFinite(p[2])) continue;
+        pred.push(rsrpHat); meas.push(p[2]);
+      }
+      panel.classList.add('on');
+      if (pred.length < 3) {
+        meta.innerHTML =
+          `<b>Walk-test score</b> · PCI ${pci}<br>` +
+          `Only ${pred.length} walk point(s) inside the calc box for this PCI — need ≥3 for Spearman. ` +
+          `Widen “Coverage region” or pick another station.`;
+        drawWalkScatter([], []);
+        return;
+      }
+      const rho = S.spearmanRho(pred, meas);
+      const q = !isFinite(rho) ? ['n/a', '#888']
+        : rho >= 0.8 ? ['Excellent', '#1a7f37']
+        : rho >= 0.6 ? ['Good', '#2d8a4e']
+        : rho >= 0.4 ? ['Fair', '#b26a00']
+        : rho >= 0.2 ? ['Weak', '#c45c00']
+        : ['Poor', '#c0392b'];
+      meta.innerHTML =
+        `<b>surrogate_predicted_RSRP vs walk-test_RSRP</b><br>` +
+        `PCI ${pci} · ${sel.site.split('_')[0]} · ${Math.round(fMHz)} MHz · ${field.solver.toUpperCase()} · n=${pred.length}<br>` +
+        `Spearman ρ = <span class="rho" style="color:${q[1]}">${isFinite(rho) ? rho.toFixed(3) : 'n/a'}</span> · ` +
+        `<span style="color:${q[1]}">${q[0]}</span><br>` +
+        `<span class="note">Predicted RSRP = EIRP−FSPL(ref) + (|U|_dB − |U|_ref) — relative surrogate field re-anchored to free-space.</span>`;
+      drawWalkScatter(pred, meas);
+    }
+    function drawWalkScatter(pred, meas) {
+      const cv = $('walkScatter'), c = cv.getContext('2d');
+      const W = cv.width, H = cv.height, pad = 28;
+      c.clearRect(0, 0, W, H);
+      c.fillStyle = '#fafbfa'; c.fillRect(0, 0, W, H);
+      if (pred.length < 2) {
+        c.fillStyle = '#5b6662'; c.font = '11px sans-serif';
+        c.fillText('no paired points', 40, H / 2); return;
+      }
+      let lo = Infinity, hi = -Infinity;
+      for (let i = 0; i < pred.length; i++) {
+        lo = Math.min(lo, pred[i], meas[i]); hi = Math.max(hi, pred[i], meas[i]);
+      }
+      if (!(hi > lo)) { hi = lo + 1; }
+      const padDb = (hi - lo) * 0.05; lo -= padDb; hi += padDb;
+      const xOf = v => pad + (v - lo) / (hi - lo) * (W - pad - 8);
+      const yOf = v => (H - pad) - (v - lo) / (hi - lo) * (H - pad - 8);
+      // 1:1 line
+      c.strokeStyle = '#c5cdc8'; c.setLineDash([4, 3]); c.beginPath();
+      c.moveTo(xOf(lo), yOf(lo)); c.lineTo(xOf(hi), yOf(hi)); c.stroke(); c.setLineDash([]);
+      // points
+      c.fillStyle = 'rgba(10,127,122,0.55)';
+      for (let i = 0; i < pred.length; i++) {
+        c.beginPath(); c.arc(xOf(pred[i]), yOf(meas[i]), 2.2, 0, Math.PI * 2); c.fill();
+      }
+      c.fillStyle = '#5b6662'; c.font = '9px ui-monospace,monospace';
+      c.fillText('pred RSRP →', pad, H - 8);
+      c.save(); c.translate(10, H / 2); c.rotate(-Math.PI / 2);
+      c.fillText('walk RSRP', 0, 0); c.restore();
+      c.fillText(`${lo.toFixed(0)}`, pad, H - 16);
+      c.fillText(`${hi.toFixed(0)}`, W - 28, H - 16);
+    }
+
+    // ---- PNG download: composite the map + overlay at display resolution ----
+    $('dlPng').onclick = () => {
+      const r = cv.getBoundingClientRect();
+      const out = document.createElement('canvas');
+      out.width = Math.max(1, Math.round(r.width)); out.height = Math.max(1, Math.round(r.height));
+      const o = out.getContext('2d'); o.imageSmoothingEnabled = false;
+      o.drawImage(cv, 0, 0, out.width, out.height);      // NX×NZ field -> display size
+      o.drawImage(ov, 0, 0, out.width, out.height);      // boxes + dot on top
+      out.toBlob(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `sim_v3_outdoor_${sel.site.split('_')[0]}_${Math.round(curFMHz())}MHz.png`;
+        a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+      }, 'image/png');
+    };
+
     cv.addEventListener('mousemove', ev => {
       const r = cv.getBoundingClientRect();
+      // hover the receiver dot -> floating link-budget tooltip
+      if (rx && rxMetrics) {
+        const p = cellToCss(rx.x, rx.z, r.width, r.height);
+        const dx = (ev.clientX - r.left) - p.x, dy = (ev.clientY - r.top) - p.y;
+        if (dx * dx + dy * dy <= 81) { showRxTip(ev.clientX, ev.clientY); return; }
+      }
+      hideRxTip();
       const pcol = Math.floor((ev.clientX - r.left) * NX / r.width), prow = Math.floor((ev.clientY - r.top) * NZ / r.height);
       const { x, z } = pxToCity(pcol, prow);
       if (x < 0 || z < 0 || x >= NX || z >= NZ) return;
@@ -391,6 +751,7 @@
       const c = CITY.grid[x * NZ + z]; if (SOLID(c)) { const m = MATS.find(mm => mm.id === c); if (m) s += ` · ${m.name}`; }
       $('readout').textContent = s;
     });
+    cv.addEventListener('mouseleave', hideRxTip);
 
     function updateDesc() {
       const f = field ? `${field.fMHz} MHz` : 'the selected band';
@@ -402,16 +763,18 @@
         `The map is <b>north-up, east-right</b>; buildings are drawn from OSM footprints as <b>concrete cores with glass façades</b>, plus <b>foliage</b>, each with its own ITU permittivity and loss (legend at left). ` +
         `<b>Heatmap</b> shows |U| as relative field strength in dB (0 dB = strongest near the antenna; range adjustable). ` +
         `<b>Wavefront</b> shows the instantaneous Re{U·e<sup>jωt</sup>} so you can watch the beam form, diffract around corners, penetrate glass, and shadow behind concrete. ` +
-        `The antenna directivity (boresight + family) shapes the beam. Values are <i>relative</i> field strength, not calibrated dBm (an EIRP-anchored RSRP mode is a follow-on).`;
+        `The antenna directivity (boresight + family) shapes the beam. The coverage heatmap is <i>relative</i> field strength; ` +
+        `for an absolute link budget, use <b>Get a Point</b> (toolbar above: Mercator / Lat·Long / Current Fix Grid) — a red receiver dot reports distance-to-Tx, geometric path loss, channel BW, and EIRP-anchored <b>RSRP / RSSI / RSRQ</b>. ` +
+        `After Generate, the panel below scores <b>surrogate_predicted_RSRP vs walk-test_RSRP</b> (Spearman ρ) for the station’s PCI inside the calc box.`;
     }
 
     // ---- init: draw the city, load contract + ONNX ----
-    fillBands(); fillAnts(); updateResNote(); drawCity();
+    fillBands(); fillAnts(); autofillBw(); updateResNote(); drawCity();
     $('hudMeta').textContent = `${NX}×${NZ} grid · ${EXT_X.toFixed(0)} × ${EXT_Z.toFixed(0)} m · cell ${CS} m`;
     requestAnimationFrame(updateScale);
     drawCbar(); updateDesc();
     (async function init() {
-      try { contract = await S.loadContractBs(CONTRACT_URL); fillBands(); fillAnts(); updateResNote(); }
+      try { contract = await S.loadContractBs(CONTRACT_URL); fillBands(); fillAnts(); autofillBw(); updateResNote(); }
       catch (e) { onnxWhy = 'contract fetch failed (' + e.message + ')'; reflectEngine(); }
       if (location.protocol === 'file:') { onnxWhy = 'needs http (file:// blocks model fetch)'; reflectEngine(); setStatus('ready — serve over http to enable ONNX'); return; }
       if (!window.ort) { onnxWhy = 'onnxruntime-web not loaded'; reflectEngine(); setStatus('ready (FDTD only — ort missing)'); return; }

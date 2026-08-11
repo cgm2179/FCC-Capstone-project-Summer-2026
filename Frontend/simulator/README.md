@@ -78,6 +78,14 @@ allow-listed like `fw_unet2d.onnx`). Re-export after retraining with
 `fw_export.py --model bs` (see `EXPORT_ONNX.md`). Without the weights,
 **Auto → FDTD** and **ONNX → a clear error** (no silent fallback).
 
+**Get a Point (receiver probe).** Toolbar above the map: pick a CRS
+(**Mercator**, **Lat/Long**, or **Current Fix Grid**), type 2D/3D coordinates,
+**Place receiver** → red dot. Hover reports Distance-to-Tx, geometric PL, RSRP,
+channel BW (+ RB count), RSSI, and RSRQ (`linkBudget` in `fw_solve2d_bs.js`).
+Solid red outline = calc box for the next Generate; dashed teal/orange = ONNX/FDTD
+solver limits. After Generate, a scatter panel scores **surrogate_predicted_RSRP
+vs walk-test_RSRP** (Spearman ρ) for the station’s PCI using `Data/outdoor_walk.js`.
+
 It embeds in the dashboard via the **"Outdoor Full-Wave (SIM V3)"** toggle in
 `Frontend_Data_Display.html` (`#sim2dPanel`), revealed by `Frontend/landing/landing.js`
 whenever the workspace is entered in **outdoor + 2D** mode. The legacy path-loss
