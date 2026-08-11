@@ -13,7 +13,7 @@ this section only captures the non-obvious, durable gotchas for future cloud age
 
 ### Contributor / LLM authorship (required)
 - The **only** authorized contributor is **cgm2179** (`cgm2179@columbia.edu`).
-  See `CONTRIBUTORS.md`, `.github/CODEOWNERS`, and `.mailmap`.
+  See `.github/CODEOWNERS`.
 - Every git commit Author **and** Committer must be `cgm2179 <cgm2179@columbia.edu>`.
   Do **not** use `Cursor Agent` / `cursoragent@cursor.com` as Author or Committer.
 - Do **not** add `Co-authored-by: Cursor Agent <cursoragent@cursor.com>` (or any
