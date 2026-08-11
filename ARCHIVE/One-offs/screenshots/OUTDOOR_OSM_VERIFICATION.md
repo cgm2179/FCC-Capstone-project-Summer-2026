@@ -98,8 +98,8 @@ Successfully verified outdoor 3D base stations displayed on OSM buildings view a
 
 ## Files Generated
 
-1. `/workspace/screenshots/outdoor_forte_osm_correct.webp` - Forte Hall on OSM building
-2. `/workspace/screenshots/outdoor_2d_pins_updated.webp` - 2D map with all base station pins
+1. `/workspace/ARCHIVE/One-offs/screenshots/outdoor_forte_osm_correct.webp` - Forte Hall on OSM building
+2. `/workspace/ARCHIVE/One-offs/screenshots/outdoor_2d_pins_updated.webp` - 2D map with all base station pins
 3. `/opt/cursor/artifacts/screenshots/outdoor_forte_osm_correct.webp` - (copy)
 4. `/opt/cursor/artifacts/screenshots/outdoor_2d_pins_updated.webp` - (copy)
 
