@@ -168,7 +168,7 @@
   <!-- onnxruntime-web (same CDN build the dashboard uses) -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
   <!-- the baked penetrable NoMa city grid + stations; sets window.NOMA_CITY_2D -->
-  <script src="../../Data/noma_city2d.js"></script>
+  <script src="../Data/noma_city2d.js"></script>
 
   <script type="module">
     import * as S from './fw_solve2d_bs.js';
@@ -192,8 +192,8 @@
       $('barPct').textContent = lab;
     };
 
-    const MODEL = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_bs.onnx';
-    const CONTRACT_URL = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_bs.json';
+    const MODEL = '../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_bs.onnx';
+    const CONTRACT_URL = '../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_bs.json';
 
     // ---- decode the baked city ----
     if (!window.NOMA_CITY_2D) { setStatus('noma_city2d.js failed to load (serve from the repo root over http).', true); throw new Error('no NOMA_CITY_2D'); }

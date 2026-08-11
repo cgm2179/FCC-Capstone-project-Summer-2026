@@ -388,7 +388,7 @@
     if (outBar) outBar.style.display = isOutdoor2d ? '' : 'none';
     if (!isOutdoor2d && outWrap) outWrap.style.display = 'none';
     if (isOutdoor2d && outFrame && !outFrame.getAttribute('src')) {   // auto-open on first outdoor entry
-      outFrame.setAttribute('src', 'Frontend/simulator/fw_studio2d_outdoor.html');
+      outFrame.setAttribute('src', 'Simulation/fw_studio2d_outdoor.html');
       if (outWrap) outWrap.style.display = 'block';
       if (outToggle) outToggle.innerHTML = '▼ Outdoor Full-Wave (SIM V3 · base-station coverage)';
     }
@@ -421,7 +421,7 @@
       let f = oHost.querySelector('iframe');
       if (!f) {
         f = document.createElement('iframe');
-        f.src = 'Frontend/osm3d/outdoor_view.html?v=osm3d-three1';
+        f.src = 'Map%20Coverage/outdoor_view.html?v=osm3d-three1';
         f.title = 'NoMa outdoor view';
         f.style.cssText = 'width:100%; height:100%; border:0; display:block;';
         oHost.appendChild(f);
@@ -442,7 +442,7 @@
     if (timeTab) timeTab.classList.toggle('outdoor-mode', outdoor);
     if (tHost && outdoor && !tHost.querySelector('iframe')) {
       const tf = document.createElement('iframe');
-      tf.src = 'Frontend/osm3d/outdoor_timelapse.html';
+      tf.src = 'Time%20Elapse/outdoor_timelapse.html';
       tf.title = 'NoMa outdoor Time Elapse';
       tf.style.cssText = 'width:100%; height:1200px; border:0; display:block;';
       // Push the current sidebar filter once it's live (it may load after the map frame already broadcast).

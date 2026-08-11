@@ -79,7 +79,7 @@ Alternatives:
 - **VS Code "Live Server"** extension → *Go Live* (serves the workspace over http).
   A `.claude/launch.json` `static` config is already set up for the in-app preview.
 - Serve from the **repo root** specifically — the studios reference the model with
-  `../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/…`, which only
+  `../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/…`, which only
   resolves when the root is the server root.
 
 ## 4. Verify it loaded
