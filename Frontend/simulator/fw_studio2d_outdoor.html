@@ -23,13 +23,15 @@
     #bar { position:relative; height:18px; background:rgba(10,127,122,.15); border-radius:5px; overflow:hidden; margin-top:8px; display:none; }
     #barFill { height:100%; width:0%; background:var(--accent); transition:width .18s linear; }
     #barPct { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:0.72rem; font-weight:700; color:var(--ink); letter-spacing:.02em; }
-    #view { flex:1; display:flex; flex-direction:column; background:#eceef0; overflow:hidden; }
-    #stage { flex:1; position:relative; display:flex; align-items:center; justify-content:center; min-height:0; }
+    #view { flex:1; display:flex; flex-direction:column; background:#eceef0; overflow:hidden; min-width:0; }
+    #stage { flex:1 1 auto; position:relative; display:flex; align-items:center; justify-content:center;
+             min-height:240px; overflow:hidden; padding:8px; }
     #desc { flex:none; padding:9px 16px 11px; border-top:1px solid var(--line); background:var(--panel);
-            font-size:0.78rem; line-height:1.45; color:var(--muted); max-height:32%; overflow-y:auto; }
+            font-size:0.78rem; line-height:1.45; color:var(--muted); max-height:18%; overflow-y:auto; }
     #desc b { color:var(--ink); } #desc sup { font-size:0.7em; }
     .row { display:flex; gap:8px; } .row > label { flex:1; font-size:0.72rem; color:var(--muted); }
-    #cv { image-rendering:pixelated; box-shadow:0 2px 18px rgba(0,0,0,.12); max-width:96%; max-height:92%; cursor:crosshair; }
+    #cv { image-rendering:pixelated; box-shadow:0 2px 18px rgba(0,0,0,.12); cursor:crosshair;
+          width:auto; height:auto; max-width:100%; max-height:100%; object-fit:contain; }
     #hud { position:absolute; top:12px; left:14px; font-size:0.75rem; color:var(--ink); pointer-events:none; text-shadow:0 1px 2px #fff; }
     #cbar { position:absolute; right:16px; top:16px; width:158px; }
     #cbar canvas { width:158px; height:12px; border-radius:3px; border:1px solid var(--line); }
@@ -67,13 +69,20 @@
     #rxTip .rxRow { display:flex; justify-content:space-between; gap:14px; padding:1px 0; }
     #rxTip .rxRow span { color:var(--muted); } #rxTip .rxRow b { font-family:ui-monospace,monospace; }
     /* surrogate vs walk-test RSRP scatter */
-    #walkPanel { flex:none; display:none; padding:10px 14px 12px; border-top:1px solid var(--line);
-                 background:var(--panel); gap:14px; align-items:flex-start; }
+    #walkPanel { flex:none; display:none; padding:8px 14px; border-top:1px solid var(--line);
+                 background:var(--panel); gap:14px; align-items:flex-start; max-height:200px; overflow:auto; }
     #walkPanel.on { display:flex; }
-    #walkScatter { width:220px; height:160px; border:1px solid var(--line); border-radius:8px; background:#fafbfa; flex:none; }
+    #walkScatter { width:200px; height:140px; border:1px solid var(--line); border-radius:8px; background:#fafbfa; flex:none; }
     #walkMeta { font-size:0.78rem; color:var(--muted); line-height:1.45; max-width:420px; }
     #walkMeta b { color:var(--ink); }
     #walkMeta .rho { font-size:1.05rem; font-weight:700; }
+    #view:fullscreen, #view:-webkit-full-screen { background:#eceef0; width:100vw; height:100vh; }
+    #view:fullscreen #stage, #view:-webkit-full-screen #stage { flex:1; min-height:0; }
+    /* CSS fallback when Fullscreen API is blocked (e.g. some iframe embeds) */
+    body.fs-fallback-body { overflow:hidden; }
+    #view.fs-fallback { position:fixed; inset:0; z-index:50; width:100vw; height:100vh;
+                        background:#eceef0; display:flex; flex-direction:column; }
+    #fsBtn.on { background:#1f2a2a; color:#fff; }
   </style>
 </head>
 <body>
@@ -156,6 +165,7 @@
     </div>
     <div id="actionBar">
       <button class="btn2" id="dlPng">⬇ Download PNG</button>
+      <button class="btn2 ghost" id="fsBtn" title="Expand the map to fill the screen">⛶ Full screen</button>
       <span class="note" id="dlNote">Saves the map + coverage + calc boxes + receiver dot.</span>
       <span class="spacer"></span>
     </div>
@@ -212,10 +222,23 @@
 
     // ---- canvas: full city, north-up / east-right (X = -easting runs west; Z runs north) ----
     const cv = $('cv'); cv.width = NX; cv.height = NZ;
-    cv.style.width = Math.min(NX * 1.15, 900) + 'px';
     const cx = cv.getContext('2d');
     const ov = $('ov'), ovcx = ov.getContext('2d');   // transparent overlay: calc boxes + Rx dot
     const EXT_X = NX * CS, EXT_Z = NZ * CS;          // real extent (m)
+    // Fit the bitmap into #stage WITHOUT distorting aspect ratio (was squashed when only
+    // CSS width was set and max-height clipped the height).
+    function fitCanvas() {
+      const stage = $('stage');
+      const availW = Math.max(120, stage.clientWidth - 16);
+      const availH = Math.max(120, stage.clientHeight - 16);
+      const scale = Math.min(availW / NX, availH / NZ);
+      const w = Math.max(1, Math.floor(NX * scale));
+      const h = Math.max(1, Math.floor(NZ * scale));
+      cv.style.width = w + 'px';
+      cv.style.height = h + 'px';
+      syncOverlay();
+      updateScaleBar(w);
+    }
     // native city cell (x=X row, z=Z col) -> flipped canvas pixel index (north up, east right)
     const dstCity = (x, z) => ((NZ - 1 - z) * NX + (NX - 1 - x));
     // canvas pixel (px col, py row) -> native city (x, z)
@@ -466,14 +489,19 @@
       $('cbLo').textContent = wave ? '− trough (behind)' : `weak · ${rangeLo} dB`;
       $('cbHi').textContent = wave ? 'crest + (toward)' : `${rangeHi} dB · strong`;
     }
-    function updateScale() {
-      const rect = cv.getBoundingClientRect(); if (!rect.width) return;
-      const pxPerM = rect.width / EXT_X; let Lm = 10;
+    function updateScaleBar(cssW) {
+      const w = cssW || cv.getBoundingClientRect().width;
+      if (!w) return;
+      const pxPerM = w / EXT_X; let Lm = 10;
       for (const n of [10, 20, 50, 100, 200, 500]) if (n * pxPerM <= 120) Lm = n;
       $('scaleBar').style.width = (Lm * pxPerM) + 'px'; $('scaleLab').textContent = Lm + ' m';
-      syncOverlay();
     }
+    function updateScale() { fitCanvas(); }
     addEventListener('resize', updateScale);
+    // Re-fit when the stage itself changes size (iframe / fullscreen / walk panel).
+    if (window.ResizeObserver) {
+      new ResizeObserver(() => fitCanvas()).observe($('stage'));
+    }
 
     // ---- overlay: calc bounding box + FDTD/ONNX solver-limit outlines + receiver dot ----
     // Keep #ov exactly over #cv (which is flex-centred and CSS-scaled), drawing in CSS px.
@@ -732,6 +760,45 @@
         a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1500);
       }, 'image/png');
     };
+
+    // ---- Full screen: expand #view so the map gets a normal, undistorted window ----
+    function isFs() {
+      return !!(document.fullscreenElement || document.webkitFullscreenElement ||
+                $('view').classList.contains('fs-fallback'));
+    }
+    function reflectFs() {
+      const on = isFs();
+      $('fsBtn').classList.toggle('on', on);
+      $('fsBtn').textContent = on ? '⛶ Exit full screen' : '⛶ Full screen';
+      requestAnimationFrame(fitCanvas);
+    }
+    $('fsBtn').onclick = async () => {
+      const el = $('view');
+      try {
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+          if (document.exitFullscreen) await document.exitFullscreen();
+          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        } else if (el.classList.contains('fs-fallback')) {
+          el.classList.remove('fs-fallback');
+          document.body.classList.remove('fs-fallback-body');
+          reflectFs();
+        } else if (el.requestFullscreen) {
+          await el.requestFullscreen();
+        } else if (el.webkitRequestFullscreen) {
+          el.webkitRequestFullscreen();
+        } else {
+          el.classList.add('fs-fallback');
+          document.body.classList.add('fs-fallback-body');
+          reflectFs();
+        }
+      } catch (e) {
+        el.classList.toggle('fs-fallback');
+        document.body.classList.toggle('fs-fallback-body', el.classList.contains('fs-fallback'));
+        reflectFs();
+      }
+    };
+    document.addEventListener('fullscreenchange', reflectFs);
+    document.addEventListener('webkitfullscreenchange', reflectFs);
 
     cv.addEventListener('mousemove', ev => {
       const r = cv.getBoundingClientRect();
