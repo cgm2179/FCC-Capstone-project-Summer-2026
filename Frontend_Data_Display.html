@@ -398,8 +398,34 @@
       </div>
 
       <div id="histTab" class="tab-content" style="display: none;">
-        <div id="histMetric"></div>
-        <div id="histTime"></div>
+        <!-- Statistics sub-tabs: Distributions (existing histograms) · Antenna Pattern
+             (measured polar pattern per base-station sector — Indoor + Outdoor). -->
+        <div class="hist-subtabs" role="tablist" aria-label="Statistics views">
+          <button type="button" class="hist-subtab active" id="histSubDistBtn" data-hist-sub="dist">Distributions</button>
+          <button type="button" class="hist-subtab" id="histSubAntBtn" data-hist-sub="antenna">Antenna Pattern</button>
+        </div>
+
+        <div id="histDistPane">
+          <div id="histMetric"></div>
+          <div id="histTime"></div>
+        </div>
+
+        <div id="histAntPane" style="display: none;">
+          <p class="sub">Measured radiation pattern for a surveyed base-station sector: the selected metric vs. azimuth from the transmitter to each walk point, with a binned mean envelope. Indoor points use the floor-plan georeference (not raw GPS); Outdoor uses the 7/24 NoMa walk (RSRP).</p>
+          <div class="ant-controls">
+            <label for="antSector">Sector
+              <select id="antSector"></select>
+            </label>
+            <label for="antBins">Azimuth bins
+              <input type="number" id="antBins" min="12" max="72" step="6" value="36" />
+            </label>
+            <label class="ant-check" for="antDistNorm" title="Add 20·log₁₀(d / d₀) so free-space range falloff does not dominate the lobe shape. d₀ = median sample distance.">
+              <input type="checkbox" id="antDistNorm" /> Distance-normalize (≈FSPL)
+            </label>
+          </div>
+          <div id="antPatternPlot"></div>
+          <div id="antPatternStats" class="stats"></div>
+        </div>
       </div>
 
       <div id="timeTab" class="tab-content" style="display: none;">

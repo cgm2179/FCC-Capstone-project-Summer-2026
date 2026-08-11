@@ -58,6 +58,17 @@
     const timeStatsEl = document.getElementById('timeStats');
     const histMetricEl = document.getElementById('histMetric');
     const histTimeEl = document.getElementById('histTime');
+    const histDistPaneEl = document.getElementById('histDistPane');
+    const histAntPaneEl = document.getElementById('histAntPane');
+    const histSubDistBtn = document.getElementById('histSubDistBtn');
+    const histSubAntBtn = document.getElementById('histSubAntBtn');
+    const antSectorEl = document.getElementById('antSector');
+    const antBinsEl = document.getElementById('antBins');
+    const antDistNormEl = document.getElementById('antDistNorm');
+    const antPatternPlotEl = document.getElementById('antPatternPlot');
+    const antPatternStatsEl = document.getElementById('antPatternStats');
+    let histSubTab = 'dist';   // 'dist' | 'antenna'
+    let outdoorWalkPromise = null;
     const playbackMapEl = document.getElementById('playbackMap');
     const playbackHistogramEl = document.getElementById('playbackHistogram');
     const playbackLineEl = document.getElementById('playbackLine');
@@ -1062,6 +1073,372 @@
       }, { responsive: true, displaylogo: false });
     }
 
+    // ---- Antenna Pattern (Statistics sub-tab) --------------------------------
+    // Measured polar pattern per surveyed base-station sector: metric vs. azimuth
+    // from the Tx to each walk point, plus a binned mean envelope. Indoor uses
+    // floor-plan px→lon/lat (never raw indoor GPS); Outdoor uses OUTDOOR_WALK.
+
+    function isOutdoorWorkspace() {
+      return !!(window.appMode && window.appMode.environment === 'outdoor');
+    }
+
+    // Inline of georef.js pxToLonlat — dashboard.js is a classic script and cannot
+    // import the ES module. Affines come from window.FLOORPLAN_META.
+    function pxToLonlatInline(px, py) {
+      const meta = window.FLOORPLAN_META;
+      if (!meta || !meta.affine_px_to_lonlat) return null;
+      const A = meta.affine_px_to_lonlat;
+      return {
+        lon: A[0][0] * px + A[0][1] * py + A[0][2],
+        lat: A[1][0] * px + A[1][1] * py + A[1][2]
+      };
+    }
+
+    function bearingDeg(lat1, lon1, lat2, lon2) {
+      const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
+      const Δλ = (lon2 - lon1) * Math.PI / 180;
+      const y = Math.sin(Δλ) * Math.cos(φ2);
+      const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+      return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+
+    function haversineM(lat1, lon1, lat2, lon2) {
+      const R = 6371000;
+      const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
+      const Δφ = (lat2 - lat1) * Math.PI / 180;
+      const Δλ = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+      return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+    }
+
+    function compassLabel(deg) {
+      const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+                    'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+      return dirs[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
+    }
+
+    // Lazy-load Data/outdoor_walk.js if somehow absent (main HTML already loads it
+    // for the 3D OSM ground — this is the defensive path used when that script
+    // tag is stripped or blocked).
+    function ensureOutdoorWalk() {
+      if (window.OUTDOOR_WALK && Array.isArray(window.OUTDOOR_WALK.pts)) {
+        return Promise.resolve(window.OUTDOOR_WALK);
+      }
+      if (outdoorWalkPromise) return outdoorWalkPromise;
+      outdoorWalkPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'Data/outdoor_walk.js';
+        s.onload = () => {
+          if (window.OUTDOOR_WALK) resolve(window.OUTDOOR_WALK);
+          else reject(new Error('OUTDOOR_WALK missing after load'));
+        };
+        s.onerror = () => reject(new Error('Failed to load outdoor_walk.js'));
+        document.head.appendChild(s);
+      });
+      return outdoorWalkPromise;
+    }
+
+    function unpackOutdoorWalk(W) {
+      return (W.pts || []).map(r => ({
+        lon: r[0], lat: r[1], rsrp: r[2], pci: r[3],
+        op: W.ops[r[4]], network: W.nets[r[5]], band: W.bands[r[6]], ch: W.chs[r[7]]
+      }));
+    }
+
+    // Unique (site, PCI) sectors with a known transmitter lat/lon. Point counts
+    // come from the active environment so empty sectors stay out of the picker.
+    function listAntennaSectors(pointCounts) {
+      const out = [];
+      for (const s of (window.BASE_STATIONS || [])) {
+        if (s.lat == null || s.lon == null) continue;
+        const seen = new Set();
+        for (const se of (s.sectors || [])) {
+          const pci = se.pci;
+          if (pci == null || seen.has(pci)) continue;
+          seen.add(pci);
+          const n = pointCounts.get(Number(pci)) || 0;
+          if (n <= 0) continue;
+          out.push({
+            key: `${s.site_id}::${pci}`,
+            site_id: s.site_id,
+            name: s.name || s.site_id,
+            lat: s.lat,
+            lon: s.lon,
+            pci: Number(pci),
+            carrier: se.carrier || '',
+            n
+          });
+        }
+      }
+      out.sort((a, b) => b.n - a.n || a.name.localeCompare(b.name) || a.pci - b.pci);
+      return out;
+    }
+
+    function populateAntSectors(sectors) {
+      const prev = antSectorEl.value;
+      antSectorEl.innerHTML = '';
+      if (!sectors.length) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'No base-station sectors in this walk';
+        antSectorEl.appendChild(opt);
+        return;
+      }
+      for (const s of sectors) {
+        const opt = document.createElement('option');
+        opt.value = s.key;
+        const carrier = s.carrier ? `${s.carrier} · ` : '';
+        opt.textContent = `${s.name} · PCI ${s.pci} (${carrier}${s.n} pts)`;
+        antSectorEl.appendChild(opt);
+      }
+      antSectorEl.value = [...antSectorEl.options].some(o => o.value === prev) ? prev : sectors[0].key;
+    }
+
+    function indoorLonLat(r) {
+      if (Number.isFinite(r.px) && Number.isFinite(r.py)) {
+        const ll = pxToLonlatInline(r.px, r.py);
+        if (ll && Number.isFinite(ll.lat) && Number.isFinite(ll.lon)) return ll;
+      }
+      // Fallback only if georef is unavailable — raw indoor GPS is known-bad.
+      if (Number.isFinite(r.latitude) && Number.isFinite(r.longitude)) {
+        return { lat: r.latitude, lon: r.longitude };
+      }
+      return null;
+    }
+
+    function collectAntennaSamples(sector, metric) {
+      const outdoor = isOutdoorWorkspace();
+      const selectedNetwork = networkEl.value || 'all';
+      const selectedBand = bandEl.value || 'all';
+      const selectedChannel = channelEl.value || 'all';
+      const samples = [];
+
+      if (outdoor) {
+        const W = window.OUTDOOR_WALK;
+        if (!W) return { samples, note: 'Outdoor walk not loaded.' };
+        // Outdoor walk bake carries RSRP only.
+        if (metric !== 'rsrp') {
+          return { samples, note: `Outdoor walk has RSRP only — switch the Metric sidebar to RSRP (asked for ${metric.toUpperCase()}).` };
+        }
+        for (const p of unpackOutdoorWalk(W)) {
+          if (Number(p.pci) !== sector.pci) continue;
+          if (selectedNetwork !== 'all' && p.network !== selectedNetwork) continue;
+          // Outdoor bands are strings like "B13" / "n77"; sidebar band is numeric.
+          if (selectedBand !== 'all') {
+            const bandNum = String(p.band).replace(/^[A-Za-z]+/, '');
+            if (bandNum !== selectedBand) continue;
+          }
+          if (selectedChannel !== 'all' && String(p.ch) !== selectedChannel) continue;
+          if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon) || !Number.isFinite(p.rsrp)) continue;
+          const az = bearingDeg(sector.lat, sector.lon, p.lat, p.lon);
+          const dist = haversineM(sector.lat, sector.lon, p.lat, p.lon);
+          if (!(dist > 1)) continue;
+          samples.push({ az, dist, value: p.rsrp });
+        }
+        return { samples, note: null };
+      }
+
+      for (const r of tsRecords) {
+        if (Number(r.pci) !== sector.pci) continue;
+        if (selectedNetwork !== 'all' && r.network !== selectedNetwork) continue;
+        if (selectedBand !== 'all' && String(r.band) !== selectedBand) continue;
+        if (selectedChannel !== 'all' && String(r.freq) !== selectedChannel) continue;
+        if (!Number.isFinite(r[metric])) continue;
+        const ll = indoorLonLat(r);
+        if (!ll) continue;
+        const az = bearingDeg(sector.lat, sector.lon, ll.lat, ll.lon);
+        const dist = haversineM(sector.lat, sector.lon, ll.lat, ll.lon);
+        if (!(dist > 1)) continue;
+        samples.push({ az, dist, value: r[metric] });
+      }
+      return { samples, note: null };
+    }
+
+    function binAzimuthMeans(samples, nBins, valueOf) {
+      const bins = Array.from({ length: nBins }, () => []);
+      const width = 360 / nBins;
+      for (const s of samples) {
+        const i = Math.min(nBins - 1, Math.floor(s.az / width));
+        bins[i].push(valueOf(s));
+      }
+      const theta = [];
+      const r = [];
+      const counts = [];
+      for (let i = 0; i < nBins; i++) {
+        const vals = bins[i];
+        if (!vals.length) continue;
+        theta.push((i + 0.5) * width);
+        r.push(vals.reduce((a, b) => a + b, 0) / vals.length);
+        counts.push(vals.length);
+      }
+      // Close the envelope for a continuous polar ring when we have ≥2 bins.
+      if (theta.length >= 2) {
+        theta.push(theta[0] + 360);
+        r.push(r[0]);
+        counts.push(counts[0]);
+      }
+      return { theta, r, counts };
+    }
+
+    function setHistSubTab(sub) {
+      histSubTab = sub;
+      const isAnt = sub === 'antenna';
+      if (histDistPaneEl) histDistPaneEl.style.display = isAnt ? 'none' : '';
+      if (histAntPaneEl) histAntPaneEl.style.display = isAnt ? '' : 'none';
+      if (histSubDistBtn) histSubDistBtn.classList.toggle('active', !isAnt);
+      if (histSubAntBtn) histSubAntBtn.classList.toggle('active', isAnt);
+      if (currentTab === 'histogram') refresh();
+    }
+
+    function renderAntennaPattern() {
+      if (!antPatternPlotEl || !antSectorEl) return;
+
+      const outdoor = isOutdoorWorkspace();
+      const metric = outdoor ? 'rsrp' : metricEl.value;
+      const unit = units[metric] || '';
+
+      // Point counts for the sector picker (PCI → n), environment-aware.
+      const pointCounts = new Map();
+      if (outdoor) {
+        const W = window.OUTDOOR_WALK;
+        if (!W) {
+          antPatternStatsEl.innerHTML = `<div>Loading the outdoor walk…</div>`;
+          Plotly.purge(antPatternPlotEl);
+          ensureOutdoorWalk().then(() => {
+            if (histSubTab === 'antenna' && currentTab === 'histogram') renderAntennaPattern();
+          }).catch(err => {
+            antPatternStatsEl.innerHTML = `<div style="color:#b0483f;">${err.message}</div>`;
+          });
+          return;
+        }
+        for (const r of W.pts || []) {
+          const pci = r[3];
+          pointCounts.set(pci, (pointCounts.get(pci) || 0) + 1);
+        }
+      } else {
+        for (const r of tsRecords) {
+          if (!Number.isFinite(r.pci)) continue;
+          pointCounts.set(r.pci, (pointCounts.get(r.pci) || 0) + 1);
+        }
+      }
+
+      const sectors = listAntennaSectors(pointCounts);
+      populateAntSectors(sectors);
+      const sector = sectors.find(s => s.key === antSectorEl.value) || sectors[0];
+      if (!sector) {
+        Plotly.purge(antPatternPlotEl);
+        antPatternStatsEl.innerHTML = `<div>No surveyed base-station sectors overlap this ${outdoor ? 'outdoor' : 'indoor'} walk.</div>`;
+        return;
+      }
+
+      const { samples, note } = collectAntennaSamples(sector, metric);
+      if (note && !samples.length) {
+        Plotly.purge(antPatternPlotEl);
+        antPatternStatsEl.innerHTML = `<div>${note}</div>`;
+        return;
+      }
+
+      const nBins = Math.max(12, Math.min(72, Number(antBinsEl.value) || 36));
+      antBinsEl.value = String(nBins);
+      const distNorm = !!(antDistNormEl && antDistNormEl.checked);
+      const dists = samples.map(s => s.dist).sort((a, b) => a - b);
+      const d0 = dists.length ? dists[Math.floor(dists.length / 2)] : 100;
+      const valueOf = (s) => distNorm
+        ? s.value + 20 * Math.log10(Math.max(s.dist, 1) / Math.max(d0, 1))
+        : s.value;
+      const values = samples.map(valueOf);
+      const azimuths = samples.map(s => s.az);
+
+      const envelope = binAzimuthMeans(samples, nBins, valueOf);
+      let peakAz = null, peakVal = -Infinity;
+      for (let i = 0; i < envelope.theta.length - (envelope.theta.length >= 2 ? 1 : 0); i++) {
+        if (envelope.r[i] > peakVal) { peakVal = envelope.r[i]; peakAz = envelope.theta[i]; }
+      }
+
+      const azSpan = (() => {
+        if (azimuths.length < 2) return 0;
+        const sorted = [...azimuths].sort((a, b) => a - b);
+        let maxGap = 0;
+        for (let i = 1; i < sorted.length; i++) maxGap = Math.max(maxGap, sorted[i] - sorted[i - 1]);
+        maxGap = Math.max(maxGap, (sorted[0] + 360) - sorted[sorted.length - 1]);
+        return Math.max(0, 360 - maxGap);
+      })();
+
+      const range = computeDefaultRange(
+        samples.map((s, i) => ({ [metric]: values[i] })),
+        metric
+      );
+      const metricLabel = distNorm
+        ? `${metric.toUpperCase()} norm (${unit}) @ ${d0.toFixed(0)} m`
+        : `${metric.toUpperCase()} (${unit})`;
+
+      const traces = [
+        {
+          type: 'scatterpolar',
+          mode: 'markers',
+          r: values,
+          theta: azimuths,
+          marker: {
+            size: 5,
+            color: values,
+            colorscale: 'Viridis',
+            cmin: range.vmin,
+            cmax: range.vmax,
+            opacity: 0.55,
+            colorbar: { title: metricLabel, len: 0.7, thickness: 14 }
+          },
+          name: 'Walk samples',
+          hovertemplate: `Az %{theta:.0f}°<br>${metric.toUpperCase()}: %{r:.1f} ${unit}<extra></extra>`
+        }
+      ];
+      if (envelope.theta.length) {
+        traces.push({
+          type: 'scatterpolar',
+          mode: 'lines',
+          r: envelope.r,
+          theta: envelope.theta,
+          line: { color: '#c0392b', width: 3 },
+          name: `Mean · ${nBins} bins`,
+          hovertemplate: `Az %{theta:.0f}°<br>Mean: %{r:.1f} ${unit}<extra></extra>`
+        });
+      }
+
+      Plotly.react(antPatternPlotEl, traces, {
+        title: {
+          text: `${sector.name} · PCI ${sector.pci} · ${outdoor ? 'Outdoor' : 'Indoor'} measured pattern`,
+          x: 0.02
+        },
+        polar: {
+          bgcolor: '#ffffff',
+          radialaxis: {
+            title: { text: metricLabel },
+            angle: 90,
+            tickfont: { size: 11 }
+          },
+          angularaxis: {
+            rotation: 90,
+            direction: 'clockwise',
+            tickmode: 'array',
+            tickvals: [0, 45, 90, 135, 180, 225, 270, 315],
+            ticktext: ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+          }
+        },
+        showlegend: true,
+        legend: { orientation: 'h', y: -0.08 },
+        margin: { t: 48, l: 40, r: 40, b: 56 },
+        paper_bgcolor: '#ffffff',
+        plot_bgcolor: '#ffffff'
+      }, { responsive: true, displaylogo: false });
+
+      const distMin = dists[0] || 0, distMax = dists[dists.length - 1] || 0;
+      antPatternStatsEl.innerHTML = `
+        <div>Sector: <b>${sector.name}</b> · PCI <b>${sector.pci}</b>${sector.carrier ? ` · ${sector.carrier}` : ''}</div>
+        <div>Samples: <b>${samples.length}</b> · Azimuth span: <b>${azSpan.toFixed(0)}°</b> · Range: <b>${distMin.toFixed(0)}–${distMax.toFixed(0)} m</b></div>
+        <div>Peak lobe (binned mean): <b>${peakAz == null ? '—' : `${peakAz.toFixed(0)}° ${compassLabel(peakAz)}`}</b>${peakAz == null ? '' : ` · ${peakVal.toFixed(1)} ${unit}`}${distNorm ? ` · normalized to ${d0.toFixed(0)} m` : ''}</div>
+        <div>Mode: <b>${outdoor ? 'Outdoor walk (RSRP)' : 'Indoor walk (floor-plan georef)'}</b></div>
+      `;
+    }
+
     // Builds the RSRP/RSRQ/CINR/RSSI points table for the Time Elapsed
     // Playback tab. Capped to the most recent N rows for render performance
     // during animated playback; newest-captured point first.
@@ -1216,7 +1593,8 @@
     // position; only the Time Elapsed Playback tab reads it.
     function refresh() {
       if (currentTab === 'histogram') {
-        renderHistograms();
+        if (histSubTab === 'antenna') renderAntennaPattern();
+        else renderHistograms();
       } else if (currentTab === 'time') {
         renderPlayback();
       } else {
@@ -1252,6 +1630,34 @@
     tabTimeBtn.addEventListener('click', () => setActiveTab('time'));
     document.getElementById('tabSimBtn')
       .addEventListener('click', () => setActiveTab('sim'));
+
+    if (histSubDistBtn) histSubDistBtn.addEventListener('click', () => setHistSubTab('dist'));
+    if (histSubAntBtn) histSubAntBtn.addEventListener('click', () => setHistSubTab('antenna'));
+    if (antSectorEl) antSectorEl.addEventListener('change', () => {
+      if (currentTab === 'histogram' && histSubTab === 'antenna') renderAntennaPattern();
+    });
+    if (antBinsEl) antBinsEl.addEventListener('change', () => {
+      if (currentTab === 'histogram' && histSubTab === 'antenna') renderAntennaPattern();
+    });
+    if (antDistNormEl) antDistNormEl.addEventListener('change', () => {
+      if (currentTab === 'histogram' && histSubTab === 'antenna') renderAntennaPattern();
+    });
+
+    // Re-render the antenna pattern when the workspace flips Indoor ⇄ Outdoor
+    // (landing.js mutates window.appMode.environment).
+    window.addEventListener('appmodechange', () => {
+      if (currentTab === 'histogram' && histSubTab === 'antenna') renderAntennaPattern();
+    });
+    // Fallback: landing may not dispatch — watch via a light poll on tab show is enough;
+    // also hook the landing continue buttons if present.
+    document.addEventListener('click', (e) => {
+      if (!e.target) return;
+      if (e.target.id === 'enterWorkspaceBtn' || e.target.closest?.('#envIndoor, #envOutdoor')) {
+        setTimeout(() => {
+          if (currentTab === 'histogram' && histSubTab === 'antenna') renderAntennaPattern();
+        }, 50);
+      }
+    });
 
     // OSM under-layer controls (PR #25) — Map Coverage only. Delegated on document so
     // they work even though the map-modes row is (re)built after this script runs.

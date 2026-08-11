@@ -462,6 +462,8 @@
 
     // Let Plotly / three.js reclaim real width now the workspace is visible.
     requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+    // Notify dashboard tabs (e.g. Statistics → Antenna Pattern) that Indoor/Outdoor flipped.
+    window.dispatchEvent(new Event('appmodechange'));
   }
 
   bind('modeChange', () => showScreen('screenChooser'));
