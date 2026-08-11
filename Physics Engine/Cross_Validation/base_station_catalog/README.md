@@ -36,7 +36,7 @@ verify TLS to Overpass — "CERTIFICATE_VERIFY_FAILED" — run
 | `unregistered_measured_cells.csv` | Measured (network,band,PCI) cells **not** in the registry (transparency). |
 | `osm_heights_cache.json` | Cached Overpass results (generated). |
 
-Reuses `Backend/early_analysis/build_all_bands_data.py` (scan parsing + georeference)
+Reuses `ARCHIVE/EARLY Analysis/build_all_bands_data.py` (scan parsing + georeference)
 and `Physics Engine/3D Map Physics/SIM V1 3D/osm_building_height.py` (height resolver,
 extended here with caching + a manual-override / placeholder guard).
 

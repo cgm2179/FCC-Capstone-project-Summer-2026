@@ -9,10 +9,10 @@ import numpy as np
 import pandas as pd
 
 
-ROOT = Path(__file__).resolve().parent
-CSV_DIR = ROOT / "CSV"
-FLOOR_MAP_PNG = ROOT / "7th_Floor_2nd_Indoor_Walk_Test_V2.2.png"
-FLOOR_MAP_TAB = ROOT / "7th_Floor_2nd_Indoor_Walk_Test_V2.2.TAB"
+ROOT = Path(__file__).resolve().parents[2]  # repo root
+CSV_DIR = ROOT / "ARCHIVE" / "raw_walk_data" / "CSV"
+FLOOR_MAP_PNG = ROOT / "Essentials + HTML" / "floorplan" / "7th_Floor_2nd_Indoor_Walk_Test_V2.2.png"
+FLOOR_MAP_TAB = ROOT / "Essentials + HTML" / "floorplan" / "7th_Floor_2nd_Indoor_Walk_Test_V2.2.TAB"
 OUTPUT_HTML = ROOT / "Frontend_Data_Display.html"
 
 PAT_GENERIC_NR_TOPN = "*nr Top N Signal*.CSV"

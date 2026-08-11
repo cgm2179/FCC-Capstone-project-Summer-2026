@@ -44,11 +44,11 @@ NUM_COLS = ['rsrp', 'rsrq', 'cinr', 'rssi']
 ID_COLS = {'pci', 'freq', 'band', 'network'}
 OTHER = {'source', 'n_samples'}
 
-DATA_DIR = Path('./Data')
-CSV_DIR = Path('./CSV') if Path('./CSV').exists() else DATA_DIR / 'WHOLE LOT OF csv'
+DATA_DIR = Path('../../Data')
+CSV_DIR = Path('../../ARCHIVE/raw_walk_data/CSV')
 
-FLOOR_MAP_PNG = './7th_Floor_2nd_Indoor_Walk_Test_V2.2.png'
-FLOOR_MAP_TAB = './7th_Floor_2nd_Indoor_Walk_Test_V2.2.TAB'
+FLOOR_MAP_PNG = '../../Essentials + HTML/floorplan/7th_Floor_2nd_Indoor_Walk_Test_V2.2.png'
+FLOOR_MAP_TAB = '../../Essentials + HTML/floorplan/7th_Floor_2nd_Indoor_Walk_Test_V2.2.TAB'
 
 PAT_LTE_BLIND = '*LTE*DL_Blind Scan.CSV'
 PAT_LTE_TOPN = '*Enhanced Top N Signal*MHz.CSV'

@@ -8,7 +8,9 @@ Browser payloads and CAD models for the dashboard (was `Data/`).
 | Georef / basemap | `floorplan_*.js`, `basemap_image.js`, `base_stations.js` |
 | City rasters | `noma_city2d.js`, `noma_clutter.js` |
 | CAD | `models/` (indoor GLB/OBJ, NoMa outdoor OBJ) |
-| Raw imports | `raw_walk_data/` |
+
+Raw scanner exports live in `ARCHIVE/raw_walk_data/` (not here).
+Source floor-plan ground truth: `Essentials + HTML/floorplan/`.
 
 A root symlink `Data → Data + Model` keeps older scripts and docs working.
 Regenerate baked JS with `scripts/bake_*.py` / `prepare_indoor_basemap.py`.

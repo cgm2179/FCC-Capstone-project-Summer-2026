@@ -53,10 +53,10 @@ ground-truth*, plus GPU offload and ML.
   `SIM3D/phase_c3_train_colab.ipynb` (`UNet3D`, input `(1,9,262,11,118)`, exports
   `SIM3D/web/pl_unet3d.onnx`, opset 17, wasm EP). `onnxruntime-web@1.19.2` already in the page.
   2-D precedent: `SIM/web/simulator_tab.js` `pathlossOnnx()` + `pl_unet.onnx`.
-- Ground truth: `Data/raw_walk_data/` (215 scanner CSVs + `Concat_Indoor_Walk_Test_from_csv.csv`,
+- Ground truth: `ARCHIVE/raw_walk_data/` (215 scanner CSVs + `Concat_Indoor_Walk_Test_from_csv.csv`,
   182 cols) — `Latitude/Longitude`, `Ref Signal - Received Power`=RSRP, `…Received Quality`=RSRQ,
   `…CINR`=SINR, `Carrier RSSI Antenna Port n`=RSSI, **no elevation**. Georef:
-  `Essentials + HTML/7th_Floor_2nd_Indoor_Walk_Test_V2.2.TAB` + `…_PseudoMercator.csv`
+  `Essentials + HTML/floorplan/7th_Floor_2nd_Indoor_Walk_Test_V2.2.TAB` + `…_PseudoMercator.csv`
   (3 GCPs, Web-Mercator).
 
 ---
@@ -450,10 +450,10 @@ sequence) with a 3-D+time or ConvLSTM net; Colab GPU. Marked hook.)*
 
 > Close the loop: compare simulated coverage against the real scanner data — your "3D
 > environment heat map that matches up with the scanner." Load
-> `Data/raw_walk_data/Concat_Indoor_Walk_Test_from_csv.csv` (or the 215 per-band CSVs) —
+> `ARCHIVE/raw_walk_data/Concat_Indoor_Walk_Test_from_csv.csv` (or the 215 per-band CSVs) —
 > columns `Latitude/Longitude`, `Ref Signal - Received Power`(RSRP), `…Received Quality`(RSRQ),
 > `…CINR`(SINR), `Carrier RSSI Antenna Port n`(RSSI) — and georeference to the floor via
-> `Essentials + HTML/7th_Floor_2nd_Indoor_Walk_Test_V2.2.TAB` + `…_PseudoMercator.csv`
+> `Essentials + HTML/floorplan/7th_Floor_2nd_Indoor_Walk_Test_V2.2.TAB` + `…_PseudoMercator.csv`
 > (3 GCPs, Web-Mercator: `(lon,lat) ↔ pixel/mercator`). Sample the simulated volume along the
 > walk path (single 7th-floor elevation — the scan has **no altitude column**) and report
 > error metrics (ME/RMSE/correlation per band) + a side-by-side measured-vs-simulated overlay.
