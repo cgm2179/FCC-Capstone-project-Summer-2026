@@ -1,7 +1,7 @@
 // preprocess_cad.mjs — the FAITHFUL preprocess step: voxelize the ORIGINAL, full-resolution CAD into
 // the material grid that governs the physics, so the RF solve never depends on a decimated mesh.
 //
-//   node preprocess_cad.mjs --in model.glb --bounds 60 15 40 --out ../../Data/models --name sandbox_v1
+//   node preprocess_cad.mjs --in model.glb --bounds 60 15 40 --out ../Data/models --name sandbox_v1
 //
 // Emits, into <out>/:
 //   <name>.vox.json     — the PHYSICS artifact: the full-CAD voxel grid (grid_b64 + inside_b64 + dims +

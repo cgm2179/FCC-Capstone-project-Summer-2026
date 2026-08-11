@@ -160,9 +160,9 @@
   </div>
 
   <!-- the baked penetrable NoMa 3-D city grid (window.SIM3D_ASSETS_OUTDOOR) -->
-  <script src="../../SIM3D/web/sim_assets_outdoor_3d.js"></script>
+  <script src="../SIM3D/web/sim_assets_outdoor_3d.js"></script>
   <!-- the canonical base-station registry (window.BASE_STATIONS) — single source of truth -->
-  <script src="../../Data/base_stations.js"></script>
+  <script src="../Data/base_stations.js"></script>
   <!-- onnxruntime-web for the ONNX (hybrid) solver — the trained fw_unet3d surrogate near the antenna -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
   <script src="./sim_fs.js"></script>
@@ -400,7 +400,7 @@
       const hits = _probeRay.intersectObject(modelGroup, true);
       return hits.length ? +hits[0].point.y.toFixed(2) : null;
     }
-    const MDIR = '../../Data/models/NoMa_DC/';
+    const MDIR = '../Data/models/NoMa_DC/';
     const MOBJ = 'Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.obj';
     const MMTL = 'Actual_Outdoor_Sim_3D_Render_NoMa_Washington_DC_3D.mtl';
     const setModelStatus = m => { const el = $('modelStatus'); if (el) el.textContent = m; };
@@ -550,8 +550,8 @@
     let rangeHi = -40, rangeLo = -110;
     // ONNX (hybrid) solver state — the trained 3-D surrogate (shared with the indoor studio).
     let onnxReady = false, onnxWhy = 'loading ONNX surrogate…', session = null, contract = null;
-    const OMODEL = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_unet3d.onnx';
-    const OCONTRACT = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_unet3d.json';
+    const OMODEL = '../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_unet3d.onnx';
+    const OCONTRACT = '../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_unet3d.json';
     seg('solverSeg', v => { solverSel = v; reflectEngine(); });
     seg('cmapSeg', v => { cmapName = v; drawCbar(); if (field) recolorField(); });
     seg('fstyleSeg', v => { fieldStyle = v; if (field) buildFieldMesh(); });

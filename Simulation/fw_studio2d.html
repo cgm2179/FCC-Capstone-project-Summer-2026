@@ -109,7 +109,7 @@
   <!-- onnxruntime-web (same CDN build the dashboard uses) -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
   <!-- the real 2-D floor plan (material grid + cell size); sets window.SIM_ASSETS -->
-  <script src="../../Physics%20Engine/2D/SIM/web/sim_assets.js"></script>
+  <script src="../Physics%20Engine/2D/SIM/web/sim_assets.js"></script>
   <script src="./sim_fs.js"></script>
 
   <script type="module">
@@ -120,8 +120,8 @@
     const setWarn = m => { $('warn').textContent = m || ''; };
     const setBar = f => { $('bar').style.display = f == null ? 'none' : 'block'; if (f != null) $('barFill').style.width = Math.round(f * 100) + '%'; };
 
-    const MODEL = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_unet2d.onnx';
-    const CONTRACT_URL = '../../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_unet2d.json';
+    const MODEL = '../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_unet2d.onnx';
+    const CONTRACT_URL = '../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/fw_unet2d.json';
 
     // bands (label → MHz); default 617 = the band the surrogate was trained on
     const BANDS = [['617', 'LTE 617'], ['751', 'LTE 751'], ['1960', 'LTE 1960'],
