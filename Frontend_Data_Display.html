@@ -422,9 +422,19 @@
             <label class="ant-check" for="antDistNorm" title="Add 20·log₁₀(d / d₀) so free-space range falloff does not dominate the lobe shape. d₀ = median sample distance.">
               <input type="checkbox" id="antDistNorm" /> Distance-normalize (≈FSPL)
             </label>
+            <label class="ant-check" for="antMapPoints" title="Overlay every measurement on the map, coloured by the metric (can be dense for the outdoor walk).">
+              <input type="checkbox" id="antMapPoints" /> Measured points on map
+            </label>
           </div>
           <div id="antPatternPlot"></div>
           <div id="antPatternStats" class="stats"></div>
+          <!-- The measured pattern georeferenced on OSM: the base station, the binned-mean lobe drawn at
+               real bearings/scale, a dashed peak-lobe spike, and a translucent main-lobe (−3 dB) wedge. -->
+          <div class="ant-map-head">
+            <span class="ant-map-title">Pattern on the map</span>
+            <span class="ant-map-legend">▲ base station · ✕ peak bearing · shaded = −3 dB main lobe</span>
+          </div>
+          <div id="antPatternMap"></div>
         </div>
       </div>
 

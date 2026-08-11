@@ -67,8 +67,11 @@
     const antDistNormEl = document.getElementById('antDistNorm');
     const antPatternPlotEl = document.getElementById('antPatternPlot');
     const antPatternStatsEl = document.getElementById('antPatternStats');
+    const antPatternMapEl = document.getElementById('antPatternMap');
+    const antMapPointsEl = document.getElementById('antMapPoints');
     let histSubTab = 'dist';   // 'dist' | 'antenna'
     let outdoorWalkPromise = null;
+    let antMap = null, antMapLayer = null;   // Leaflet map + dynamic overlay for the pattern-on-OSM view
     const playbackMapEl = document.getElementById('playbackMap');
     const playbackHistogramEl = document.getElementById('playbackHistogram');
     const playbackLineEl = document.getElementById('playbackLine');
@@ -1290,6 +1293,103 @@
       if (currentTab === 'histogram') refresh();
     }
 
+    // Forward geodesic: the point `distM` metres from (lat,lon) along compass `bearing`°.
+    function destPoint(lat, lon, bearing, distM) {
+      const R = 6371000, d = distM / R, br = bearing * Math.PI / 180;
+      const φ1 = lat * Math.PI / 180, λ1 = lon * Math.PI / 180;
+      const φ2 = Math.asin(Math.sin(φ1) * Math.cos(d) + Math.cos(φ1) * Math.sin(d) * Math.cos(br));
+      const λ2 = λ1 + Math.atan2(Math.sin(br) * Math.sin(d) * Math.cos(φ1), Math.cos(d) - Math.sin(φ1) * Math.sin(φ2));
+      return [φ2 * 180 / Math.PI, λ2 * 180 / Math.PI];
+    }
+    function antMapClear() { if (antMapLayer) antMapLayer.clearLayers(); }
+    function pctl(arr, p) {
+      if (!arr.length) return 0;
+      const s = [...arr].sort((a, b) => a - b);
+      return s[Math.min(s.length - 1, Math.max(0, Math.floor(p * (s.length - 1))))];
+    }
+
+    // Draw the measured pattern on OSM: the base station, the binned-mean lobe at real bearings/scale,
+    // a dashed peak-lobe spike, and a translucent −3 dB main-lobe wedge. `values` is parallel to `samples`
+    // (both from renderAntennaPattern). The lobe is a directional-gain shape, not a coverage boundary.
+    function renderAntennaMap(ctx) {
+      if (!antPatternMapEl || typeof L === 'undefined' || !L.map) return;
+      const { sector, envelope, peakAz, peakVal, samples, values, range, nBins } = ctx;
+
+      if (!antMap) {
+        // SVG renderer (not canvas): the overlay is a handful of vector shapes, and SVG repaints on
+        // every update without waiting on requestAnimationFrame — robust even where rAF is throttled.
+        antMap = L.map(antPatternMapEl, { zoomControl: true, renderer: L.svg() });
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+          { attribution: '© OpenStreetMap · © CARTO', maxZoom: 20, subdomains: 'abcd' }).addTo(antMap);
+        antMapLayer = L.layerGroup().addTo(antMap);
+      }
+      antMapClear();
+      if (!sector) { return; }
+      if (!samples || !samples.length) { antMap.setView([sector.lat, sector.lon], 15); return; }
+
+      // Outer radius follows the measurement spread so the lobe sits over the walk; the radius per
+      // bearing is the binned mean, normalised (weakest→inner, strongest→outer).
+      const dists = samples.map(s => s.dist);
+      const rOuter = Math.max(80, Math.min(1100, pctl(dists, 0.78)));
+      const rInner = 0.22 * rOuter;
+      const env = { theta: envelope.theta.slice(), r: envelope.r.slice() };
+      if (env.theta.length >= 2 && Math.abs((env.theta[env.theta.length - 1] % 360) - (env.theta[0] % 360)) < 1e-6) {
+        env.theta.pop(); env.r.pop();     // drop the closing duplicate binAzimuthMeans appends
+      }
+      let rMin = Math.min(...env.r), rMax = Math.max(...env.r);
+      if (!(rMax > rMin)) rMax = rMin + 1;
+      const radiusFor = v => rInner + (v - rMin) / (rMax - rMin) * (rOuter - rInner);
+      const bs = [sector.lat, sector.lon];
+
+      // 1) the lobe (pattern outline) — polygon when it spans enough directions, else an arc back to Tx.
+      const lobe = env.theta.map((t, i) => destPoint(sector.lat, sector.lon, t, radiusFor(env.r[i])));
+      if (lobe.length >= 3) {
+        L.polygon(lobe, { color: '#c0392b', weight: 2, fillColor: '#c0392b', fillOpacity: 0.10 }).addTo(antMapLayer);
+      } else if (lobe.length >= 1) {
+        L.polyline([bs].concat(lobe).concat([bs]), { color: '#c0392b', weight: 2, dashArray: '4,4' }).addTo(antMapLayer);
+      }
+
+      // 2) optional measured points, reconstructed from (az,dist) about the Tx, coloured by value.
+      if (antMapPointsEl && antMapPointsEl.checked && range) {
+        const step = Math.max(1, Math.ceil(samples.length / 1500));
+        const span = (range.vmax > range.vmin) ? (range.vmax - range.vmin) : 1;
+        for (let i = 0; i < samples.length; i += step) {
+          const ll = destPoint(sector.lat, sector.lon, samples[i].az, samples[i].dist);
+          L.circleMarker(ll, { radius: 2.6, stroke: false, fillColor: viridis((values[i] - range.vmin) / span), fillOpacity: 0.7 }).addTo(antMapLayer);
+        }
+      }
+
+      // 3) peak-lobe spike (dashed) + a −3 dB main-lobe wedge.
+      if (peakAz != null) {
+        const halfBin = 180 / Math.max(12, nBins || 36);   // half a bin's angular width
+        const thresh = peakVal - 3;
+        let loOff = -halfBin, hiOff = halfBin;
+        for (let i = 0; i < env.theta.length; i++) {
+          if (env.r[i] < thresh) continue;
+          const off = ((env.theta[i] - peakAz + 540) % 360) - 180;   // [-180,180]
+          if (Math.abs(off) > 90) continue;                          // ignore back lobes
+          loOff = Math.min(loOff, off - halfBin);
+          hiOff = Math.max(hiOff, off + halfBin);
+        }
+        const arc = [];
+        const stepA = Math.max(2, (hiOff - loOff) / 24);
+        for (let a = loOff; a <= hiOff + 1e-6; a += stepA) arc.push(destPoint(sector.lat, sector.lon, peakAz + a, rOuter));
+        L.polygon([bs].concat(arc), { color: '#e67e22', weight: 1, fillColor: '#f1c40f', fillOpacity: 0.18 }).addTo(antMapLayer);
+
+        const tip = destPoint(sector.lat, sector.lon, peakAz, rOuter * 1.06);
+        L.polyline([bs, tip], { color: '#c0392b', weight: 2.5, dashArray: '7,6' }).addTo(antMapLayer);
+        L.marker(tip, { icon: L.divIcon({ className: '', html: '<span class="ant-peak-label">' + peakAz.toFixed(0) + '° ' + compassLabel(peakAz) + '</span>', iconSize: null }) }).addTo(antMapLayer);
+      }
+
+      // 4) base station on top.
+      L.circleMarker(bs, { radius: 7, color: '#fff', weight: 2, fillColor: '#c0392b', fillOpacity: 1 })
+        .bindTooltip(sector.name + ' · PCI ' + sector.pci, { direction: 'top' }).addTo(antMapLayer);
+
+      const bounds = L.latLngBounds(lobe.concat([bs]));
+      if (bounds.isValid()) antMap.fitBounds(bounds.pad(0.25));
+      setTimeout(() => { if (antMap) antMap.invalidateSize(); }, 30);
+    }
+
     function renderAntennaPattern() {
       if (!antPatternPlotEl || !antSectorEl) return;
 
@@ -1327,6 +1427,7 @@
       const sector = sectors.find(s => s.key === antSectorEl.value) || sectors[0];
       if (!sector) {
         Plotly.purge(antPatternPlotEl);
+        antMapClear();
         antPatternStatsEl.innerHTML = `<div>No surveyed base-station sectors overlap this ${outdoor ? 'outdoor' : 'indoor'} walk.</div>`;
         return;
       }
@@ -1437,6 +1538,9 @@
         <div>Peak lobe (binned mean): <b>${peakAz == null ? '—' : `${peakAz.toFixed(0)}° ${compassLabel(peakAz)}`}</b>${peakAz == null ? '' : ` · ${peakVal.toFixed(1)} ${unit}`}${distNorm ? ` · normalized to ${d0.toFixed(0)} m` : ''}</div>
         <div>Mode: <b>${outdoor ? 'Outdoor walk (RSRP)' : 'Indoor walk (floor-plan georef)'}</b></div>
       `;
+
+      // Mirror the same pattern onto OSM: base station, lobe, dashed peak spike + main-lobe wedge.
+      renderAntennaMap({ sector, envelope, peakAz, peakVal, samples, values, range, nBins });
     }
 
     // Builds the RSRP/RSRQ/CINR/RSSI points table for the Time Elapsed
@@ -1640,6 +1744,9 @@
       if (currentTab === 'histogram' && histSubTab === 'antenna') renderAntennaPattern();
     });
     if (antDistNormEl) antDistNormEl.addEventListener('change', () => {
+      if (currentTab === 'histogram' && histSubTab === 'antenna') renderAntennaPattern();
+    });
+    if (antMapPointsEl) antMapPointsEl.addEventListener('change', () => {
       if (currentTab === 'histogram' && histSubTab === 'antenna') renderAntennaPattern();
     });
 
