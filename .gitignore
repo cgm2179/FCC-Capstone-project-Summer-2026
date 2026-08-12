@@ -11,38 +11,38 @@
 # fixed deploy path MUST clone with the repo — allow-list it explicitly so
 # `git add SIM3D/web/pl_unet3d.onnx` after Colab export is not silently skipped.
 *.onnx
-!Physics Engine/3D Map Physics/SIM V1 3D/web/pl_unet3d.onnx
+!Backend/Physics Engine/3D Map Physics/SIM V1 3D/web/pl_unet3d.onnx
 !SIM3D/web/pl_unet3d.onnx
 !ARCHIVE/One-offs/artifacts/pl_unet3d.onnx
 # Indoor 2-D full-wave surrogate (SIM V3). The Simulation tab's "Full-Wave (ONNX / FDTD)"
 # option fetches this from Simulation/fw_studio2d.html at
 # ../Physics Engine/3D Map Physics/SIM V1 3D/web/fw_unet2d.onnx — so it MUST clone with the repo.
-!Physics Engine/3D Map Physics/SIM V1 3D/web/fw_unet2d.onnx
+!Backend/Physics Engine/3D Map Physics/SIM V1 3D/web/fw_unet2d.onnx
 # Outdoor 2-D base-station surrogate (SIM V3). Outdoor Full-Wave Studio fetches this from
 # Simulation/fw_studio2d_outdoor.html at the same web/ path — must clone with the repo.
-!Physics Engine/3D Map Physics/SIM V1 3D/web/fw_bs.onnx
+!Backend/Physics Engine/3D Map Physics/SIM V1 3D/web/fw_bs.onnx
 !SIM3D/web/fw_bs.onnx
 
 # Dataset shard *volumes* (~GB). Meta sidecars are ignored the same way.
 # Do NOT use a blanket `*.npz` — that also hides small non-dataset archives.
-Physics Engine/3D Map Physics/SIM V1 3D/dataset/shard_*.npy
-Physics Engine/3D Map Physics/SIM V1 3D/dataset/shard_*_meta.npz
-Physics Engine/3D Map Physics/SIM V1 3D/dataset/*.part
+Backend/Physics Engine/3D Map Physics/SIM V1 3D/dataset/shard_*.npy
+Backend/Physics Engine/3D Map Physics/SIM V1 3D/dataset/shard_*_meta.npz
+Backend/Physics Engine/3D Map Physics/SIM V1 3D/dataset/*.part
 # 2-D pipeline shards (same rule)
-Physics Engine/2D/SIM/dataset/shard_*.npz
-Physics Engine/2D/SIM/dataset/*.part
+Backend/Physics Engine/2D/SIM/dataset/shard_*.npz
+Backend/Physics Engine/2D/SIM/dataset/*.part
 
 # Outdoor FULL city voxel grids — ~350 MB; regenerate with voxelize_city.py.
 # The committed demo tile under city_demo/ is NOT ignored (Outdoor mode works offline).
-Physics Engine/3D Map Physics/SIM V1 3D/city/
+Backend/Physics Engine/3D Map Physics/SIM V1 3D/city/
 
 # Diffraction relay cache — ~376 MB; rebuilt on first solve (~75 s).
-Physics Engine/3D Map Physics/SIM V1 3D/cache/
+Backend/Physics Engine/3D Map Physics/SIM V1 3D/cache/
 
 # Colab checkpoint dir contents except the human-readable train report
-Physics Engine/3D Map Physics/SIM V1 3D/checkpoints/*
-!Physics Engine/3D Map Physics/SIM V1 3D/checkpoints/.gitkeep
-!Physics Engine/3D Map Physics/SIM V1 3D/checkpoints/train_report.json
+Backend/Physics Engine/3D Map Physics/SIM V1 3D/checkpoints/*
+!Backend/Physics Engine/3D Map Physics/SIM V1 3D/checkpoints/.gitkeep
+!Backend/Physics Engine/3D Map Physics/SIM V1 3D/checkpoints/train_report.json
 
 # ---- Large local working data — NOT committable ----
 # GitHub rejects any single file over 100 MB at the pre-receive hook, and
@@ -73,7 +73,7 @@ __pycache__/
 .ipynb_checkpoints/
 
 # scene_v1_backup/ — pre-M0.4 grid, kept locally for rollback (not versioned)
-Physics Engine/3D Map Physics/SIM V1 3D/scene_v1_backup/
+Backend/Physics Engine/3D Map Physics/SIM V1 3D/scene_v1_backup/
 
 # Indoor OSM basemap (PR #25): a large, per-machine generated raster. Regenerate with
 # `python3 scripts/prepare_indoor_basemap.py`. The live (Leaflet) path needs no file.
@@ -82,13 +82,13 @@ Data + Model/basemap_image.js
 
 # PR #26 — regenerable 2D O2I prediction artifacts. Rebuild with
 # pathloss_2d/predict_o2i.py then pathloss_2d/export_web.py.
-Physics Engine/Cross_Validation/pathloss_2d/out/
+Backend/Physics Engine/Cross_Validation/pathloss_2d/out/
 Data/pl2d_crossval.js
 Data + Model/pl2d_crossval.js
-Physics Engine/Cross_Validation/validation/reports/*.png
+Backend/Physics Engine/Cross_Validation/validation/reports/*.png
 
 # PR #27 — regenerable 3D O2I volumes (rebuild with pathloss_3d/predict_o2i_3d.py)
-Physics Engine/Cross_Validation/pathloss_3d/out/
+Backend/Physics Engine/Cross_Validation/pathloss_3d/out/
 
 # Project backend (Backend/server/app.py)
 Backend/server/.env               # local API keys (see .env.example)
