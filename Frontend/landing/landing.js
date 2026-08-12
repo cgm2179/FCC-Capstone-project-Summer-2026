@@ -775,7 +775,7 @@
     if (outBar) outBar.style.display = isOutdoor2d ? '' : 'none';
     if (!isOutdoor2d && outWrap) outWrap.style.display = 'none';
     if (isOutdoor2d && outFrame && !outFrame.getAttribute('src')) {   // auto-open on first outdoor entry
-      outFrame.setAttribute('src', 'Simulation/fw_studio2d_outdoor.html');
+      outFrame.setAttribute('src', window.simStudioSrc('Simulation/fw_studio2d_outdoor.html'));
       if (outWrap) outWrap.style.display = 'block';
       if (outToggle) outToggle.innerHTML = '▼ Outdoor Full-Wave (SIM V3 · base-station coverage)';
     }

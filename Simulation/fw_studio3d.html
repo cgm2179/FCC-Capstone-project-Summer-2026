@@ -64,7 +64,7 @@
 
     <div class="grp"><label>Solver</label>
       <div class="seg" id="solverSeg">
-        <button class="on" data-v="auto">Auto</button><button data-v="onnx">ONNX</button><button data-v="fdtd">FDTD</button>
+        <button class="on" data-v="auto" data-aiml="1">Auto</button><button data-v="onnx" data-aiml="1">ONNX</button><button data-v="fdtd">FDTD</button>
       </div>
       <div id="engine">loading model…</div>
       <p class="note">Auto/ONNX = <b>hybrid</b> whole-floor RSRP: the trained surrogate near the Tx ⊕ eikonal path-loss + wall shadows for the rest. <b>FDTD solves a sub-volume around the Tx</b> (whole-floor 3-D FDTD is infeasible in a browser).</p>
@@ -122,6 +122,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+  <!-- AI/ML gate: disable ONNX when the parent passes ?aiml=0 (created project) -->
+  <script src="./aiml_gate.js"></script>
   <script src="../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/sim_assets_3d.js"></script>
   <script src="./sim_fs.js"></script>
 

@@ -80,6 +80,14 @@
   window.activeProject = function () { return _active; };
   window.workspaceBooted = function () { return _booted; };
 
+  // Append ?aiml=0 to a Simulation-studio URL when the active project's ONNX surrogate is invalid
+  // for it (created projects carry ai_ml:false — the surrogate was trained on the DEFAULT dataset).
+  // The studios read the param and disable ONNX/Auto, leaving the physics solvers.
+  window.simStudioSrc = function (base) {
+    var p = window.activeProject && window.activeProject();
+    return (p && p.ai_ml === false) ? base + (base.indexOf('?') >= 0 ? '&' : '?') + 'aiml=0' : base;
+  };
+
   /* Inject the project's data files (in order), then boot the dashboard once. Returns a
    * Promise that resolves when the workspace is ready to have applyModeToWorkspace() run.
    * A non-optional data file that 404s rejects; optional ones warn and continue. */

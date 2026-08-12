@@ -84,7 +84,7 @@
 
     <div class="grp"><label>Solver</label>
       <div class="seg" id="solverSeg">
-        <button class="on" data-v="auto">Auto</button><button data-v="onnx">ONNX</button><button data-v="fdtd">FDTD</button>
+        <button class="on" data-v="auto" data-aiml="1">Auto</button><button data-v="onnx" data-aiml="1">ONNX</button><button data-v="fdtd">FDTD</button>
       </div>
       <div id="engine">loading model…</div>
       <p class="note">SIM&nbsp;V3 full-wave · Auto = ONNX surrogate → penetrable FDTD. This is <b>not</b> the legacy path-loss “Simulate 2D PL” engine.</p>
@@ -167,6 +167,8 @@
 
   <!-- onnxruntime-web (same CDN build the dashboard uses) -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+  <!-- AI/ML gate: disable ONNX when the parent passes ?aiml=0 (created project) -->
+  <script src="./aiml_gate.js"></script>
   <!-- the baked penetrable NoMa city grid + stations; sets window.NOMA_CITY_2D -->
   <script src="../Data/noma_city2d.js"></script>
 

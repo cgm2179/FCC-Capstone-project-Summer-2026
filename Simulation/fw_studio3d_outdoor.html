@@ -91,7 +91,7 @@
 
     <div class="grp"><label>Solver</label>
       <div class="seg" id="solverSeg">
-        <button class="on" data-v="eikonal">Eikonal</button><button data-v="onnx">ONNX (hybrid)</button><button data-v="fdtd">FDTD</button>
+        <button class="on" data-v="eikonal">Eikonal</button><button data-v="onnx" data-aiml="1">ONNX (hybrid)</button><button data-v="fdtd">FDTD</button>
       </div>
       <div id="engine"></div>
       <p class="note"><b>Eikonal</b> = whole-city absolute RSRP (FSPL + ray-marched building/foliage loss) — the iBwave/WinProp coverage look. <b>ONNX (hybrid)</b> = the trained full-wave surrogate in the box around the antenna ⊕ eikonal for the rest of the city. <b>FDTD</b> solves the true sub-volume field around the station at λ/8.</p></div>
@@ -165,6 +165,8 @@
   <script src="../Data/base_stations.js"></script>
   <!-- onnxruntime-web for the ONNX (hybrid) solver — the trained fw_unet3d surrogate near the antenna -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+  <!-- AI/ML gate: disable ONNX when the parent passes ?aiml=0 (created project) -->
+  <script src="./aiml_gate.js"></script>
   <script src="./sim_fs.js"></script>
 
   <script type="module">

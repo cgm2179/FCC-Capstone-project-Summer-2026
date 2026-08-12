@@ -569,7 +569,7 @@
             var LABEL = ' Full-Wave (SIM V3 · ONNX / FDTD)';
             b.addEventListener('click', function () {
               var open = w.style.display === 'none';
-              if (open && !f.getAttribute('src')) f.setAttribute('src', 'Simulation/fw_studio2d.html');
+              if (open && !f.getAttribute('src')) f.setAttribute('src', window.simStudioSrc('Simulation/fw_studio2d.html'));
               w.style.display = open ? 'block' : 'none';
               b.innerHTML = (open ? '▼' : '▶') + LABEL;
             });
@@ -601,7 +601,7 @@
             var LABEL = ' Outdoor Full-Wave (SIM V3 · base-station coverage)';
             b.addEventListener('click', function () {
               var open = w.style.display === 'none';
-              if (open && !f.getAttribute('src')) f.setAttribute('src', 'Simulation/fw_studio2d_outdoor.html');
+              if (open && !f.getAttribute('src')) f.setAttribute('src', window.simStudioSrc('Simulation/fw_studio2d_outdoor.html'));
               w.style.display = open ? 'block' : 'none';
               b.innerHTML = (open ? '▼' : '▶') + LABEL;
             });
@@ -736,7 +736,7 @@
               var LABEL = ' 3-D Full-Wave (SIM V3 \u00b7 voxel grid \u00b7 ONNX / FDTD)';
               b.addEventListener('click', function () {
                 var open = w.style.display === 'none';
-                if (open && !f.getAttribute('src')) f.setAttribute('src', 'Simulation/fw_studio3d.html');
+                if (open && !f.getAttribute('src')) f.setAttribute('src', window.simStudioSrc('Simulation/fw_studio3d.html'));
                 w.style.display = open ? 'block' : 'none';
                 b.innerHTML = (open ? '\u25bc' : '\u25b6') + LABEL;
               });
@@ -764,7 +764,7 @@
               var LABEL = ' Outdoor 3-D Full-Wave (SIM V3 \u00b7 NoMa render + basemap)';
               b.addEventListener('click', function () {
                 var open = w.style.display === 'none';
-                if (open && !f.getAttribute('src')) f.setAttribute('src', 'Simulation/fw_studio3d_outdoor.html');
+                if (open && !f.getAttribute('src')) f.setAttribute('src', window.simStudioSrc('Simulation/fw_studio3d_outdoor.html'));
                 w.style.display = open ? 'block' : 'none';
                 b.innerHTML = (open ? '\u25bc' : '\u25b6') + LABEL;
               });
