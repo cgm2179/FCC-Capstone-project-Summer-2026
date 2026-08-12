@@ -15,13 +15,22 @@ Output  Data/outdoor_walk.js:
     facets:{operators,networks,bands,pcis,channels}          # distinct values, for the filters
   }
 """
-import re, json, os, statistics
+import re, json, os, statistics, argparse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "FCC_Walk_Outdoor_Indoor_Full/Outdoor_Walk_Test_7-24/records_data.js")
-BS = os.path.join(ROOT, "Data/base_stations.js")
-OUT = os.path.join(ROOT, "Data/outdoor_walk.js")
-FCC = {"lon": -77.00740, "lat": 38.90359}
+# Defaults reproduce the built-in 7/24 NoMa bake; the project backend
+# (Backend/server/pipeline.py) passes an uploaded outdoor walk via --src/--out.
+_ap = argparse.ArgumentParser(description="Bake an outdoor walk records file to window.OUTDOOR_WALK")
+_ap.add_argument("--src", default=os.path.join(ROOT, "FCC_Walk_Outdoor_Indoor_Full/Outdoor_Walk_Test_7-24/records_data.js"),
+                 help="a records_data.js-style file (const records = [...]) with lon/lat/rsrp/pci")
+_ap.add_argument("--bs", default=os.path.join(ROOT, "Data/base_stations.js"),
+                 help="base_stations.js for the PCI->operator join")
+_ap.add_argument("--out", default=os.path.join(ROOT, "Data/outdoor_walk.js"))
+_ap.add_argument("--fcc-lon", type=float, default=-77.00740)
+_ap.add_argument("--fcc-lat", type=float, default=38.90359)
+_args = _ap.parse_args()
+SRC, BS, OUT = _args.src, _args.bs, _args.out
+FCC = {"lon": _args.fcc_lon, "lat": _args.fcc_lat}
 
 # PCI -> operator, from the base-station catalog (a PCI is a sector of one operator's site).
 pci_op = {}
@@ -38,7 +47,9 @@ def s(v, d=""):
 
 cells = {}
 for r in recs:
-    lat, lon, rsrp = r.get("latitude"), r.get("longitude"), r.get("avg_rsrp")
+    # accept both the outdoor bake's avg_rsrp and build_all_bands_data's rsrp
+    lat, lon = r.get("latitude"), r.get("longitude")
+    rsrp = r.get("avg_rsrp", r.get("rsrp"))
     if lat is None or lon is None or rsrp is None:
         continue
     try:

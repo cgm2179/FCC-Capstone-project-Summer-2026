@@ -26,13 +26,22 @@ CSV_DIR = os.path.join(ROOT, "ARCHIVE", "raw_walk_data", "CSV")
 OUT_RECORDS = os.path.join(ROOT, "Data", "records_data.js")
 OUT_TIMESERIES = os.path.join(ROOT, "Data", "timeseries_data.js")
 
-# --- georeference: 3 ground-control points from floorplan_meta.js -------------
-GCPS = [(-77.0070535, 38.9036891, 974.0, 47.0),
-        (-77.0077309, 38.9034977, 155.0, 468.0),
-        (-77.0074321, 38.9035672, 557.0, 268.0)]
-_A = np.array([[g[0], g[1], 1] for g in GCPS])
-COEF_X = np.linalg.lstsq(_A, np.array([g[2] for g in GCPS]), rcond=None)[0]
-COEF_Y = np.linalg.lstsq(_A, np.array([g[3] for g in GCPS]), rcond=None)[0]
+# --- georeference: 3 ground-control points (lon, lat, px_x, px_y) -------------
+# Default = the built-in 7th-floor TAB. The project backend (Backend/server/pipeline.py)
+# passes a NEW project's own GCPs, parsed from its uploaded .TAB, via --gcps, so px/py land
+# in that project's own floor-plan pixel frame. Run with no args -> unchanged behavior.
+DEFAULT_GCPS = [(-77.0070535, 38.9036891, 974.0, 47.0),
+                (-77.0077309, 38.9034977, 155.0, 468.0),
+                (-77.0074321, 38.9035672, 557.0, 268.0)]
+
+def _fit_px(gcps):
+    A = np.array([[g[0], g[1], 1] for g in gcps])
+    cx = np.linalg.lstsq(A, np.array([g[2] for g in gcps]), rcond=None)[0]
+    cy = np.linalg.lstsq(A, np.array([g[3] for g in gcps]), rcond=None)[0]
+    return cx, cy
+
+GCPS = DEFAULT_GCPS
+COEF_X, COEF_Y = _fit_px(GCPS)
 
 def to_px(lon, lat):
     return (float(COEF_X[0]*lon + COEF_X[1]*lat + COEF_X[2]),
@@ -103,9 +112,27 @@ def parse_t(date_s, time_s):
         return None
 
 def main():
-    files = [f for f in sorted(glob.glob(os.path.join(CSV_DIR, "*.CSV")))
-             if "Blind Scan" in os.path.basename(f)
-             and "_Spectrum" not in os.path.basename(f)]
+    import argparse
+    import json as _json
+    global COEF_X, COEF_Y, OUT_RECORDS, OUT_TIMESERIES
+    ap = argparse.ArgumentParser(description="Build indoor dashboard data from Blind Scan CSVs")
+    ap.add_argument("--csv-dir", default=CSV_DIR, help="folder of scanner CSVs")
+    ap.add_argument("--out-records", default=OUT_RECORDS)
+    ap.add_argument("--out-timeseries", default=OUT_TIMESERIES)
+    ap.add_argument("--gcps", help="JSON [[lon,lat,px,py],...] (>=3); default = built-in 7th-floor TAB")
+    ap.add_argument("--any-csv", action="store_true",
+                    help="include every *.csv/*.CSV, not just files named 'Blind Scan'")
+    args = ap.parse_args()
+    OUT_RECORDS, OUT_TIMESERIES = args.out_records, args.out_timeseries
+    if args.gcps:
+        g = [tuple(x) for x in _json.loads(args.gcps)]
+        if len(g) < 3:
+            raise SystemExit("--gcps needs >= 3 [lon,lat,px,py] points")
+        COEF_X, COEF_Y = _fit_px(g)
+    allf = sorted(set(glob.glob(os.path.join(args.csv_dir, "*.CSV")) +
+                      glob.glob(os.path.join(args.csv_dir, "*.csv"))))
+    files = [f for f in allf if args.any_csv or
+             ("Blind Scan" in os.path.basename(f) and "_Spectrum" not in os.path.basename(f))]
 
     samples = []  # every decoded-cell measurement
     for fn in files:
@@ -193,7 +220,12 @@ def main():
     with open(OUT_RECORDS, "w", encoding="utf-8") as f:
         f.write("    const records = " + json.dumps(records, ensure_ascii=True) + ";\n")
     with open(OUT_TIMESERIES, "w", encoding="utf-8") as f:
-        f.write('const timeseriesStartTime = "%s";\n' % start.isoformat().replace("+00:00", "Z"))
+        # A CSV set with no parseable timestamps still yields a valid map (records); the
+        # time-elapse playback just has no clock — write null rather than crashing.
+        if start is not None:
+            f.write('const timeseriesStartTime = "%s";\n' % start.isoformat().replace("+00:00", "Z"))
+        else:
+            f.write('const timeseriesStartTime = null;\n')
         f.write("const timeseriesRecords = " + json.dumps(ts, ensure_ascii=True) + ";\n")
 
     # ---- report --------------------------------------------------------------

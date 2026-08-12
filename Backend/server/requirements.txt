@@ -1,0 +1,11 @@
+# RF Simulation Studio — project backend (Backend/server/app.py)
+#
+# The server itself needs only Flask. The rasterize/bake pipeline it orchestrates
+# (Backend/server/pipeline.py, added with the New-project builder) shells out to the
+# existing scripts, which use numpy/scipy/pandas/pillow — already present in this repo's
+# Python; they're listed here so a fresh environment can `pip install -r requirements.txt`.
+flask>=3.0
+numpy
+scipy
+pandas
+pillow

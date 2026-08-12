@@ -45,8 +45,10 @@
   if (chooserGo) chooserGo.addEventListener('click', () => {
     window.appMode.environment = pickEnv;
     window.appMode.dim = pickDim;
-    if (pickDim === '3d') { showScreen('screenImport'); }
-    else { enterWorkspace(); }
+    // Both 2D and 3D now go through Import (the project picker). 2D used to skip straight to
+    // the workspace; it stops here first so a saved project can be chosen (or a new one made).
+    prepImport();
+    showScreen('screenImport');
   });
 
   /* ---- Screen 1: import (3D) ------------------------------------------- */
@@ -76,8 +78,224 @@
   listFiles(modelList, null, 'Using built-in 7th-floor model');
   listFiles(tabList, null, 'No .TAB registration file');
 
+  /* ---- Import project picker (2D + 3D) -------------------------------- */
+  const NEW_PROJECT = '__new__';
+
+  // Prepare the Import screen for the chosen mode: adapt the copy, populate the project
+  // dropdown (backend + built-ins), preselect this mode's Default, and show/hide the
+  // new-dataset cards. Called on entry from the chooser.
+  function prepImport() {
+    const env = window.appMode.environment, dim = window.appMode.dim;
+    const title = document.getElementById('importTitle');
+    const sub = document.getElementById('importSub');
+    if (title) title.textContent = 'Import & dataset — ' +
+      (env === 'indoor' ? 'Indoor' : 'Outdoor') + ' · ' + (dim === '3d' ? '3D' : '2D');
+    if (sub) sub.textContent = dim === '3d'
+      ? 'Load a saved project, or start a new one by importing a 3D model + its TAB registration.'
+      : 'Load a saved project, or start a new one by importing measurement CSVs + a floor plan / area.';
+    populateProjectPicker();
+  }
+
+  function populateProjectPicker() {
+    const sel = document.getElementById('importProject');
+    if (!sel) return;
+    const env = window.appMode.environment, dim = window.appMode.dim;
+    const fill = () => {
+      const list = (window.getProjects ? window.getProjects(env, dim) : []);
+      sel.innerHTML = list.map((p) => '<option value="' + p.id + '">' + p.label +
+        (p.builtin ? '' : ' · saved') + '</option>').join('') +
+        '<option value="' + NEW_PROJECT + '">➕ New project…</option>';
+      const def = window.resolveDefaultProject && window.resolveDefaultProject(env, dim);
+      if (def && list.some((p) => p.id === def.id)) sel.value = def.id;
+      onProjectPick();
+    };
+    // Pull server/created projects first (best-effort; falls back to built-ins offline).
+    (window.refreshProjects ? window.refreshProjects() : Promise.resolve()).then(fill, fill);
+  }
+
+  function onProjectPick() {
+    const sel = document.getElementById('importProject');
+    const legacyCards = document.getElementById('importNewCards');
+    const builder = document.getElementById('importBuilder');
+    const summary = document.getElementById('importProjectSummary');
+    const goBtn = document.getElementById('importGo');
+    const val = sel ? sel.value : null;
+    const isNew = val === NEW_PROJECT;
+    window.appImport.project = isNew ? null : (window.getProject ? window.getProject(val) : null);
+    // Legacy 3D model/TAB cards belong to the old built-in 3D flow; keep them only for a saved
+    // 3D project (optional model swap), hidden for 2D and for New (the builder replaces them).
+    if (legacyCards) legacyCards.style.display = (!isNew && window.appMode.dim === '3d') ? '' : 'none';
+    if (builder) builder.hidden = !isNew;
+    if (summary) summary.style.display = isNew ? 'none' : '';
+    if (goBtn) goBtn.style.display = isNew ? 'none' : '';   // New uses its own Create button
+    if (isNew) renderBuilder(); else renderProjectSummary(window.appImport.project);
+  }
+
+  // Show the selected project's named data files + metadata — the "what will load" preview.
+  function renderProjectSummary(m) {
+    const box = document.getElementById('importProjectSummary');
+    if (!box) return;
+    if (!m) { box.innerHTML = ''; return; }
+    const files = (m.data || []).map((d) => d.role + ' · ' + String(d.src).split('/').pop() +
+      (d.optional ? ' (optional)' : '')).join('<br>');
+    const rows = [
+      ['Project', m.label + (m.builtin ? ' · built-in' : ' · saved')],
+      ['Mode', (m.environment === 'indoor' ? 'Indoor' : 'Outdoor') + ' · ' + String(m.dim).toUpperCase()],
+      ['Data files', files || '—'],
+    ];
+    if (m.model) rows.push(['3D model', m.model.label || m.model.src]);
+    if (m.elevation) rows.push(['Elevation', m.elevation.mode === 'none' ? 'none (city heights)'
+      : ((m.elevation.floor_z_m || 0) + ' m floor · ' + (m.elevation.ceiling_height_m || '?') + ' m ceiling')]);
+    box.innerHTML = rows.map((r) => '<div class="k">' + r[0] + '</div><div class="v">' + r[1] + '</div>').join('');
+  }
+
+  const importProjectSel = document.getElementById('importProject');
+  if (importProjectSel) importProjectSel.addEventListener('change', onProjectPick);
+
+  /* ---- New-project builder (backend-powered) -------------------------- */
+  // Renders this mode's required inputs, validates uploads live via POST /api/validate, and
+  // POSTs /api/projects on Create. The backend shells the existing rasterize/bake scripts.
+  let _bldTimer = null;
+
+  function renderBuilder() {
+    const box = document.getElementById('importBuilderInputs');
+    if (!box) return;
+    const env = window.appMode.environment, dim = window.appMode.dim;
+    const fileRow = (id, label, attrs, hint) =>
+      '<div class="field"><label for="' + id + '">' + label + '</label>' +
+      '<input type="file" id="' + id + '" ' + attrs + '>' +
+      (hint ? '<div class="step-note">' + hint + '</div>' : '') + '</div>';
+    const numRow = (id, label, val, step, min) =>
+      '<div class="field"><label for="' + id + '">' + label + '</label>' +
+      '<input type="number" id="' + id + '" value="' + val + '" step="' + step + '"' +
+      (min != null ? ' min="' + min + '"' : '') + '></div>';
+    let html = '';
+    if (dim === '2d') {
+      html += fileRow('bldCsv', 'Measurement CSVs (folder)', 'multiple webkitdirectory',
+        'Pick the folder of scanner CSVs — every .csv inside is read.');
+      if (env === 'indoor') {
+        html += fileRow('bldImage', 'Floor-plan image', 'accept=".png,.jpg,.jpeg"', 'PNG/JPG of the plan.');
+        html += fileRow('bldTab', 'TAB georeference', 'accept=".tab,.TAB"',
+          'MapInfo .TAB (≥3 GCPs) — sets scale + placement; crops the OSM basemap to it.');
+      }
+      html += numRow('bldCell', 'Grid cell (m)', env === 'indoor' ? '0.3' : '1', '0.1', '0.1');
+    } else {
+      html += fileRow('bldModel', '3D model',
+        'accept=".dae,.obj,.mtl,.glb,.gltf,.fbx,.3ds,.stl,.kmz,.png,.jpg,.jpeg" multiple',
+        'OBJ (+ .mtl & textures) / GLB / DAE / FBX / 3DS / STL / KMZ.');
+      html += '<div class="field"><label for="bldElevMode">Elevation</label>' +
+        '<select id="bldElevMode"><option value="none">None — flat / city building heights</option>' +
+        '<option value="floor">Choose elevation…</option></select></div>' +
+        '<div id="bldElevFields" style="display:none">' +
+        numRow('bldFloorZ', 'Floor elevation (m)', '0', '0.5') +
+        numRow('bldCeiling', 'Ceiling height (m)', '3', '0.1', '0.1') + '</div>';
+      if (env === 'indoor')
+        html += fileRow('bldTab', 'TAB georeference (optional)', 'accept=".tab,.TAB"', 'Optional for placement.');
+      html += numRow('bldCell', 'Voxel cell (m)', '1', '0.5', '0.1');
+    }
+    box.innerHTML = html;
+    box.querySelectorAll('input,select').forEach((el) => {
+      el.addEventListener('change', scheduleValidate);
+      el.addEventListener('input', scheduleValidate);
+    });
+    const em = document.getElementById('bldElevMode');
+    if (em) em.addEventListener('change', () => {
+      const f = document.getElementById('bldElevFields');
+      if (f) f.style.display = em.value === 'none' ? 'none' : '';
+    });
+    const nm = document.getElementById('importNewName');
+    if (nm && !nm._wired) { nm.addEventListener('input', scheduleValidate); nm._wired = true; }
+    validateBuilder();
+  }
+
+  function scheduleValidate() { if (_bldTimer) clearTimeout(_bldTimer); _bldTimer = setTimeout(validateBuilder, 250); }
+
+  function builderOpts() {
+    const cell = parseFloat((document.getElementById('bldCell') || {}).value);
+    const opts = {}; if (isFinite(cell)) opts.cell_m = cell;
+    const em = document.getElementById('bldElevMode');
+    if (em) opts.elevation = em.value === 'none' ? { mode: 'none' } : { mode: 'floor',
+      floor_z_m: parseFloat((document.getElementById('bldFloorZ') || {}).value) || 0,
+      ceiling_height_m: parseFloat((document.getElementById('bldCeiling') || {}).value) || 0 };
+    return opts;
+  }
+
+  function builderFormData() {
+    const fd = new FormData();
+    fd.append('environment', window.appMode.environment);
+    fd.append('dim', window.appMode.dim);
+    fd.append('label', (document.getElementById('importNewName') || {}).value || '');
+    fd.append('opts', JSON.stringify(builderOpts()));
+    const add = (id, field) => {
+      const el = document.getElementById(id);
+      if (el && el.files) Array.from(el.files).forEach((f) => fd.append(field, f));
+    };
+    add('bldCsv', 'csv'); add('bldImage', 'image'); add('bldTab', 'tab'); add('bldModel', 'model');
+    return fd;
+  }
+
+  function validateBuilder() {
+    const report = document.getElementById('importBuilderReport');
+    const create = document.getElementById('importCreate');
+    const note = document.getElementById('importBuilderNote');
+    if (!report) return;
+    fetch(window.PROJECT_API_BASE + '/validate', { method: 'POST', body: builderFormData() })
+      .then((r) => r.json())
+      .then((rep) => {
+        report.className = 'step-status';
+        report.innerHTML = renderReport(rep);
+        if (create) create.disabled = !rep.ok;
+        if (note) note.textContent = rep.ok ? 'Ready to create.' : 'Provide the required inputs above.';
+      })
+      .catch(() => {
+        report.className = 'step-status err';
+        report.textContent = '✗ Backend not reachable — run  python Backend/server/app.py  then open http://127.0.0.1:8000';
+        if (create) create.disabled = true;
+        if (note) note.textContent = '';
+      });
+  }
+
+  function renderReport(rep) {
+    const row = (x, opt) => '<div style="color:' + (x.ok ? '#2a7d46' : '#b0483f') + '">' +
+      (x.ok ? '✓' : '✗') + ' ' + x.role + (opt ? ' (optional)' : '') + ' — ' + (x.detail || '') + '</div>';
+    let h = '';
+    (rep.required || []).forEach((x) => { h += row(x, false); });
+    (rep.optional || []).forEach((x) => { h += row(x, true); });
+    (rep.warnings || []).forEach((w) => { h += '<div style="color:#b0771f">⚠ ' + w + '</div>'; });
+    if (rep.grid) h += '<div style="color:#888">grid ≈ ' + rep.grid.cols + ' × ' + rep.grid.rows +
+      ' @ ' + rep.grid.cell_m + ' m' + (rep.grid.extent_m ? ' (' + rep.grid.extent_m.join(' × ') + ' m)' : '') + '</div>';
+    return h;
+  }
+
+  function createProject() {
+    const create = document.getElementById('importCreate');
+    const note = document.getElementById('importBuilderNote');
+    if (create) create.disabled = true;
+    if (note) note.textContent = 'Creating… rasterizing + baking on the backend (this can take a moment).';
+    fetch(window.PROJECT_API_BASE + '/projects', { method: 'POST', body: builderFormData() })
+      .then((r) => r.json().then((body) => ({ status: r.status, body })))
+      .then(({ status, body }) => {
+        if (status === 201 && body.id) {
+          // A new dataset declares its own `const records`; reload into a fresh scope for it.
+          location.search = '?project=' + encodeURIComponent(body.id);
+        } else {
+          if (note) note.textContent = '✗ ' + (body.error || ('failed (HTTP ' + status + ')'));
+          if (create) create.disabled = false;
+        }
+      })
+      .catch((e) => { if (note) note.textContent = '✗ ' + e.message; if (create) create.disabled = false; });
+  }
+
+  const importCreateBtn = document.getElementById('importCreate');
+  if (importCreateBtn) importCreateBtn.addEventListener('click', createProject);
+
   bind('importBack', () => showScreen('screenChooser'));
-  bind('importGo',   () => { prepPreprocess(); showScreen('screenPreprocess'); });
+  bind('importGo', () => {
+    // The picker set window.appImport.project. 3D continues to Preprocess (voxel grid); 2D
+    // enters the workspace directly (its lighter Preprocess/Exports view is added next phase).
+    if (window.appMode.dim === '3d') { prepPreprocess(); showScreen('screenPreprocess'); }
+    else { enterWorkspace(); }
+  });
 
   /* ---- Screen 2: preprocess (3D) -------------------------------------- */
   const geoBox   = document.getElementById('geoSummary');
@@ -315,7 +533,51 @@
   bind('preGo',   enterWorkspace);
 
   /* ---- Screen 3: workspace -------------------------------------------- */
-  function enterWorkspace() { showScreen('screenWorkspace'); applyModeToWorkspace(); }
+  // Boot the active project's data (via project_loader.js) — which also injects
+  // dashboard.js/spectrum.js the first time — THEN apply the mode. window.appImport.project
+  // is set by the Import project picker (added in a later phase); until then we resolve the
+  // built-in Default for the chosen environment/dim. The loader dedupes, so re-entering the
+  // workspace (change mode) reuses the already-loaded data and never re-wires the dashboard.
+  function enterWorkspace() {
+    showScreen('screenWorkspace');
+    const manifest = (window.appImport && window.appImport.project) ||
+      (window.resolveDefaultProject && window.resolveDefaultProject(window.appMode.environment, window.appMode.dim));
+    const boot = (window.loadProject && manifest) ? window.loadProject(manifest) : Promise.resolve();
+    const after = () => { applyModeToWorkspace(); wireSaveButton(); };
+    boot.then(after).catch((e) => {
+      console.error('[workspace] project load failed:', e);
+      after();   // still show the shell so the failure is visible, not blank
+    });
+  }
+
+  // SAVE button: visible only for a created project; commits a new version to the workspace-store
+  // branch via the backend (never main). Publishing that branch to GitHub is a separate step.
+  function wireSaveButton() {
+    const btn = document.getElementById('wsSave');
+    const note = document.getElementById('wsSaveNote');
+    if (!btn) return;
+    const proj = window.activeProject && window.activeProject();
+    btn.hidden = !(proj && proj.id && !proj.builtin);
+    if (note) note.textContent = '';
+    if (btn._wired) return;
+    btn._wired = true;
+    btn.addEventListener('click', () => {
+      const p = window.activeProject && window.activeProject();
+      if (!p || !p.id) return;
+      btn.disabled = true;
+      if (note) note.textContent = 'saving…';
+      fetch(window.PROJECT_API_BASE + '/projects/' + encodeURIComponent(p.id) + '/save', { method: 'POST' })
+        .then((r) => r.json())
+        .then((res) => {
+          btn.disabled = false;
+          if (res.error) { if (note) note.textContent = '✗ ' + res.error; return; }
+          if (note) note.textContent = res.saved
+            ? ('✓ saved v' + (res.version && res.version.version) + ' to workspace-store')
+            : '✓ no changes since last save';
+        })
+        .catch((e) => { btn.disabled = false; if (note) note.textContent = '✗ ' + e.message; });
+    });
+  }
 
   // Outdoor mode: drive the outdoor iframe's dot filter from the Coverage sidebar. Repopulate the
   // sidebar selects from the outdoor walk's facets and intercept their changes in the CAPTURE phase
@@ -482,4 +744,23 @@
 
   // Boot on the chooser.
   showScreen('screenChooser');
+
+  // Deep-link / dataset-switch support: ?project=<id> boots straight into that project's
+  // workspace. Loading a DIFFERENT dataset after the page already declared `const records`
+  // can't reuse this global scope, so the project switch reloads with this param — a fresh
+  // scope. Best-effort: needs the backend (or a built-in id) to resolve the manifest.
+  (function bootFromQuery() {
+    let pid = null;
+    try { pid = new URLSearchParams(location.search).get('project'); } catch (e) { return; }
+    if (!pid) return;
+    const go = () => {
+      const m = window.getProject && window.getProject(pid);
+      if (!m) { console.warn('[workspace] ?project=' + pid + ' not found; staying on chooser.'); return; }
+      window.appMode.environment = m.environment;
+      window.appMode.dim = m.dim;
+      window.appImport.project = m;
+      enterWorkspace();
+    };
+    (window.refreshProjects ? window.refreshProjects() : Promise.resolve()).then(go, go);
+  })();
 })();

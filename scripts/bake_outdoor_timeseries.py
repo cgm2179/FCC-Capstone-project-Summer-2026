@@ -21,13 +21,21 @@ Output  Data/outdoor_timeseries.js:
     facets:{operators,networks,bands,pcis,channels}               # distinct values, for the filters
   }
 """
-import re, json, os
+import re, json, os, argparse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "FCC_Walk_Outdoor_Indoor_Full/Outdoor_Walk_Test_7-24/timeseries_data.js")
-BS = os.path.join(ROOT, "Data/base_stations.js")
-OUT = os.path.join(ROOT, "Data/outdoor_timeseries.js")
-FCC = {"lon": -77.00740, "lat": 38.90359}
+# Defaults reproduce the built-in 7/24 NoMa bake; the project backend passes an uploaded
+# outdoor timeseries via --src/--out.
+_ap = argparse.ArgumentParser(description="Bake an outdoor timeseries file to window.OUTDOOR_TIMESERIES")
+_ap.add_argument("--src", default=os.path.join(ROOT, "FCC_Walk_Outdoor_Indoor_Full/Outdoor_Walk_Test_7-24/timeseries_data.js"),
+                 help="a timeseries_data.js-style file (timeseriesRecords = [...]) with t_sec/lon/lat/rsrp/pci")
+_ap.add_argument("--bs", default=os.path.join(ROOT, "Data/base_stations.js"))
+_ap.add_argument("--out", default=os.path.join(ROOT, "Data/outdoor_timeseries.js"))
+_ap.add_argument("--fcc-lon", type=float, default=-77.00740)
+_ap.add_argument("--fcc-lat", type=float, default=38.90359)
+_args = _ap.parse_args()
+SRC, BS, OUT = _args.src, _args.bs, _args.out
+FCC = {"lon": _args.fcc_lon, "lat": _args.fcc_lat}
 
 # PCI -> operator, from the base-station catalog (a PCI is a sector of one operator's site).
 pci_op = {}

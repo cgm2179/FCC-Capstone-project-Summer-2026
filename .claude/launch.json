@@ -6,6 +6,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8777"],
       "port": 8777
+    },
+    {
+      "name": "server",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["Backend/server/app.py", "--host", "127.0.0.1", "--port", "8000"],
+      "port": 8000
     }
   ]
 }

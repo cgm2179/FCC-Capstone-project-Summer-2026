@@ -89,3 +89,11 @@ Physics Engine/Cross_Validation/validation/reports/*.png
 
 # PR #27 — regenerable 3D O2I volumes (rebuild with pathloss_3d/predict_o2i_3d.py)
 Physics Engine/Cross_Validation/pathloss_3d/out/
+
+# Project backend (Backend/server/app.py)
+Backend/server/.env               # local API keys (see .env.example)
+Backend/server/projects/          # runtime project store — created projects (generated data +
+                                  # uploaded inputs, can be large). Built-in "Default" projects are
+                                  # code (app.py BUILTINS + Data/projects/*.js); nothing here is
+                                  # committed. Saved workspaces live on the workspace-store branch.
+.workspace-store/                 # git worktree bound to the workspace-store branch (SAVE target)
