@@ -14,6 +14,10 @@
     select, input[type=number] { width:100%; background:#fff; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:7px 10px; font:inherit; }
     .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
     .seg button { flex:1; background:#fff; color:var(--muted); border:0; padding:7px; cursor:pointer; font:inherit; }
+    /* solver options stacked vertically (many solvers) */
+    #solverSeg { flex-direction: column; }
+    #solverSeg button { flex: none; text-align: left; border-top: 1px solid var(--line); }
+    #solverSeg button:first-child { border-top: 0; }
     .seg button.on { background:var(--accent); color:#fff; }
     .btn { width:100%; padding:9px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; margin-top:4px; }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
@@ -84,10 +88,10 @@
 
     <div class="grp"><label>Solver</label>
       <div class="seg" id="solverSeg">
-        <button class="on" data-v="auto" data-aiml="1">Auto</button><button data-v="onnx" data-aiml="1">ONNX</button><button data-v="fdtd">FDTD</button>
+        <button data-v="onnx" data-aiml="1">ONNX</button><button class="on" data-v="fdtd">FDTD</button>
       </div>
       <div id="engine">loading model…</div>
-      <p class="note">SIM&nbsp;V3 full-wave · Auto = ONNX surrogate → penetrable FDTD. This is <b>not</b> the legacy path-loss “Simulate 2D PL” engine.</p>
+      <p class="note">SIM&nbsp;V3 — ONNX surrogate (fast) or the penetrable FDTD full-wave solver. <b>Not</b> the legacy “Simulate 2D PL” engine.</p>
     </div>
     <div class="grp"><label>Base station</label><select id="station"></select></div>
     <div class="grp"><label>Band</label><select id="band"></select></div>
@@ -253,7 +257,7 @@
     let sel = STA[0] || { vx: NX / 2, vz: NZ / 2, boresight: 0, band: '', f_mhz: 617, site: '—', pci: '' };
 
     let contract = null, session = null, onnxReady = false, onnxWhy = 'not loaded';
-    let solverSel = 'auto', viewMode = 'heat', cmapName = 'viridis', rangeHi = 0, rangeLo = -40;
+    let solverSel = 'fdtd', viewMode = 'heat', cmapName = 'viridis', rangeHi = 0, rangeLo = -40;
     let field = null;
     let showBoxes = true, rx = null, rxMetrics = null;   // calc-box toggle + placed receiver + its metrics
 

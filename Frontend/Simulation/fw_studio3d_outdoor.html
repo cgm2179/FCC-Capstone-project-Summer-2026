@@ -14,6 +14,10 @@
     select, input[type=number] { width:100%; background:#fff; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:7px 10px; font:inherit; }
     .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
     .seg button { flex:1; background:#fff; color:var(--muted); border:0; padding:7px; cursor:pointer; font:inherit; }
+    /* solver options stacked vertically (many solvers) */
+    #solverSeg { flex-direction: column; }
+    #solverSeg button { flex: none; text-align: left; border-top: 1px solid var(--line); }
+    #solverSeg button:first-child { border-top: 0; }
     .seg button.on { background:var(--accent); color:#fff; }
     .btn { width:100%; padding:9px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; margin-top:4px; }
     .btn:disabled { opacity:.5; cursor:not-allowed; }

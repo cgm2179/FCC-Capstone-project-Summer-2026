@@ -14,6 +14,10 @@
     select, input[type=number] { width:100%; background:#fff; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:7px 10px; font:inherit; }
     .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
     .seg button { flex:1; background:#fff; color:var(--muted); border:0; padding:7px; cursor:pointer; font:inherit; }
+    /* solver options stacked vertically (many solvers) */
+    #solverSeg { flex-direction: column; }
+    #solverSeg button { flex: none; text-align: left; border-top: 1px solid var(--line); }
+    #solverSeg button:first-child { border-top: 0; }
     .seg button.on { background:var(--accent); color:#fff; }
     .btn { width:100%; padding:9px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; margin-top:4px; }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
@@ -64,10 +68,10 @@
 
     <div class="grp"><label>Solver</label>
       <div class="seg" id="solverSeg">
-        <button class="on" data-v="auto" data-aiml="1">Auto</button><button data-v="onnx" data-aiml="1">ONNX</button><button data-v="fdtd">FDTD</button>
+        <button data-v="onnx" data-aiml="1">ONNX</button><button class="on" data-v="fdtd">FDTD</button>
       </div>
       <div id="engine">loading model…</div>
-      <p class="note">Auto/ONNX = <b>hybrid</b> whole-floor RSRP: the trained surrogate near the Tx ⊕ eikonal path-loss + wall shadows for the rest. <b>FDTD solves a sub-volume around the Tx</b> (whole-floor 3-D FDTD is infeasible in a browser).</p>
+      <p class="note">ONNX = <b>hybrid</b> whole-floor RSRP: the trained surrogate near the Tx ⊕ eikonal path-loss + wall shadows for the rest. <b>FDTD solves a sub-volume around the Tx</b> (whole-floor 3-D FDTD is infeasible in a browser).</p>
     </div>
     <div class="grp"><label>Band</label><select id="band"></select></div>
     <div class="grp"><label>Tx power (dBm)</label><input id="txp" type="number" value="20" min="0" max="46" step="1"></div>
@@ -236,7 +240,7 @@
 
     // ---- segmented controls ----
     function seg(id, cb) { const el = $(id); el.querySelectorAll('button').forEach(b => b.onclick = () => { el.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); cb(b.dataset.v); }); }
-    let solverSel = 'auto', viewMode = 'heat', cmapName = 'rainbow', rangeHi = 0, rangeLo = -40, fieldStyle = 'cloud';
+    let solverSel = 'fdtd', viewMode = 'heat', cmapName = 'rainbow', rangeHi = 0, rangeLo = -40, fieldStyle = 'cloud';
     seg('solverSeg', v => { solverSel = v; $('fdtdResGrp').style.display = (v === 'onnx') ? 'none' : 'block'; reflectEngine(); });
     seg('modelSeg', v => { modelView = v; applyModelView(); });
     seg('viewSeg', v => { viewMode = v; drawCbar(); if (field) recolorField(viewMode === 'wave' ? phase : null); });
