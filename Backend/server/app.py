@@ -128,6 +128,7 @@ def resolve_data_path(project: dict, role: str) -> Path | None:
 
 # --- Flask app ----------------------------------------------------------------------------
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024   # 100 MB cap on uploaded CSV folders/models
 
 
 @app.after_request
@@ -415,6 +416,46 @@ def stress_test() -> int:
     return 0 if ok else 1
 
 
+def fake_project_test() -> int:
+    """Fabricate a SYNTHETIC walk-test project (fake CSVs + PNG + .TAB) and run it through
+    validate + pipeline.create, asserting a valid project — exercising the whole preprocess path
+    on fakes. Cleans up after itself; never touches committed data."""
+    import tempfile
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    import make_fake_walktest as fake
+    import pipeline
+    import validate as _validate
+
+    src = Path(tempfile.mkdtemp(prefix="rffake_"))
+    store = Path(tempfile.mkdtemp(prefix="rffakestore_"))
+    ok = True
+    try:
+        gen = fake.generate(src / "inputs")
+        files = {"csv": gen["csv"], "image": [gen["image"]], "tab": [gen["tab"]]}
+        mode = {"environment": "indoor", "dim": "2d"}
+        rep = _validate.validate(mode, files, {"cell_m": 0.3})
+        g = rep.get("grid") or {}
+        print(f"  validate ok: {rep.get('ok')} · grid ≈ {g.get('cols')}×{g.get('rows')} @ {g.get('cell_m')} m"
+              f" · columns: {len((rep.get('csv') or {}).get('columns') or [])}")
+        ok = bool(rep.get("ok"))
+        m = pipeline.create(store, "fake-walktest", mode, "Fake Walk Test", files, {})
+        recs = store / "fake-walktest" / "data" / "records_data.js"
+        good = recs.is_file() and recs.stat().st_size > 100
+        print(f"  create records_data.js: {'ok, ' + format(recs.stat().st_size, ',') + ' bytes' if good else 'MISSING/empty'}"
+              f" · ai_ml={m['ai_ml']} · roles={[x['role'] for x in m['data']]}")
+        ok = ok and good
+    except Exception as e:  # noqa: BLE001
+        ok = False
+        import traceback
+        traceback.print_exc()
+    finally:
+        _shutil.rmtree(src, ignore_errors=True)
+        _shutil.rmtree(store, ignore_errors=True)
+    print("fake-project:", "PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+
 def load_env() -> None:
     """Best-effort read of Backend/server/.env (KEY=VALUE lines) into os.environ. No key is
     required for the app; this is only for optional providers (see .env.example)."""
@@ -437,11 +478,15 @@ def main() -> int:
     ap.add_argument("--self-test", action="store_true", help="run checks and exit")
     ap.add_argument("--stress-test", action="store_true",
                     help="create a project and assert the default data is untouched, then exit")
+    ap.add_argument("--fake-project", action="store_true",
+                    help="fabricate a synthetic walk-test project (fake CSV/PNG/TAB) + validate/create it")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
     if args.stress_test:
         return stress_test()
+    if args.fake_project:
+        return fake_project_test()
     load_env()
     PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
     try:

@@ -658,7 +658,7 @@
       const A = (window.FLOORPLAN_META || {}).affine_px_to_mercator;
       if (!A) { useEmbedded(); return; }
 
-      // Extent (plan px): the plan frame ∪ the whole outdoor walk ∪ every base station.
+      // Extent (plan px): the plan frame ∪ the whole outdoor walk (matches Outdoor 3D's crop).
       const { pxMin, pxMax, pyMin, pyMax } = osmGroundExtent();
       const merc = (px, py) => [A[0][0]*px + A[0][1]*py + A[0][2], A[1][0]*px + A[1][1]*py + A[1][2]];
       const cs = [merc(pxMin, pyMin), merc(pxMax, pyMin), merc(pxMax, pyMax), merc(pxMin, pyMax)];
@@ -737,9 +737,11 @@
       if (jobs.length === 0) finish(); else pump();
     }
 
-    // Rectangle (plan px) the OSM ground should cover: the floor plan ∪ the whole outdoor
-    // walk ∪ every base station, so the wider street grid and the surveyed cells share one
-    // georeferenced plane. Memoized — depends only on the static datasets.
+    // Rectangle (plan px) the OSM ground should cover: the floor plan ∪ the whole outdoor walk
+    // + 5% pad — matching the Outdoor-3D view's walkBounds() so BOTH 3D basemaps crop to the
+    // same size. Base stations are still PLACED (addBaseStations) but are NOT counted in the
+    // extent: the far towers (Gonzaga, JHU-APL) would otherwise blow the crop well past the
+    // walk. Memoized — depends only on the static datasets.
     let _osmExtent = null;
     function osmGroundExtent() {
       if (_osmExtent) return _osmExtent;
@@ -752,7 +754,6 @@
       if (georef.available()) {
         const W = window.OUTDOOR_WALK;
         if (W && Array.isArray(W.pts)) for (const r of W.pts) { const p = georef.lonlatToPx(r[0], r[1]); grow(p.px, p.py); }
-        for (const b of (window.BASE_STATIONS || [])) if (Number.isFinite(b.lat)) { const p = georef.lonlatToPx(b.lon, b.lat); grow(p.px, p.py); }
       }
       const mX = (pxMax - pxMin) * 0.05, mY = (pyMax - pyMin) * 0.05;
       _osmExtent = { pxMin: pxMin - mX, pxMax: pxMax + mX, pyMin: pyMin - mY, pyMax: pyMax + mY };

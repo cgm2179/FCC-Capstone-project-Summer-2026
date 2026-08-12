@@ -191,12 +191,36 @@
         numRow('bldCeiling', 'Ceiling height (m)', '3', '0.1', '0.1') + '</div>';
       if (env === 'indoor')
         html += fileRow('bldTab', 'TAB georeference (optional)', 'accept=".tab,.TAB"', 'Optional for placement.');
-      html += numRow('bldCell', 'Voxel cell (m)', '1', '0.5', '0.1');
+      html += numRow('bldCell', 'Voxel cube (m)', '1', '0.5', '0.1');
     }
+    // Coordinate system / units + a live grid preview (label + unit-aware; no reprojection deps).
+    html += '<div class="field"><label for="bldCrs">Coordinate system</label>' +
+      '<select id="bldCrs">' +
+      '<option value="wgs84">WGS84 — lat/lon (°)</option>' +
+      '<option value="mercator">Pseudo-Mercator — x/y (m)</option>' +
+      '<option value="fixed">Fixed grid — set physical size</option>' +
+      '</select><div class="step-note">Columns → axes (x,y,z / lat,lon,elv) are auto-detected from the CSV headers; see “Columns read”.</div></div>';
+    html += '<div id="bldFixedFields" style="display:none"><div class="field"><label>Grid size</label>' +
+      '<span class="vox-cell"><input type="number" id="bldFixW" value="100" min="1" step="1"> × ' +
+      '<input type="number" id="bldFixH" value="100" min="1" step="1"> ' +
+      '<select id="bldFixUnit"><option>m</option><option>km</option><option>ft</option><option>mi</option></select></span></div></div>';
+    html += '<div class="field"><label>Grid preview</label>' +
+      '<canvas id="bldGridPreview" width="320" height="180" style="border:1px solid var(--line,#ccd);border-radius:6px;background:#fff;max-width:100%;display:block"></canvas>' +
+      '<div class="step-note" id="bldGridLabel">Add measurements + a TAB (or set a fixed grid) to preview the ' +
+      (dim === '3d' ? '3D voxel' : '2D') + ' grid.</div></div>';
+    html += '<details id="bldColumnsWrap" style="margin-top:4px"><summary id="bldColumnsSummary" class="step-note">Columns read</summary>' +
+      '<div id="bldColumns"></div></details>';
     box.innerHTML = html;
     box.querySelectorAll('input,select').forEach((el) => {
       el.addEventListener('change', scheduleValidate);
       el.addEventListener('input', scheduleValidate);
+    });
+    const cellEl = document.getElementById('bldCell');
+    if (cellEl) cellEl.addEventListener('input', () => { cellEl._touched = true; });
+    const crsEl = document.getElementById('bldCrs');
+    if (crsEl) crsEl.addEventListener('change', () => {
+      const ff = document.getElementById('bldFixedFields');
+      if (ff) ff.style.display = crsEl.value === 'fixed' ? '' : 'none';
     });
     const em = document.getElementById('bldElevMode');
     if (em) em.addEventListener('change', () => {
@@ -217,6 +241,14 @@
     if (em) opts.elevation = em.value === 'none' ? { mode: 'none' } : { mode: 'floor',
       floor_z_m: parseFloat((document.getElementById('bldFloorZ') || {}).value) || 0,
       ceiling_height_m: parseFloat((document.getElementById('bldCeiling') || {}).value) || 0 };
+    const crsEl = document.getElementById('bldCrs');
+    if (crsEl) {
+      opts.crs = crsEl.value;
+      if (crsEl.value === 'fixed') opts.grid_extent = {
+        w: parseFloat((document.getElementById('bldFixW') || {}).value) || 0,
+        h: parseFloat((document.getElementById('bldFixH') || {}).value) || 0,
+        unit: (document.getElementById('bldFixUnit') || {}).value || 'm' };
+    }
     return opts;
   }
 
@@ -234,16 +266,36 @@
     return fd;
   }
 
+  function selectedBytes() {
+    return ['bldCsv', 'bldModel', 'bldImage', 'bldTab'].reduce((sum, id) => {
+      const el = document.getElementById(id);
+      return sum + (el && el.files ? Array.from(el.files).reduce((a, f) => a + f.size, 0) : 0);
+    }, 0);
+  }
+
   function validateBuilder() {
     const report = document.getElementById('importBuilderReport');
     const create = document.getElementById('importCreate');
     const note = document.getElementById('importBuilderNote');
     if (!report) return;
+    // Client-side 100 MB cap (server also enforces MAX_CONTENT_LENGTH) — fail fast before upload.
+    const bytes = selectedBytes();
+    if (bytes > 100 * 1024 * 1024) {
+      report.className = 'step-status err';
+      report.innerHTML = '✗ Selected files total ' + (bytes / 1048576).toFixed(0) +
+        ' MB — over the 100 MB limit. Trim the CSV folder / model.';
+      if (create) create.disabled = true;
+      if (note) note.textContent = '';
+      return;
+    }
     fetch(window.PROJECT_API_BASE + '/validate', { method: 'POST', body: builderFormData() })
       .then((r) => r.json())
       .then((rep) => {
         report.className = 'step-status';
         report.innerHTML = renderReport(rep);
+        renderColumns(rep.csv);
+        maybePrefillCell(rep);   // interpolate a default cell from the extent (once, if untouched)
+        drawGridPreview(rep);
         if (create) create.disabled = !rep.ok;
         if (note) note.textContent = rep.ok ? 'Ready to create.' : 'Provide the required inputs above.';
       })
@@ -255,6 +307,74 @@
       });
   }
 
+  // Interpolate a default cell from the extent (target ~300 cells across) once, unless the user
+  // has typed a cell. Setting .value programmatically doesn't fire 'input', so no validate loop.
+  function maybePrefillCell(rep) {
+    const cellEl = document.getElementById('bldCell');
+    const s = rep.grid && rep.grid.suggested_cell_m;
+    if (cellEl && !cellEl._touched && s && parseFloat(cellEl.value) !== s) cellEl.value = s;
+  }
+
+  // "Columns read" panel: what the pipeline reads each CSV header as + how many inputs captured.
+  function renderColumns(csv) {
+    const box = document.getElementById('bldColumns');
+    const sum = document.getElementById('bldColumnsSummary');
+    if (!box) return;
+    if (!csv || !csv.columns) { box.innerHTML = ''; if (sum) sum.textContent = 'Columns read'; return; }
+    if (sum) sum.textContent = 'Columns read (' + csv.columns.length + ') · ' +
+      (csv.n_rows || 0).toLocaleString() + ' inputs captured · ' + (csv.n_files || 0) + ' file(s)';
+    box.innerHTML = '<table style="font-size:12px;border-collapse:collapse;width:100%">' +
+      csv.columns.map((c) => '<tr>' +
+        '<td style="padding:1px 6px;font-family:ui-monospace,monospace">' + c.name + '</td>' +
+        '<td style="padding:1px 6px;color:' + (c.role === 'ignored' ? '#999' : '#2a7d46') + '">' + c.role + '</td>' +
+        '<td style="padding:1px 6px;color:#888">' + (c.numeric ? 'num' : 'text') + '</td>' +
+        '<td style="padding:1px 6px;color:#aaa">' + String(c.sample || '').slice(0, 18) + '</td>' +
+        '</tr>').join('') + '</table>';
+  }
+
+  // Live grid preview: 2D = bbox + capped cell grid; 3D = an isometric voxel-cube schematic.
+  function drawGridPreview(rep) {
+    const cv = document.getElementById('bldGridPreview');
+    const lab = document.getElementById('bldGridLabel');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    const g = rep.grid;
+    if (!g || !g.extent_m) { if (lab) lab.textContent = 'Add measurements + a TAB (or set a fixed grid) to preview.'; return; }
+    const cell = parseFloat((document.getElementById('bldCell') || {}).value) || g.cell_m;
+    const ew = g.extent_m[0], eh = g.extent_m[1];
+    const cols = Math.max(1, Math.ceil(ew / cell) + 1), rows = Math.max(1, Math.ceil(eh / cell) + 1);
+    const W = cv.width, H = cv.height, pad = 14;
+    if (window.appMode.dim !== '3d') {
+      const s = Math.min((W - 2 * pad) / ew, (H - 2 * pad) / eh);
+      const rw = ew * s, rh = eh * s, ox = (W - rw) / 2, oy = (H - rh) / 2;
+      ctx.strokeStyle = '#0a7f7a'; ctx.lineWidth = 1.5; ctx.strokeRect(ox, oy, rw, rh);
+      ctx.strokeStyle = 'rgba(10,127,122,.28)'; ctx.lineWidth = 0.5;
+      const cs = Math.max(1, Math.ceil(cols / 40)), rs = Math.max(1, Math.ceil(rows / 40));
+      for (let i = 0; i <= cols; i += cs) { const x = ox + rw * i / cols; ctx.beginPath(); ctx.moveTo(x, oy); ctx.lineTo(x, oy + rh); ctx.stroke(); }
+      for (let j = 0; j <= rows; j += rs) { const y = oy + rh * j / rows; ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox + rw, y); ctx.stroke(); }
+      if (lab) lab.textContent = '≈ ' + cols + ' × ' + rows + ' cells @ ' + cell + ' × ' + cell + ' m  (' + ew + ' × ' + eh + ' m)';
+    } else {
+      drawIsoGrid(ctx, W, H);
+      if (lab) lab.textContent = '≈ ' + cols + ' × ' + rows + ' × ' + (g.layers || '?') + ' voxels @ ' + cell + '³ m';
+    }
+  }
+
+  function drawIsoGrid(ctx, W, H) {
+    const cx = W / 2, cy = H * 0.66, S = 26, nx = 4, ny = 3, nz = 2;
+    const ux = [Math.cos(-Math.PI / 6), Math.sin(-Math.PI / 6)];
+    const uy = [Math.cos(-5 * Math.PI / 6), Math.sin(-5 * Math.PI / 6)];
+    const P = (i, j, k) => [cx + (i - nx / 2) * S * ux[0] + (j - ny / 2) * S * uy[0],
+                            cy + (i - nx / 2) * S * ux[1] + (j - ny / 2) * S * uy[1] - k * S * 0.7];
+    ctx.strokeStyle = 'rgba(10,127,122,.55)'; ctx.lineWidth = 0.7;
+    const line = (a, b) => { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); };
+    for (let k = 0; k <= nz; k++) {
+      for (let i = 0; i <= nx; i++) line(P(i, 0, k), P(i, ny, k));
+      for (let j = 0; j <= ny; j++) line(P(0, j, k), P(nx, j, k));
+    }
+    for (let i = 0; i <= nx; i++) for (let j = 0; j <= ny; j++) line(P(i, j, 0), P(i, j, nz));
+  }
+
   function renderReport(rep) {
     const row = (x, opt) => '<div style="color:' + (x.ok ? '#2a7d46' : '#b0483f') + '">' +
       (x.ok ? '✓' : '✗') + ' ' + x.role + (opt ? ' (optional)' : '') + ' — ' + (x.detail || '') + '</div>';
@@ -262,8 +382,13 @@
     (rep.required || []).forEach((x) => { h += row(x, false); });
     (rep.optional || []).forEach((x) => { h += row(x, true); });
     (rep.warnings || []).forEach((w) => { h += '<div style="color:#b0771f">⚠ ' + w + '</div>'; });
-    if (rep.grid) h += '<div style="color:#888">grid ≈ ' + rep.grid.cols + ' × ' + rep.grid.rows +
-      ' @ ' + rep.grid.cell_m + ' m' + (rep.grid.extent_m ? ' (' + rep.grid.extent_m.join(' × ') + ' m)' : '') + '</div>';
+    if (rep.grid) {
+      const gd = rep.grid;
+      h += '<div style="color:#888">grid ≈ ' + gd.cols + ' × ' + gd.rows +
+        (gd.layers ? ' × ' + gd.layers : '') + ' @ ' + gd.cell_m + ' m' +
+        (gd.extent_m ? ' (' + gd.extent_m.join(' × ') + ' m)' : '') +
+        (gd.suggested_cell_m ? ' · suggested cell ≈ ' + gd.suggested_cell_m + ' m' : '') + '</div>';
+    }
     return h;
   }
 
