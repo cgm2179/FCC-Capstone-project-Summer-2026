@@ -10,7 +10,7 @@ stitched field stays phase-coherent.
 g2 gate: predict the whole 7th floor at 617 MHz for a held-out Tx and compare to a
 fresh FDTD solve of the same scene (envelope dB RMSE, Spearman, complex coherence).
 
-  python fw_infer.py --ckpt fw_unet2d.pt --band LTE_B71_617 --validate
+  python fw_infer.py --ckpt assets/fw_unet2d.pt --band LTE_B71_617 --validate
 """
 from __future__ import annotations
 
@@ -234,7 +234,7 @@ def render_prediction(model, band_label="LTE_B71_617", n_per_wavelength=8.0,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", default="fw_unet2d.pt")
+    ap.add_argument("--ckpt", default="assets/fw_unet2d.pt")
     ap.add_argument("--band", default="LTE_B71_617")
     ap.add_argument("--validate", action="store_true", help="indoor g2 gate")
     ap.add_argument("--outdoor", action="store_true", help="outdoor g2 (NoMa region)")

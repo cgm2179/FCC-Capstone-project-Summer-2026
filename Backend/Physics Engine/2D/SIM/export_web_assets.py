@@ -40,10 +40,10 @@ def main():
     ap.add_argument("--skip-bs", action="store_true")
     args = ap.parse_args()
 
-    manifest = json.loads((SIM / "manifest.json").read_text())
-    grid = np.load(SIM / "grid_model.npy")
-    inside = np.load(SIM / "inside_mask.npy")
-    walkable = np.load(SIM / "walkable_mask.npy")
+    manifest = json.loads((SIM / "assets" / "manifest.json").read_text())
+    grid = np.load(SIM / "assets" / "grid_model.npy")
+    inside = np.load(SIM / "assets" / "inside_mask.npy")
+    walkable = np.load(SIM / "assets" / "walkable_mask.npy")
     cell = manifest["cell_size_m"]
 
     bs = None

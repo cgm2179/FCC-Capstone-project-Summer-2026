@@ -108,7 +108,7 @@ def train(data, epochs=25, base=16, bs=4, lr=1e-3, val_frac=0.2, out=None):
         vmse /= max(nv2, 1); best = min(best, vmse)
         if ep % 5 == 0 or ep == epochs - 1:
             print(f"  ep{ep:3d}  val_mse={vmse:.4f}  (best {best:.4f})")
-    out = Path(out) if out else HERE / "fw_unet3d.pt"
+    out = Path(out) if out else HERE.parent / "assets" / "fw_unet3d.pt"
     torch.save({"state": m.state_dict(), "base": base, "in_ch": cin, "out_ch": cout}, out)
     print(f"saved {out}  best_val_mse={best:.4f}")
     return m, best

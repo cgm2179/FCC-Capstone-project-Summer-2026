@@ -185,9 +185,9 @@ def prepare_grid():
         grid[small] = 1
 
     walkable = np.isin(grid, [0, 4]) & inside      # Rule R8
-    np.save(SIM / "grid_model.npy", grid)
-    np.save(SIM / "inside_mask.npy", inside)
-    np.save(SIM / "walkable_mask.npy", walkable)
+    np.save(SIM / "assets" / "grid_model.npy", grid)
+    np.save(SIM / "assets" / "inside_mask.npy", inside)
+    np.save(SIM / "assets" / "walkable_mask.npy", walkable)
     return grid, inside, walkable, cell, mpp0
 
 
@@ -339,8 +339,8 @@ def write_manifest(grid, walkable, cell_size_m, mpp0):
         version="sim-v1.1",
         grid_shape=[H_MODEL, W_MODEL],
         cell_size_m=round(cell_size_m, 6),
-        floor_rows=[int(np.nonzero(np.load(SIM / 'inside_mask.npy').any(1))[0][0]),
-                    int(np.nonzero(np.load(SIM / 'inside_mask.npy').any(1))[0][-1] + 1)],
+        floor_rows=[int(np.nonzero(np.load(SIM / 'assets' / 'inside_mask.npy').any(1))[0][0]),
+                    int(np.nonzero(np.load(SIM / 'assets' / 'inside_mask.npy').any(1))[0][-1] + 1)],
         scale_status=f"measured from QGIS GCPs: {mpp0:.4f} m/px source raster; "
                      "supersedes the 12.3 px/m estimate in the build doc",
         # 9th channel deviates from the doc's 8-channel table: without an
@@ -406,7 +406,7 @@ def write_manifest(grid, walkable, cell_size_m, mpp0):
         walkable_mask_sha256=hashlib.sha256(walkable.tobytes()).hexdigest()[:16],
         grid_sha256=hashlib.sha256(grid.tobytes()).hexdigest()[:16],
     )
-    (SIM / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    (SIM / "assets" / "manifest.json").write_text(json.dumps(manifest, indent=2))
     return manifest
 
 
@@ -444,9 +444,9 @@ def run_tests():
 
 
 def sample_maps():
-    grid = np.load(SIM / "grid_model.npy")
-    inside = np.load(SIM / "inside_mask.npy")
-    manifest = json.loads((SIM / "manifest.json").read_text())
+    grid = np.load(SIM / "assets" / "grid_model.npy")
+    inside = np.load(SIM / "assets" / "inside_mask.npy")
+    manifest = json.loads((SIM / "assets" / "manifest.json").read_text())
     cell = manifest["cell_size_m"]
     txs = json.loads((ROOT / "STEP_1" / "transmitters.json").read_text())["transmitters"]
     # STEP_1 pin -> model cell coords (source px -> meters -> cells, plus pad)

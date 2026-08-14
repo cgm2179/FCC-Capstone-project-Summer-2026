@@ -115,7 +115,7 @@ def load_params_from_torch(ckpt="fw_unet3d.pt", jnp=None, dtype=None):
     """Port a trained PyTorch UNet3DField state_dict into a flat {name: array} pytree.
     Conv/BN weight layouts already match (OIDHW / per-channel), so it's a straight cast."""
     import torch
-    ck = torch.load(HERE / ckpt if not Path(ckpt).is_absolute() else ckpt, map_location="cpu")
+    ck = torch.load(HERE.parent / ckpt if not Path(ckpt).is_absolute() else ckpt, map_location="cpu")
     state = ck["state"]
     meta = dict(base=ck["base"], in_ch=ck["in_ch"], out_ch=ck["out_ch"])
     params = {}
@@ -136,7 +136,7 @@ def parity(ckpt="fw_unet3d.pt", shape=(1, 9, 24, 16, 24)):
     jax, jnp, lax = _jax(x64=True)
     from fw_unet3d import UNet3DField
 
-    ck = torch.load(HERE / ckpt, map_location="cpu")
+    ck = torch.load(HERE.parent / ckpt, map_location="cpu")
     tm = UNet3DField(cin=ck["in_ch"], cout=ck["out_ch"], base=ck["base"])
     tm.load_state_dict(ck["state"]); tm.eval(); tm.double()
     rng = np.random.default_rng(0)

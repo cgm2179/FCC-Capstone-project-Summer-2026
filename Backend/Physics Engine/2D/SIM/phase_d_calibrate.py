@@ -41,8 +41,8 @@ def fit():
             f"Provide {MEASUREMENTS_CSV.name} (x_px, y_px, rsrp_dbm, freq_mhz)"
             " and set TX_KNOWN. See SIM/README.md 'Phase D'.")
 
-    grid = np.load(SIM / "grid_model.npy")
-    manifest = json.loads((SIM / "manifest.json").read_text())
+    grid = np.load(SIM / "assets" / "grid_model.npy")
+    manifest = json.loads((SIM / "assets" / "manifest.json").read_text())
     cell = manifest["cell_size_m"]
     df = pd.read_csv(MEASUREMENTS_CSV)
     df["cx"], df["cy"] = df.x_px.round().astype(int), df.y_px.round().astype(int)
@@ -92,9 +92,9 @@ def fit():
 
 def sanity():
     """D.3 checks, runnable today against the simulator itself."""
-    grid = np.load(SIM / "grid_model.npy")
-    inside = np.load(SIM / "inside_mask.npy")
-    manifest = json.loads((SIM / "manifest.json").read_text())
+    grid = np.load(SIM / "assets" / "grid_model.npy")
+    inside = np.load(SIM / "assets" / "inside_mask.npy")
+    manifest = json.loads((SIM / "assets" / "manifest.json").read_text())
     cell = manifest["cell_size_m"]
     tx = (246.0, 189.0)
     pl, k = pa.pathloss_map(grid, tx, 3500.0, cell, return_crossings=True)

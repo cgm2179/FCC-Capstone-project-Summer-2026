@@ -83,7 +83,7 @@ def load_session():
     if not ok:
         raise SolverUnavailable(
             f"ONNX solver unavailable — {why}. Export it with `python fw_export.py "
-            f"--ckpt fw_unet2d.pt`, or use --solver fdtd."
+            f"--ckpt assets/fw_unet2d.pt`, or use --solver fdtd."
         )
     import onnxruntime as ort
     model, _ = onnx_paths()

@@ -67,9 +67,9 @@ def main():
     ap.add_argument("--bs-map", help="npy of BS P_rx (for hole_filling)")
     args = ap.parse_args()
 
-    manifest = json.loads((SIM / "manifest.json").read_text())
-    grid = np.load(SIM / "grid_model.npy")
-    walk = np.load(SIM / "walkable_mask.npy")
+    manifest = json.loads((SIM / "assets" / "manifest.json").read_text())
+    grid = np.load(SIM / "assets" / "grid_model.npy")
+    walk = np.load(SIM / "assets" / "walkable_mask.npy")
     cell = manifest["cell_size_m"]
     onehot = np.stack([(grid == c) for c in range(6)]).astype(np.float32)
 
@@ -126,7 +126,7 @@ def main():
               f"score {scores[i]:.4f}")
         result.append(dict(rank=r, x_cell=int(x), y_cell=int(y),
                            score=float(scores[i])))
-    (SIM / f"optimizer_top5_{args.objective}.json").write_text(json.dumps(dict(
+    (SIM / "assets" / f"optimizer_top5_{args.objective}.json").write_text(json.dumps(dict(
         objective=args.objective, freq_mhz=args.freq, eirp_dbm=eirp,
         threshold_dbm=args.threshold, margin_db=margin,
         stride=args.stride, top5=result), indent=2))

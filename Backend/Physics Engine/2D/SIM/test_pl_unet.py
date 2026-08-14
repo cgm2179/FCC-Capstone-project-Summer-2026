@@ -66,7 +66,7 @@ def main():
     ap.add_argument("--freq", type=float, default=2400.0, help="frequency in MHz")
     ap.add_argument("--tx-x", type=int, default=None, help="Tx column (default: scene centroid)")
     ap.add_argument("--tx-y", type=int, default=None, help="Tx row (default: scene centroid)")
-    ap.add_argument("--out", default=os.path.join(HERE, "pl_unet_test.png"))
+    ap.add_argument("--out", default=os.path.join(HERE, "assets", "pl_unet_test.png"))
     ap.add_argument("--cmap", default="jet", help="matplotlib colormap for the PL map")
     args = ap.parse_args()
 

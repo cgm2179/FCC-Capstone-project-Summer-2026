@@ -29,11 +29,23 @@ SIM3D = _PHYS / "3D Map Physics" / "SIM V1 3D"
 SIM2D = _PHYS / "2D" / "SIM"
 STEP2 = _PHYS / "2D" / "STEP_2"          # 2-D Motley-Keenan (outdoor far field)
 
-# most-specific first so a bare `import physics_3d` resolves to the production one
-for _d in (WAVE_GEN, SIM3D, SIM2D, STEP2):
-    _s = str(_d)
-    if _d.is_dir() and _s not in sys.path:
-        sys.path.insert(0, _s)
+# Register each engine dir AND its immediate code subdirs (physics/ surrogate/
+# helpers/ …), so bare imports still resolve after the modules were bucketed into
+# role subfolders. _HERE (SIM V3's own root) is added LAST so its buckets win for
+# any same-named module.
+def _add_tree(_d: Path) -> None:
+    if not _d.is_dir():
+        return
+    _subs = [_d] + [c for c in sorted(_d.iterdir())
+                    if c.is_dir() and not c.name.startswith((".", "_"))
+                    and any(f.suffix == ".py" for f in c.iterdir())]
+    for _x in _subs:
+        _s = str(_x)
+        if _s not in sys.path:
+            sys.path.insert(0, _s)
+
+for _d in (WAVE_GEN, SIM3D, SIM2D, STEP2, _HERE):
+    _add_tree(_d)
 
 # canonical on-disk scene the indoor engine already ships (voxelize.py output)
 SCENE_DIR = SIM3D

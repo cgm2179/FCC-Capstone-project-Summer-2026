@@ -324,7 +324,7 @@ def main():
     ap.add_argument("--holdout", default="BS7_forte_hall")
     ap.add_argument("--gen", action="store_true")
     ap.add_argument("--validate", action="store_true")
-    ap.add_argument("--ckpt", default="fw_bs.pt")
+    ap.add_argument("--ckpt", default="assets/fw_bs.pt")
     ap.add_argument("--out", default="fw_data_bs")
     ap.add_argument("--city-dir", default=None,
                     help="alternate city grid dir (e.g. the real-OSM "

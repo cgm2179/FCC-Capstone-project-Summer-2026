@@ -85,9 +85,10 @@ def prepare(repo: Path, out: Path):
     walkable = np.isin(grid, [0, 4]) & inside        # Rule R8
 
     out.mkdir(parents=True, exist_ok=True)
-    np.save(out / "grid_model_v2.npy", grid)
-    np.save(out / "inside_mask_v2.npy", inside)
-    np.save(out / "walkable_mask_v2.npy", walkable)
+    (out / "assets").mkdir(parents=True, exist_ok=True)
+    np.save(out / "assets" / "grid_model_v2.npy", grid)
+    np.save(out / "assets" / "inside_mask_v2.npy", inside)
+    np.save(out / "assets" / "walkable_mask_v2.npy", walkable)
 
     write_manifest(grid, walkable, inside, cell, mpp0, out, repo)
 
@@ -136,7 +137,7 @@ def write_manifest(grid, walkable, inside, cell, mpp0, out, repo):
                      # @2600 for a 23 dBm Tx (beats measured outdoor donor).
                      obs_solidity=0.35, obs_ceiling_db=55.0,
                      saturation="soft tanh ceiling 55 dB + solidity 0.35",
-                     doc="SIM V2/v2_physics.pdf"),
+                     doc="SIM V2/docs/v2_physics.pdf"),
         freqs_mhz=list(P.FREQS_MHZ_V2),
         materials=[dict(id=m["id"], name=m["name"],
                         p2040=m.get("p2040"), t_ref_m=m.get("t_ref_m"),
@@ -148,7 +149,7 @@ def write_manifest(grid, walkable, inside, cell, mpp0, out, repo):
         grid_sha256=hashlib.sha256(grid.tobytes()).hexdigest()[:16],
         walkable_mask_sha256=hashlib.sha256(walkable.tobytes()).hexdigest()[:16],
     )
-    (out / "manifest_v2.json").write_text(json.dumps(manifest, indent=2))
+    (out / "assets" / "manifest_v2.json").write_text(json.dumps(manifest, indent=2))
 
 
 def run_test(repo: Path):

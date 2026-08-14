@@ -128,9 +128,9 @@ def main():
             p2040=p["key"], cls=p["cls"], eps_re=round(p["eps_r"].real, 3),
             eps_im=round(p["eps_r"].imag, 4), sigma=p["sigma"], is_metal=p["is_metal"]))
             for n, p in tbl.items()}
-        (HERE / "cad_material_map.json").write_text(json.dumps(
+        (HERE.parent / "assets" / "cad_material_map.json").write_text(json.dumps(
             {"band": a.band, "f_mhz": f, "materials": out}, indent=2))
-        print(f"wrote {HERE / 'cad_material_map.json'} ({len(out)} materials)")
+        print(f"wrote {HERE.parent / 'assets' / 'cad_material_map.json'} ({len(out)} materials)")
 
 
 if __name__ == "__main__":

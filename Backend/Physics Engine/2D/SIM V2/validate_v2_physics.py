@@ -53,10 +53,10 @@ def main():
     import engine_v2_torch as ET
     import torch
 
-    grid = np.load(sd / "grid_model_v2.npy")
-    inside = np.load(sd / "inside_mask_v2.npy")
-    wk = np.load(sd / "walkable_mask_v2.npy")
-    man = json.loads((sd / "manifest_v2.json").read_text())
+    grid = np.load(sd / "assets" / "grid_model_v2.npy")
+    inside = np.load(sd / "assets" / "inside_mask_v2.npy")
+    wk = np.load(sd / "assets" / "walkable_mask_v2.npy")
+    man = json.loads((sd / "assets" / "manifest_v2.json").read_text())
     cell, freqs = man["cell_size_m"], man["freqs_mhz"]
     phys = man["physics"]
 

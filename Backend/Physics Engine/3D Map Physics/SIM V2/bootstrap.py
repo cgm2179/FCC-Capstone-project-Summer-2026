@@ -38,14 +38,24 @@ ANTENNA_3D = _PHYS / "3D Map Physics" / "Object and Tranmission" / "Transmitter 
 
 # SIM V2's OWN dir must win over SIM V3 for same-named modules (fw_dataset3d,
 # fw_field3d, fw_field3d_floor, city_georef, fw_bs_catalog, fw_export): prepend it.
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
-# engine dirs are FALLBACK (appended) so the local SIM V2 ports take precedence;
-# engine-internal bare imports (fullwave2d→bands_v3, _bootstrap, physics_3d, …) still resolve.
+# Register a dir AND its immediate code subdirs (physics/ surrogate/ helpers/ …),
+# so bare imports resolve after the reorg bucketed modules into role subfolders.
+def _add_tree(_d: Path, *, front: bool) -> None:
+    if not _d.is_dir():
+        return
+    _subs = [_d] + [c for c in sorted(_d.iterdir())
+                    if c.is_dir() and not c.name.startswith((".", "_"))
+                    and any(f.suffix == ".py" for f in c.iterdir())]
+    for _x in _subs:
+        _s = str(_x)
+        if _s not in sys.path:
+            sys.path.insert(0, _s) if front else sys.path.append(_s)
+
+# SIM V2's OWN buckets win (prepended); engine dirs are FALLBACK (appended) so the
+# local SIM V2 ports take precedence while engine-internal bare imports still resolve.
+_add_tree(_HERE, front=True)
 for _d in (SIMV3, WAVE_GEN, SIM3D, SIM2D, STEP2, ANTENNA_3D):
-    _s = str(_d)
-    if _d.is_dir() and _s not in sys.path:
-        sys.path.append(_s)
+    _add_tree(_d, front=False)
 
 # canonical indoor scene (SIM V1 3D/voxelize.py output)
 SCENE_DIR     = SIM3D

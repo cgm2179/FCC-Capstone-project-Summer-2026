@@ -90,10 +90,10 @@ def main() -> int:
     fp3 = ndimage.binary_fill_holes((M3 != 0).any(axis=1))   # (NX, NZ)
     NX, NZ = fp3.shape
 
-    man2 = json.loads((SIM2D / "manifest.json").read_text())
+    man2 = json.loads((SIM2D / "assets" / "manifest.json").read_text())
     cell2 = float(man2["cell_size_m"])
-    ins2 = np.load(SIM2D / "inside_mask.npy").astype(bool)   # (H=256, W=448)
-    g2 = np.load(SIM2D / "grid_model.npy")
+    ins2 = np.load(SIM2D / "assets" / "inside_mask.npy").astype(bool)   # (H=256, W=448)
+    g2 = np.load(SIM2D / "assets" / "grid_model.npy")
     r0, r1 = man2.get("floor_rows", [0, ins2.shape[0]])
     fp2 = ndimage.binary_fill_holes((g2[r0:r1 + 1, :] != 0) | ins2[r0:r1 + 1, :])
 
@@ -146,7 +146,7 @@ def main() -> int:
         "rx_height_m": a.rx_height_m,
         "rx_y_vox": int(round(a.rx_height_m / cell3)),
         "room_band": man.get("room_band"),
-        "source": {"mask_2d": str(SIM2D / "inside_mask.npy"),
+        "source": {"mask_2d": str(SIM2D / "assets" / "inside_mask.npy"),
                    "mask_3d": str(HERE / "inside_mask.npy"),
                    "floorplan_meta": str(STEP1 / "floorplan_meta.json")},
         "note": "Scale ANCHORED on m_per_px/cell_size_m (both grids were registered to the same floor plan); footprint IoU is a quality check, not the fit. Outline-vs-outline IoU 0.8929 against a 0.891 ceiling set by fill mismatch. Compose lon/lat -> px with floorplan_meta affine_px_to_lonlat inverse, then px -> voxel with px_to_vox_scale.",

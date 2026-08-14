@@ -7,7 +7,7 @@ Mirrors SIM V1 3D/export_surrogate_smoke.py, but for the 2-D complex-field model
 must be multiples of 16). The sidecar (fw_unet2d.json) tells the browser how to
 build the 9-channel input, denormalize (re,im), and reconstruct U = Ũ·e^{-jkd}.
 
-  python fw_export.py --ckpt fw_unet2d.pt
+  python fw_export.py --ckpt assets/fw_unet2d.pt
 """
 from __future__ import annotations
 
@@ -168,7 +168,7 @@ def main():
     args = ap.parse_args()
 
     is_bs = args.model == "bs"
-    ckpt = args.ckpt or ("fw_bs.pt" if is_bs else "fw_unet2d.pt")
+    ckpt = args.ckpt or ("assets/fw_bs.pt" if is_bs else "assets/fw_unet2d.pt")
     dmeta_path = args.data_meta or (
         "fw_data_bs/dataset_meta.json" if is_bs else "fw_data_617/dataset_meta.json")
     onnx_name = "fw_bs.onnx" if is_bs else "fw_unet2d.onnx"
