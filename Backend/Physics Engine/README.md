@@ -3,9 +3,52 @@
 Two RF-propagation stacks, each a sequence of versions. Everything you **run** sits at a
 version folder's root; **library code and data** are sorted into role subfolders.
 
+## The engines at a glance
+
+Two axes cut through every folder: **dimension** (2D floor-plane vs 3D voxel) and
+**physics** — analytic Motley-Keenan → eikonal/GO → full-wave FDTD (fastest+coarsest to
+slowest+exact). Each physics engine also has a fast **U-Net surrogate** trained on it.
+
+```mermaid
+graph LR
+  subgraph TWO["2D · floor plane"]
+    direction TB
+    MK2["<b>analytic — Motley-Keenan</b><br/>SIM (v1) · SIM V2<br/>multi-wall path loss"]
+    FW2["<b>full-wave — FDTD</b><br/>SIM V3<br/>+ fw_unet2d / fw_unet3d"]
+  end
+  subgraph THREE["3D · voxel"]
+    direction TB
+    EIK["<b>eikonal / GO</b> (SceneV3)<br/>SIM V1 3D · SIM V1.5 3D<br/>+ pl_unet3d · production"]
+    FW3["<b>full-wave — FDTD</b> (JAX)<br/>SIM V2 (3D)<br/>+ 3D field U-Net + hybrid"]
+  end
+  MK2 -. "coarse → detailed" .-> FW2
+  EIK -. "coarse → detailed" .-> FW3
+  FW3 == "hybrid: near full-wave + far eikonal" ==> EIK
+```
+
+| folder | dim | physics | role | status |
+|---|---|---|---|---|
+| `2D/SIM` | 2D | Motley-Keenan | v1 engine + PL U-Net; also holds `step1_geometry`/`step2_pathloss` | foundational |
+| `2D/SIM V2` | 2D | Motley-Keenan | enhanced 7-class MK | selectable solver |
+| `2D/_archive/SIM V2.2 (1)` | 2D | — | redundant copy of `SIM V2` | **archived** |
+| `2D/SIM V3` | 2D | full-wave FDTD | current 2D full-wave + `fw_unet2d` / `fw_unet3d` | **current 2D** |
+| `SIM V1 3D` | 3D | eikonal / GO | SceneV3 + voxelizer + `pl_unet3d` + backend hooks | **current 3D analytic** |
+| `SIM V1.5 3D` | 3D | eikonal / GO | thin config / link-budget layer over SceneV3 | wrapper |
+| `SIM V2` (3D) | 3D | full-wave FDTD | 3D full-wave (JAX) + 3D field U-Net + hybrid | **current 3D full-wave** |
+
+The *3D* field U-Net (`fw_unet3d`) lives under **`2D/SIM V3`** — it shares SIM V3's full-wave
+training stack — and the eikonal far-field it pairs with in the hybrid is the separate
+**`SIM V2` (3D)** → **`SIM V1 3D`** engine.
+
+> **Why the version folders aren't physically renamed/regrouped:** the bootstraps and several
+> modules locate everything by *folder depth* (`Path(__file__).resolve().parent.parent / "2D" / "SIM"`,
+> etc.), and the backend, top-level `SIM`/`SIM3D`/`TESTS3D` symlinks, `.gitignore`, and the Unity
+> repo hardcode the current names. Inserting a grouping level or renaming would break all of that
+> (and `.resolve()` defeats compat symlinks), so the separation lives in this map instead.
+
 ## Version lineage
 
-- **2D (floor-plane):** `2D/SIM` (v1) → `2D/SIM V2` → `2D/SIM V2.2 (1)` → `2D/SIM V3`
+- **2D (floor-plane):** `2D/SIM` (v1) → `2D/SIM V2` → `2D/SIM V3`  (the redundant `SIM V2.2 (1)` copy is now under `2D/_archive/`)
   - `2D/SIM` (v1) also holds the earliest pipeline stages, folded in:
     `step1_geometry/` (was `2D/STEP_1`, floor-plan raster → model) and
     `step2_pathloss/` (was `2D/STEP_2`, Motley-Keenan heatmap).
