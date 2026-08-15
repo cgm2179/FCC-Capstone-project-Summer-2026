@@ -59,7 +59,8 @@ training stack — and the eikonal far-field it pairs with in the hybrid is the 
 
 | Location | Holds |
 |---|---|
-| **(root)** | the bootstrap shim + the drivers you invoke (`run_*`, `phase_*`, `export_*`, `voxelize*`, `fetch_*`, `fw_solver/infer/export`, dataset generators) |
+| **(root)** | the bootstrap shim + README (and, for `SIM V1 3D`, the backend-invoked `voxelize.py`/`export_web3.py`, the depth-coupled libs `modes_3d`/`cache_index`/`voxelize_city`, and the canonical scene data, which are wired to that exact path) |
+| **`run/`** | the entry-point scripts you invoke (`run_*`, `phase_*`, `export_*`, `fetch_*`, `fw_solver/infer/export`, dataset generators). Each carries a 2-line `sys.path` shim so it still finds its bootstrap/siblings from one level down. |
 | **`physics/`** | EM cores, engines, FDTD/full-wave, near/far-field, hybrid, extractors |
 | **`surrogate/`** | U-Net / JAX models, training, featurization (the "unet-specific" code) |
 | **`helpers/`** | bands, antenna patterns, georef, catalogs, perf, config, contracts (getters/config) |
