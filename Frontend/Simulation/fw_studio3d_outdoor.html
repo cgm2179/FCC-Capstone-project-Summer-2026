@@ -70,8 +70,14 @@
 <body>
   <div id="side">
     <h2>Outdoor Full-Wave Studio · 3D</h2>
-    <p class="sub">SIM V3 · the NoMa DC city over a real basemap, with the surveyed base stations on their rooftops. Pick a PCI, antenna, and band, then generate the outdoor coverage field.</p>
+    <p class="sub">SIM V3 · the NoMa DC city over a real basemap, with the surveyed base stations on their rooftops.</p>
 
+    <div style="margin:6px 0 14px; padding:12px 14px; border:1px solid var(--line); border-left:4px solid var(--warn); border-radius:10px; background:#fff7e6;">
+      <div style="font-size:1.0rem; font-weight:700; color:var(--warn);">🚧 Still in development</div>
+      <div style="font-size:0.82rem; margin-top:4px; color:var(--muted);">The outdoor 3-D coverage solver and receiver tools aren't ready yet. The georeferenced NoMa city model is shown at right for preview — orbit and inspect it; the controls return when the solver ships.</div>
+    </div>
+
+    <div id="devHidden" style="display:none">
     <div class="grp"><label>Base station · PCI (Tx)</label><select id="station"></select>
       <div class="note" id="stMeta"></div></div>
     <div class="grp"><label>Antenna</label>
@@ -143,6 +149,7 @@
 
     <div class="grp"><label>Materials (legend ↔ voxels)</label><table id="legend"></table>
       <p class="note" id="scaleNote"></p></div>
+    </div><!-- /devHidden -->
   </div>
 
   <div id="view">

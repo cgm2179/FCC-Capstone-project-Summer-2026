@@ -85,6 +85,13 @@
     <div id="warn"></div>
     <div id="status">ready</div>
 
+    <div class="grp" style="margin-top:16px"><label>Receiver (Rx)</label>
+      <button class="btn ghost" id="placeRx">＋ Place Rx (click the model)</button>
+      <button class="btn ghost" id="clearRx" style="margin-top:4px">✕ Clear Rx</button>
+      <div id="rxOut" style="margin-top:6px; font-size:0.74rem; color:#9fb; font-family:ui-monospace,monospace; white-space:pre-line; min-height:16px; text-shadow:0 1px 2px #000;"></div>
+      <button class="btn" id="dlCsv" style="margin-top:6px" disabled>⬇ Export all cells (CSV)</button>
+      <p class="note">Field-derived: U = |U|, PL/RSRP anchored to free-space ~1&nbsp;m from the Tx (Gt=Gr=0&nbsp;dBi). CSV covers every solved voxel (x,y,z).</p></div>
+
     <div class="grp" style="margin-top:16px"><label>Model view</label>
       <div class="seg" id="modelSeg"><button class="on" data-v="cad">Real CAD</button><button data-v="voxel">Voxels</button></div>
       <p class="note">The solver always uses the voxel grid; this only changes what you see.</p></div>
@@ -130,6 +137,8 @@
   <script src="./aiml_gate.js"></script>
   <script src="../Physics%20Engine/3D%20Map%20Physics/SIM%20V1%203D/web/sim_assets_3d.js"></script>
   <script src="./sim_fs.js"></script>
+  <!-- receiver probe + per-cell CSV export (field-derived U / PL / RSRP) → window.RxProbe -->
+  <script src="./rx_probe.js"></script>
 
   <script type="module">
     import * as THREE from 'three';
@@ -221,20 +230,35 @@
     function placeTxMarker() { txMesh.position.set(tx.x - cX, tx.y - cY, tx.z - cZ); $('readout').textContent = `Tx @ (${(tx.x * CELL).toFixed(1)}, ${(tx.y * CELL).toFixed(1)}, ${(tx.z * CELL).toFixed(1)}) m`; }
     snapTx(); placeTxMarker();
 
+    // receiver marker (red sphere) + state
+    let rx = null, placingRx = false, anchor = null;
+    const rxMesh = new THREE.Mesh(new THREE.SphereGeometry(1.6, 16, 16), new THREE.MeshBasicMaterial({ color: 0xff3030 }));
+    rxMesh.visible = false; scene.add(rxMesh);
+    function placeRxMarker() { if (!rx) { rxMesh.visible = false; return; } rxMesh.visible = true; rxMesh.position.set(rx.x - cX, rx.y - cY, rx.z - cZ); }
+
     // click-to-place: raycast the solid voxels, place Tx in air just above the hit (x,z)
     const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
     let placing = false;
     $('place').onclick = () => { placing = true; setStatus('click the model to place the Tx…'); };
     cv.addEventListener('click', ev => {
-      if (!placing) return;
+      if (!placing && !placingRx) return;
       const r = cv.getBoundingClientRect();
       mouse.x = ((ev.clientX - r.left) / r.width) * 2 - 1; mouse.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
       ray.setFromCamera(mouse, camera);
       const hit = ray.intersectObject(solidMesh, false)[0];
       if (!hit) { setStatus('no voxel under the cursor — try again on the model.'); return; }
-      const p = hit.point; tx.x = Math.round(p.x + cX); tx.z = Math.round(p.z + cZ);
+      const p = hit.point;
+      if (placingRx) {                                   // receiver: nearest air voxel to the 3-D hit
+        let v = { x: Math.round(p.x + cX), y: Math.round(p.y + cY), z: Math.round(p.z + cZ) };
+        v.x = Math.max(0, Math.min(X - 1, v.x)); v.y = Math.max(0, Math.min(Y - 1, v.y)); v.z = Math.max(0, Math.min(Z - 1, v.z));
+        rx = snap3dAir(v); placingRx = false; placeRxMarker(); updateRxReadout();
+        setStatus(`Rx at cell (${rx.x}, ${rx.y}, ${rx.z}) — ${(rx.x * CELL).toFixed(1)}, ${(rx.y * CELL).toFixed(1)}, ${(rx.z * CELL).toFixed(1)} m.`);
+        return;
+      }
+      tx.x = Math.round(p.x + cX); tx.z = Math.round(p.z + cZ);
       tx.x = Math.max(1, Math.min(X - 2, tx.x)); tx.z = Math.max(1, Math.min(Z - 2, tx.z));
       snapTx(); placeTxMarker(); placing = false;
+      if (field) { buildAnchor(); updateRxReadout(); }
       setStatus(`Tx at cell (${tx.x}, ${tx.y}, ${tx.z}). Press Generate.`);
     });
 
@@ -270,7 +294,7 @@
       if (solver === 'onnx') {
         const txDbm = parseFloat($('txp').value) || 20;
         $('run').disabled = true;
-        setWarn('⚙ Hybrid — ONNX surrogate near the Tx ⊕ eikonal path-loss + wall shadows for the rest of the floor (absolute RSRP).');
+        setWarn(`⚙ Hybrid RSRP — near-field ONNX full-wave surrogate ≤${S.HYBRID_R1_M} m of the Tx · ${S.HYBRID_R1_M}–${S.HYBRID_R2_M} m blended · >${S.HYBRID_R2_M} m eikonal path-loss (approx.). Only ≤${S.HYBRID_R1_M} m is the accurate near field; the CSV "method" column tags every cell.`);
         setStatus('solving (hybrid: ONNX near ⊕ eikonal far)…'); setBar(0);
         const t0 = performance.now();
         let res;
@@ -278,7 +302,8 @@
         catch (e) { setBar(null); setStatus('hybrid failed: ' + e.message, true); $('run').disabled = false; return; }
         const secs = (performance.now() - t0) / 1000; setBar(null); $('run').disabled = false;
         for (let i = 0; i < res.db.length; i++) if (!isFinite(res.db[i])) res.db[i] = -120;   // solids → below floor
-        field = { re: res.re, im: res.im, db: res.db, dims: [X, Y, Z], origin: [0, 0, 0], sub: GRID, fMHz, txy: tx.y, absolute: true };
+        field = { re: res.re, im: res.im, db: res.db, dims: [X, Y, Z], origin: [0, 0, 0], sub: GRID, fMHz, txy: tx.y, absolute: true, mode: 'hybrid' };
+        afterGenerate();
         // absolute RSRP range (dBm)
         rangeHi = -40; rangeLo = -100; $('rangeHi').value = rangeHi; $('rangeLo').value = rangeLo;
         $('cbLo').textContent = `${rangeLo} dBm`; $('cbHi').textContent = `${rangeHi} dBm`;
@@ -314,12 +339,90 @@
       const secs = (performance.now() - t0) / 1000; setBar(null); $('run').disabled = false;
 
       const env = S.envelopeDb3d(res.re, res.im, sv.sub);
-      field = { re: res.re, im: res.im, db: env.db, dims: sv.dims, origin: sv.origin, sub: sv.sub, fMHz, txy: sv.txLocal.y };
+      field = { re: res.re, im: res.im, db: env.db, dims: sv.dims, origin: sv.origin, sub: sv.sub, fMHz, txy: sv.txLocal.y, mode: 'fdtd' };
+      afterGenerate();
       $('hudMeta').textContent = `${sv.dims.join('×')} sub-volume · FDTD · ${fMHz} MHz · ${secs < 1 ? (secs * 1e3).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}`;
       setStatus(`done — FDTD field in ${secs < 1 ? (secs * 1e3).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}.`);
       setOpacity(0.3); $('modelOpacity').value = 30;
       buildFieldMesh(); updateDesc();
     }
+
+    // ---- receiver (Rx): field-derived U / PL / RSRP + per-voxel CSV ----
+    const matName = c => { const m = MATS.find(mm => mm.id === c); return m ? m.name.replace(/_/g, ' ') : ('class_' + c); };
+    function snap3dAir(v) {                              // nearest air voxel to a solid hit
+      if (GRID[idx(v.x, v.y, v.z)] === 0) return v;
+      for (let r = 1; r < 12; r++)
+        for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) for (let dz = -r; dz <= r; dz++) {
+          const nx = v.x + dx, ny = v.y + dy, nz = v.z + dz;
+          if (nx >= 0 && ny >= 0 && nz >= 0 && nx < X && ny < Y && nz < Z && GRID[idx(nx, ny, nz)] === 0) return { x: nx, y: ny, z: nz };
+        }
+      return v;
+    }
+    // global voxel → the field's local sample (dims/origin) or null if outside the solved region
+    function fieldSampleAt(gx, gy, gz) {
+      if (!field) return null;
+      const [sx, sy, sz] = field.dims, [ox, oy, oz] = field.origin;
+      const xl = gx - ox, yl = gy - oy, zl = gz - oz;
+      if (xl < 0 || yl < 0 || zl < 0 || xl >= sx || yl >= sy || zl >= sz) return null;
+      const li = (xl * sy + yl) * sz + zl;
+      return { A: Math.hypot(field.re[li], field.im[li]), db: field.db[li], mat: field.sub[li] };
+    }
+    function buildAnchor() {
+      if (!field || !window.RxProbe) { anchor = null; return; }
+      const [sx, sy, sz] = field.dims, [ox, oy, oz] = field.origin, txDbm = parseFloat($('txp').value) || 20;
+      anchor = window.RxProbe.buildAnchor({
+        field, fMHz: field.fMHz, txDbm, nCells: sx * sy * sz,
+        ampOf: li => Math.hypot(field.re[li], field.im[li]),
+        isOpen: li => { const c = field.sub[li]; return c === 0 || c === 4; },
+        distOf: li => { const zl = li % sz, yl = ((li - zl) / sz) % sy, xl = ((li - zl) / sz - yl) / sy;
+          return Math.hypot((xl + ox - tx.x) * CELL, (yl + oy - tx.y) * CELL, (zl + oz - tx.z) * CELL); },
+      });
+    }
+    function updateRxReadout() {
+      const out = $('rxOut'); if (!out) return;
+      if (!rx) { out.textContent = ''; return; }
+      const dx = (tx.x - rx.x) * CELL, dy = (tx.y - rx.y) * CELL, dz = (tx.z - rx.z) * CELL, d = Math.hypot(dx, dy, dz);
+      let s = `Rx (${(rx.x * CELL).toFixed(1)}, ${(rx.y * CELL).toFixed(1)}, ${(rx.z * CELL).toFixed(1)}) m\n` +
+              `Δ(tx−rx) = (${dx.toFixed(1)}, ${dy.toFixed(1)}, ${dz.toFixed(1)}) m · d = ${d.toFixed(1)} m`;
+      if (field && window.RxProbe) {
+        if (!anchor) buildAnchor();
+        const smp = fieldSampleAt(rx.x, rx.y, rx.z);
+        if (smp) {
+          const m = window.RxProbe.metricsAt(anchor, { A: smp.A, db: smp.db, d, dx, dy, dz,
+            world: [rx.x * CELL, rx.y * CELL, rx.z * CELL], material: matName(smp.mat) });
+          s += `\nU = ${smp.A.toExponential(2)}  ·  PL = ${m.PL.toFixed(1)} dB  ·  RSRP = ${m.RSRP.toFixed(1)} dBm`;
+          s += `\nmethod: ${methodFor(d)}${field.mode === 'hybrid' && d > S.HYBRID_R1_M ? ' — approx.' : ''}`;
+        } else s += `\n(outside the solved ${field.absolute ? 'floor' : 'sub-volume'} — U/PL n/a)`;
+      } else s += `\n(generate a field for U / PL / RSRP)`;
+      out.textContent = s;
+    }
+    function afterGenerate() { buildAnchor(); $('dlCsv').disabled = false; if (rx) updateRxReadout(); }
+
+    $('placeRx').onclick = () => { placingRx = true; setStatus('click the model to place the Rx…'); };
+    $('clearRx').onclick = () => { rx = null; placingRx = false; placeRxMarker(); updateRxReadout(); };
+    $('txp').addEventListener('input', () => { if (field) { if (anchor) anchor.txDbm = parseFloat($('txp').value) || 20; updateRxReadout(); } });
+    // which engine produced a cell: hybrid splits by Tx distance (surrogate near ⊕ eikonal far, R1/R2
+    // straight from the solver); FDTD sub-volume is all near-field FDTD.
+    const methodFor = d => (field && field.mode === 'hybrid')
+      ? (d <= S.HYBRID_R1_M ? 'onnx-surrogate' : d >= S.HYBRID_R2_M ? 'eikonal' : 'blend')
+      : 'fdtd';
+    $('dlCsv').onclick = () => {
+      if (!field || !window.RxProbe) return;
+      if (!anchor) buildAnchor();
+      const [sx, sy, sz] = field.dims, [ox, oy, oz] = field.origin;
+      const csv = window.RxProbe.buildCsv({
+        anchor, nCells: sx * sy * sz, has3D: true, extraCols: ['method'],
+        sampleOf: li => {
+          const zl = li % sz, yl = ((li - zl) / sz) % sy, xl = ((li - zl) / sz - yl) / sy;
+          const gx = xl + ox, gy = yl + oy, gz = zl + oz;
+          const dx = (tx.x - gx) * CELL, dy = (tx.y - gy) * CELL, dz = (tx.z - gz) * CELL, d = Math.hypot(dx, dy, dz);
+          return { A: Math.hypot(field.re[li], field.im[li]), db: field.db[li], d,
+            dx, dy, dz, world: [gx * CELL, gy * CELL, gz * CELL], material: matName(field.sub[li]), i: gx, j: gy, k: gz, extra: [methodFor(d)] };
+        },
+      });
+      window.RxProbe.downloadCsv(`sim_v3_indoor3d_${Math.round(field.fMHz)}MHz_cells.csv`, csv);
+      setStatus(`exported ${sx * sy * sz} voxels to CSV.`);
+    };
 
     // ---- field render (cloud = continuous glowing point cloud · voxel = discrete boxes) ----
     function fieldCells() {
@@ -395,7 +498,14 @@
       $('cbLo').textContent = wave ? '− trough' : `${rangeLo} dB`; $('cbHi').textContent = wave ? 'crest +' : `${rangeHi} dB`;
     }
     function updateDesc() {
-      $('desc').innerHTML = `<b>What this shows.</b> The 3-D voxelized 7th floor — every wall, floor, ceiling, glass and metal object the model sees, colored by ITU material. Place a Tx and <b>Generate</b> for whole-floor coverage. The <b>hybrid</b> engine runs the trained full-wave surrogate in the box around the Tx (where it's accurate) and composites it with a fast <b>eikonal</b> path-loss + wall-transmission field for the rest of the floor, giving an <b>absolute RSRP (dBm)</b> map — strong at the Tx, fading with distance and wall shadowing. The <b>FDTD</b> option instead solves the true sub-volume field around the Tx at λ/8. <b>Heatmap</b> = level; <b>Wavefront</b> = the animated phase snapshot. (The surrogate was trained on ±3 m sub-volumes, so far-field coverage comes from the eikonal, not the net.)`;
+      $('desc').innerHTML =
+        `<b>What this shows — Indoor 3D.</b>` +
+        `<ul style="margin:4px 0 0; padding-left:18px;">` +
+        `<li>The 3-D voxelized 7th floor — every wall, floor, ceiling, glass and metal object, coloured by ITU material. Place a Tx and <b>Generate</b> for coverage.</li>` +
+        `<li><b>FDTD</b> solves the true full-wave field in a sub-volume around the Tx (λ/8). <b>ONNX</b> is a <b>hybrid</b>: the trained surrogate in the accurate near field (≤${S.HYBRID_R1_M} m of the Tx) ⊕ a fast <b>eikonal</b> path-loss + wall-shadow field beyond (>${S.HYBRID_R2_M} m), blended between — an absolute <b>RSRP (dBm)</b> whole-floor map.</li>` +
+        `<li><b>Heatmap</b> = level; <b>Wavefront</b> = the animated phase snapshot. |U| near the Tx is relative; the hybrid map is absolute dBm.</li>` +
+        `<li><b>Place Rx</b> drops a 3-D receiver → <b>U / PL / RSRP</b> and the full Δ(tx−rx, ty−ry, tz−rz). <b>Export all cells (CSV)</b> writes every solved voxel, each tagged with the <b>method</b> that computed it (near-field surrogate/FDTD vs blended vs far-field eikonal).</li>` +
+        `</ul>`;
     }
 
     // ---- render loop ----

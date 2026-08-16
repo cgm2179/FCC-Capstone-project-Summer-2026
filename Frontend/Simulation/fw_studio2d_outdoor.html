@@ -161,8 +161,9 @@
     </div>
     <div id="actionBar">
       <button class="btn2" id="dlPng">⬇ Download PNG</button>
+      <button class="btn2" id="dlCsv" disabled>⬇ Export cells (CSV)</button>
       <button class="btn2 ghost" id="fsBtn" title="Expand the map to fill the screen">⛶ Full screen</button>
-      <span class="note" id="dlNote">Saves the map + coverage + calc boxes + receiver dot.</span>
+      <span class="note" id="dlNote">PNG saves the map + coverage + receiver; CSV exports every cell's U / PL / RSRP.</span>
       <span class="spacer"></span>
     </div>
     <div id="desc"></div>
@@ -175,6 +176,8 @@
   <script src="./aiml_gate.js"></script>
   <!-- the baked penetrable NoMa city grid + stations; sets window.NOMA_CITY_2D -->
   <script src="../Data/noma_city2d.js"></script>
+  <!-- receiver probe + per-cell CSV export (field-derived U / PL / RSRP) → window.RxProbe -->
+  <script src="./rx_probe.js"></script>
 
   <script type="module">
     import * as S from './fw_solve2d_bs.js';
@@ -259,7 +262,7 @@
     let contract = null, session = null, onnxReady = false, onnxWhy = 'not loaded';
     let solverSel = 'fdtd', viewMode = 'heat', cmapName = 'viridis', rangeHi = 0, rangeLo = -40;
     let field = null;
-    let showBoxes = true, rx = null, rxMetrics = null;   // calc-box toggle + placed receiver + its metrics
+    let showBoxes = true, rx = null, rxMetrics = null, rxAnchor = null;   // calc-box toggle + receiver + metrics + free-space anchor
 
     // band + antenna dropdowns populated from the contract (fallback to station bands)
     function fillBands() {
@@ -386,7 +389,7 @@
       field = { region, re: U.re, im: U.im, db: env.db, fMHz, solver, st };
       $('hudMeta').textContent = `${sel.site.split('_')[0]} · ${solver.toUpperCase()} · ${fMHz} MHz · ${kind} · ${secs < 1 ? (secs * 1000).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}`;
       setStatus(`done — ${solver.toUpperCase()} coverage in ${secs < 1 ? (secs * 1000).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}.`);
-      render();
+      afterGenerate(); render();
     }
 
     // ---- rendering: base city, then the coverage patch, then Tx ----
@@ -580,23 +583,44 @@
         eirpDbm: parseFloat($('eirp').value) || 63,
         bwMHz: parseFloat($('bw').value) || undefined,
       });
-      rxMetrics = { d, f, ...lb };
-      $('readout').textContent =
-        `RX ${d.toFixed(0)} m · PL ${lb.PL.toFixed(1)} dB · RSRP ${lb.rsrp.toFixed(1)} dBm · ` +
-        `RSSI ${lb.rssi.toFixed(1)} dBm · RSRQ ${lb.rsrq.toFixed(1)} dB`;
+      // component distances (city-plane metres, tx−rx): E runs west, N runs north, H = height
+      const dx = (rx.x - sel.vx) * CS, dy = (sel.vz - rx.z) * CS, dz = 0;
+      // field-derived U / PL / RSRP at the Rx cell (needs a generated field + an open cell)
+      let fd = null;
+      if (field && window.RxProbe) {
+        if (!rxAnchor) buildRxAnchor();
+        const R = field.region, fi = fineIdx(R, rx.x, rx.z);
+        if (rxAnchor && fi >= 0) {
+          const A = Math.hypot(field.re[fi], field.im[fi]);
+          fd = window.RxProbe.metricsAt(rxAnchor, { A, db: field.db[fi], d, dx, dy, dz,
+            world: [(NX - 1 - rx.x) * CS, rx.z * CS, rx.h || 0], material: matName(R.classes[fi]) });
+        }
+      }
+      rxMetrics = { d, f, dx, dy, dz, ...lb, fd };
+      const geom = `RX ${d.toFixed(0)} m · PL ${lb.PL.toFixed(1)} dB · RSRP ${lb.rsrp.toFixed(1)} dBm`;
+      $('readout').textContent = fd
+        ? `${geom}  ·  field: U ${fd.U.toExponential(2)} · PL ${fd.PL.toFixed(1)} dB · RSRP ${fd.RSRP.toFixed(1)} dBm`
+        : `${geom} · RSSI ${lb.rssi.toFixed(1)} dBm · RSRQ ${lb.rsrq.toFixed(1)} dB`;
     }
     const rxRow = (k, v) => `<div class="rxRow"><span>${k}</span><b>${v}</b></div>`;
     function showRxTip(px, py) {
       const m = rxMetrics; if (!m) return;
       const t = $('rxTip');
-      t.innerHTML =
+      let html =
         `<div class="rxHead">Receiver — ${sel.site.split('_')[0]} · ${Math.round(m.f)} MHz</div>` +
         rxRow('Distance to Tx', m.d.toFixed(1) + ' m') +
+        rxRow('Δ tx−rx (E,N,H)', `${m.dx.toFixed(1)}, ${m.dy.toFixed(1)}, ${m.dz.toFixed(1)} m`);
+      if (m.fd) html +=
+        rxRow('U (field |U|)', m.fd.U.toExponential(2)) +
+        rxRow('Path loss (field)', m.fd.PL.toFixed(1) + ' dB') +
+        rxRow('RSRP (field)', m.fd.RSRP.toFixed(1) + ' dBm');
+      html +=
         rxRow('Path loss (geom)', m.PL.toFixed(1) + ' dB') +
-        rxRow('RSRP', m.rsrp.toFixed(1) + ' dBm') +
+        rxRow('RSRP (geom)', m.rsrp.toFixed(1) + ' dBm') +
         rxRow('Channel BW', m.bw + ' MHz · ' + m.nRB + ' RB') +
         rxRow('RSSI', m.rssi.toFixed(1) + ' dBm') +
         rxRow('RSRQ', m.rsrq.toFixed(1) + ' dB');
+      t.innerHTML = html;
       t.style.display = 'block';
       t.style.left = Math.min(px + 14, innerWidth - t.offsetWidth - 6) + 'px';
       t.style.top = Math.min(py + 14, innerHeight - t.offsetHeight - 6) + 'px';
@@ -621,6 +645,57 @@
       $('probeMsg').textContent = ''; $('readout').textContent = '';
     };
     ['eirp', 'ple', 'bw'].forEach(id => $(id).addEventListener('input', updateRxReadout));
+
+    // ---- field-derived probe + per-cell CSV (window.RxProbe) ----
+    const matName = c => { const m = MATS.find(mm => mm.id === c); return m ? m.name : ('class_' + c); };
+    // free-space anchor over the fine region grid (where re/im/db live). A_ref/PL_ref are txDbm-independent.
+    function buildRxAnchor() {
+      if (!field || !window.RxProbe) { rxAnchor = null; return; }
+      const R = field.region, W = R.W;
+      rxAnchor = window.RxProbe.buildAnchor({
+        field, fMHz: field.fMHz, txDbm: parseFloat($('eirp').value) || 63, nCells: R.H * R.W,
+        ampOf: g => Math.hypot(field.re[g], field.im[g]),
+        isOpen: g => !SOLID(R.classes[g]),
+        distOf: g => { const fi = (g / W) | 0, fj = g - fi * W;
+          const cxc = R.x0 + fi / R.zoom, czc = R.z0 + fj / R.zoom;
+          return Math.hypot((cxc - sel.vx) * CS, (czc - sel.vz) * CS); },
+      });
+    }
+    function afterGenerate() { buildRxAnchor(); $('dlCsv').disabled = false; if (rx) updateRxReadout(); }
+    // EIRP only shifts RSRP (RSRP = EIRP − PL) — patch txDbm in place, no full anchor rebuild
+    $('eirp').addEventListener('input', () => { if (rxAnchor) rxAnchor.txDbm = parseFloat($('eirp').value) || 63; });
+
+    // click the map to drop the receiver at that city cell (alongside the CRS "Get a Point" entry)
+    cv.addEventListener('click', ev => {
+      const r = cv.getBoundingClientRect();
+      const pcol = Math.floor((ev.clientX - r.left) * NX / r.width), prow = Math.floor((ev.clientY - r.top) * NZ / r.height);
+      const { x, z } = pxToCity(pcol, prow);
+      if (x < 0 || z < 0 || x >= NX || z >= NZ) return;
+      rx = { x, z, h: parseFloat($('c2').value) || 0 };
+      $('rxGroup').style.display = ''; $('probeMsg').textContent = '◉ receiver placed — hover the dot for metrics';
+      updateRxReadout(); drawOverlay();
+    });
+
+    $('dlCsv').onclick = () => {
+      if (!field || !window.RxProbe) return;
+      if (!rxAnchor) buildRxAnchor();
+      const R = field.region, W = R.W, H = R.H;
+      const csv = window.RxProbe.buildCsv({
+        anchor: rxAnchor, nCells: H * W, has3D: false, extraCols: ['lon_deg', 'lat_deg', 'method'],
+        sampleOf: g => {
+          const fi = (g / W) | 0, fj = g - fi * W;
+          const cxc = R.x0 + fi / R.zoom, czc = R.z0 + fj / R.zoom;      // fine cell → city cell
+          const dx = (cxc - sel.vx) * CS, dy = (sel.vz - czc) * CS;      // Δ(tx−rx), city-plane metres
+          const [lon, lat] = lonlat(cxc, czc);
+          return { A: Math.hypot(field.re[g], field.im[g]), db: field.db[g],
+            d: Math.hypot(dx, dy), dx, dy, dz: 0,
+            world: [(NX - 1 - cxc) * CS, czc * CS, 0], material: matName(R.classes[g]),
+            i: fi, j: fj, extra: [lon, lat, field.solver] };
+        },
+      });
+      window.RxProbe.downloadCsv(`sim_v3_outdoor2d_${sel.site.split('_')[0]}_${Math.round(field.fMHz)}MHz_cells.csv`, csv);
+      $('probeMsg').textContent = `exported ${H * W} cells to CSV`;
+    };
 
     // ---- PNG download: composite the map + overlay at display resolution ----
     $('dlPng').onclick = () => {
@@ -702,13 +777,13 @@
       const eng = field ? field.solver.toUpperCase() : 'the ONNX surrogate or FDTD';
       const site = field ? sel.site.split('_')[0] : 'the selected base station';
       $('desc').innerHTML =
-        `<b>What this simulation computes.</b> The steady-state complex full-wave field U(x,y) radiating from <b>${site}</b> at ${f} across the real NoMa DC blocks, solved by ${eng} — ` +
-        `either the <b>ONNX surrogate</b> (a U-Net trained on FDTD solves of this penetrable city; milliseconds) or a direct <b>penetrable FDTD</b> of the damped scalar wave equation. ` +
-        `The map is <b>north-up, east-right</b>; buildings are drawn from OSM footprints as <b>concrete cores with glass façades</b>, plus <b>foliage</b>, each with its own ITU permittivity and loss (legend at left). ` +
-        `<b>Heatmap</b> shows |U| as relative field strength in dB (0 dB = strongest near the antenna; range adjustable). ` +
-        `<b>Wavefront</b> shows the instantaneous Re{U·e<sup>jωt</sup>} so you can watch the beam form, diffract around corners, penetrate glass, and shadow behind concrete. ` +
-        `The antenna directivity (boresight + family) shapes the beam. The coverage heatmap is <i>relative</i> field strength; ` +
-        `for an absolute link budget, use <b>Get a Point</b> (toolbar above: Mercator / Lat·Long / Current Fix Grid) — a red receiver dot reports distance-to-Tx, geometric path loss, channel BW, and EIRP-anchored <b>RSRP / RSSI / RSRQ</b>.`;
+        `<b>What this shows — Outdoor 2D.</b>` +
+        `<ul style="margin:4px 0 0; padding-left:18px;">` +
+        `<li>Field <b>U(x,y)</b> radiating from <b>${site}</b> at ${f} across the real NoMa DC blocks (<b>north-up, east-right</b>), via ${eng} — <b>ONNX</b> surrogate / penetrable <b>FDTD</b>. Buildings are OSM footprints as concrete cores + glass façades + foliage, each with its ITU permittivity/loss (legend).</li>` +
+        `<li><b>Heatmap</b> = |U| relative dB (0 dB ≈ strongest near the antenna); <b>Wavefront</b> = Re{U·e<sup>jωt</sup>} — the beam forming, diffracting around corners, penetrating glass, shadowing behind concrete. Antenna boresight + family shape the lobe.</li>` +
+        `<li><b>Get a Point</b> (top toolbar: Mercator / Lat·Long / Current Fix Grid) or <b>click the map</b> drops a receiver → field-derived <b>U / PL / RSRP</b> plus the EIRP-anchored geometric <b>RSRP / RSSI / RSRQ</b> and Δ(tx−rx).</li>` +
+        `<li><b>Export cells (CSV)</b> writes every cell's lon/lat + position, U, PL, RSRP, Δ(tx−rx) and solver.</li>` +
+        `</ul>`;
     }
 
     // ---- init: draw the city, load contract + ONNX ----

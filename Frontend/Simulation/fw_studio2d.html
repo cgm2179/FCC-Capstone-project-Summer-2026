@@ -80,6 +80,13 @@
     <div id="warn"></div>
     <div id="status">ready</div>
 
+    <div class="grp" style="margin-top:16px"><label>Receiver (Rx)</label>
+      <button class="btn ghost" id="placeRx">＋ Place Rx (click the plan)</button>
+      <button class="btn ghost" id="clearRx" style="margin-top:4px">✕ Clear Rx</button>
+      <div id="rxOut" style="margin-top:6px; font-size:0.74rem; color:var(--ink); font-family:ui-monospace,monospace; white-space:pre-line; min-height:16px;"></div>
+      <button class="btn" id="dlCsv" style="margin-top:6px" disabled>⬇ Export all cells (CSV)</button>
+      <p class="note">Field-derived: U = |U| (relative), PL/RSRP anchored to free-space ~1&nbsp;m from the Tx (Gt=Gr=0&nbsp;dBi). CSV covers every grid cell.</p></div>
+
     <div class="grp" style="margin-top:16px"><label>Field view</label>
       <div class="seg" id="viewSeg"><button class="on" data-v="heat">Heatmap |U|</button><button data-v="wave">Wavefront</button></div></div>
 
@@ -117,6 +124,8 @@
   <script src="./sim_fs.js"></script>
   <!-- non-AI/ML analytic path-loss solvers (FSPL / Motley-Keenan / Eikonal / Ray-trace) → window.PL2D -->
   <script src="./fw_pathloss2d.js"></script>
+  <!-- receiver probe + per-cell CSV export (field-derived U / PL / RSRP) → window.RxProbe -->
+  <script src="./rx_probe.js"></script>
 
   <script type="module">
     import * as S from './fw_solve2d.js';
@@ -172,6 +181,7 @@
     let field = null, contract = null, session = null, onnxReady = false, onnxWhy = 'not loaded';
     let tx = { i: Math.floor(H / 2), j: Math.floor(W / 2) };
     snapTx(); // move off any wall
+    let rx = null, placingRx = false, anchor = null;   // receiver state + cached free-space anchor
 
     // ---- segmented controls ----
     function seg(id, cb) { const el = $(id); el.querySelectorAll('button').forEach(b => b.onclick = () => {
@@ -223,9 +233,14 @@
       const j = Math.floor((ev.clientX - r.left) * W / r.width);
       const i = Math.floor((ev.clientY - r.top) * H / r.height);
       if (i < 0 || j < 0 || i >= H || j >= W) return;
+      if (placingRx) {                                  // receiver may sit anywhere (no snap)
+        rx = { i, j }; placingRx = false; updateRxReadout();
+        setStatus(`Rx at cell (${rx.i}, ${rx.j}) — ${(rx.j * CELL).toFixed(1)}, ${(rx.i * CELL).toFixed(1)} m.`);
+        if (field) render(); else drawPlan(); return;
+      }
       tx = { i, j }; snapTx(); placing = false;
       setStatus(`Tx at cell (${tx.i}, ${tx.j}) — ${(tx.j * CELL).toFixed(1)}, ${(tx.i * CELL).toFixed(1)} m. Press Generate.`);
-      if (field) render(); else drawPlan();
+      if (field) { buildAnchor(); updateRxReadout(); render(); } else drawPlan();
     });
     function snapTx() {
       if (GRID[tx.i * W + tx.j] !== BARRIER) return;
@@ -244,6 +259,58 @@
       else if (SOLID(GRID[g])) { const m = MATS.find(mm => mm.id === GRID[g]); if (m) s += ` · ${m.name.replace(/_/g, ' ')}`; }
       $('readout').textContent = s;
     });
+
+    // ---- receiver (Rx): field-derived U / PL / RSRP + per-cell CSV ----
+    const matName = c => { const m = MATS.find(mm => mm.id === c); return m ? m.name.replace(/_/g, ' ') : ('class_' + c); };
+    // (re)build the free-space anchor for the current field + Tx power (see rx_probe.js)
+    function buildAnchor() {
+      if (!field || !window.RxProbe) { anchor = null; return; }
+      const txDbm = parseFloat($('txp').value) || 20;
+      anchor = window.RxProbe.buildAnchor({
+        field, fMHz: field.fMHz, txDbm, nCells: H * W,
+        ampOf: g => Math.hypot(field.re[g], field.im[g]),
+        isOpen: g => !SOLID(GRID[g]),
+        distOf: g => { const i = (g / W) | 0, j = g - i * W; return Math.hypot((j - tx.j) * CELL, (i - tx.i) * CELL); },
+      });
+    }
+    function updateRxReadout() {
+      const out = $('rxOut'); if (!out) return;
+      if (!rx) { out.textContent = ''; return; }
+      const dx = (tx.j - rx.j) * CELL, dy = (tx.i - rx.i) * CELL, dz = 0, d = Math.hypot(dx, dy);
+      let s = `Rx (${(rx.j * CELL).toFixed(1)}, ${(rx.i * CELL).toFixed(1)}, 0.0) m\n` +
+              `Δ(tx−rx) = (${dx.toFixed(1)}, ${dy.toFixed(1)}, 0.0) m · d = ${d.toFixed(1)} m`;
+      if (field && window.RxProbe) {
+        if (!anchor) buildAnchor();
+        const g = rx.i * W + rx.j, A = Math.hypot(field.re[g], field.im[g]);
+        const m = window.RxProbe.metricsAt(anchor, { A, db: field.db[g], d, dx, dy, dz,
+          world: [rx.j * CELL, rx.i * CELL, 0], material: matName(GRID[g]) });
+        s += `\nU = ${A.toExponential(2)}  ·  PL = ${m.PL.toFixed(1)} dB  ·  RSRP = ${m.RSRP.toFixed(1)} dBm`;
+        if (SOLID(GRID[g])) s += `\n(inside ${matName(GRID[g])} — no open field here)`;
+      } else {
+        s += `\n(generate a field for U / PL / RSRP)`;
+      }
+      out.textContent = s;
+    }
+    function afterGenerate() { buildAnchor(); $('dlCsv').disabled = false; if (rx) updateRxReadout(); }
+
+    $('placeRx').onclick = () => { placingRx = true; setStatus('click the plan to place the Rx…'); };
+    $('clearRx').onclick = () => { rx = null; placingRx = false; updateRxReadout(); if (field) render(); else drawPlan(); };
+    $('txp').addEventListener('input', () => { if (field) { buildAnchor(); updateRxReadout(); } });
+    $('dlCsv').onclick = () => {
+      if (!field || !window.RxProbe) return;
+      if (!anchor) buildAnchor();
+      const csv = window.RxProbe.buildCsv({
+        anchor, nCells: H * W, has3D: false, extraCols: ['method'],
+        sampleOf: g => {
+          const i = (g / W) | 0, j = g - i * W;
+          const dx = (tx.j - j) * CELL, dy = (tx.i - i) * CELL, dz = 0;
+          return { A: Math.hypot(field.re[g], field.im[g]), db: field.db[g], d: Math.hypot(dx, dy),
+            dx, dy, dz, world: [j * CELL, i * CELL, 0], material: matName(GRID[g]), i, j, extra: [field.solver] };
+        },
+      });
+      window.RxProbe.downloadCsv(`sim_v3_indoor2d_${Math.round(field.fMHz)}MHz_cells.csv`, csv);
+      setStatus(`exported ${H * W} cells to CSV.`);
+    };
 
     // ---- generate ----
     $('run').onclick = generate;
@@ -270,7 +337,7 @@
         setBar(null); $('run').disabled = false;
         $('hudMeta').textContent = `${W}×${H} · ${solver.toUpperCase()} · ${fMHz} MHz · ${ts}`;
         setStatus(`done — ${solver.toUpperCase()} field in ${ts}.`);
-        render();
+        afterGenerate(); render();
         return;
       }
 
@@ -324,7 +391,7 @@
       field = { re: U.re, im: U.im, db: env.db, fMHz, solver };
       $('hudMeta').textContent = `${W}×${H} · ${solver.toUpperCase()} · ${fMHz} MHz · ${secs < 1 ? (secs * 1000).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}`;
       setStatus(`done — ${solver.toUpperCase()} field in ${secs < 1 ? (secs * 1000).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}.`);
-      render();
+      afterGenerate(); render();
     }
 
     // ---- rendering ----
@@ -334,7 +401,7 @@
       stopWave();
       const img = cx.createImageData(W, H);
       for (let g = 0; g < H * W; g++) paintBase(img, g);
-      paintTx(img); cx.putImageData(img, 0, 0);
+      paintTx(img); paintRx(img); cx.putImageData(img, 0, 0);
     }
     function paintBase(img, g) {
       const c = GRID[g];
@@ -346,6 +413,14 @@
         const ii = tx.i + di, jj = tx.j + dj; if (ii < 0 || jj < 0 || ii >= H || jj >= W) continue;
         if (di * di + dj * dj > 5) continue; const o = (ii * W + jj) * 4;
         img.data[o] = 40; img.data[o + 1] = 200; img.data[o + 2] = 64; img.data[o + 3] = 255;
+      }
+    }
+    function paintRx(img) {                              // receiver marker: red disc, white centre pixel
+      if (!rx) return;
+      for (let di = -2; di <= 2; di++) for (let dj = -2; dj <= 2; dj++) {
+        const ii = rx.i + di, jj = rx.j + dj; if (ii < 0 || jj < 0 || ii >= H || jj >= W) continue;
+        const rr = di * di + dj * dj; if (rr > 5) continue; const o = (ii * W + jj) * 4, c = rr === 0;
+        img.data[o] = c ? 255 : 220; img.data[o + 1] = c ? 255 : 40; img.data[o + 2] = c ? 255 : 40; img.data[o + 3] = 255;
       }
     }
     function render() {
@@ -362,7 +437,7 @@
         const [r, gr, b] = S.cmap(cmapName, (db[g] - lo) / span);
         const o = g * 4; img.data[o] = r; img.data[o + 1] = gr; img.data[o + 2] = b; img.data[o + 3] = 255;
       }
-      paintTx(img); cx.putImageData(img, 0, 0);
+      paintTx(img); paintRx(img); cx.putImageData(img, 0, 0);
     }
     function renderWave() {
       stopWave();
@@ -387,7 +462,7 @@
           const [r, gr, b] = S.cmapSigned(cmapName, v);
           const o = g * 4; img.data[o] = r; img.data[o + 1] = gr; img.data[o + 2] = b; img.data[o + 3] = 255;
         }
-        paintTx(img); cx.putImageData(img, 0, 0);
+        paintTx(img); paintRx(img); cx.putImageData(img, 0, 0);
         phase += 0.15; waveTimer = requestAnimationFrame(frame);
       }
       frame();
@@ -406,11 +481,13 @@
       const b = field ? `${field.fMHz} MHz` : 'the selected band';
       const eng = field ? field.solver.toUpperCase() : 'the ONNX surrogate or FDTD';
       $('desc').innerHTML =
-        `<b>What this simulation computes.</b> The steady-state complex full-wave field U(x,y) on the 7th-floor plan at ${b}, solved by ${eng} — ` +
-        `either the <b>ONNX surrogate</b> (a U-Net trained on FDTD solves; milliseconds) or a direct <b>FDTD</b> leapfrog of the scalar wave equation. ` +
-        `<b>Heatmap</b> shows |U| as relative field strength in dB (0 dB = strongest indoor field; range adjustable at left). ` +
-        `<b>Wavefront</b> shows the instantaneous Re{U·e<sup>jωt</sup>} — a snapshot of the propagating wave, so you can see interference, reflection off walls, and shadowing behind them. ` +
-        `Walls attenuate/reflect per the material legend. Values are <i>relative</i> field strength (the source amplitude is arbitrary), not calibrated dBm.`;
+        `<b>What this shows — Indoor 2D.</b>` +
+        `<ul style="margin:4px 0 0; padding-left:18px;">` +
+        `<li>Steady-state field <b>U(x,y)</b> on the 7th-floor plan at ${b}, via ${eng} — <b>ONNX</b> surrogate / <b>FDTD</b> full-wave, or the analytic <b>FSPL / Motley-Keenan / Eikonal / Ray-trace</b> path-loss solvers.</li>` +
+        `<li><b>Heatmap</b> = |U| as relative field strength in dB (0 dB ≈ strongest indoor field); <b>Wavefront</b> = the instantaneous Re{U·e<sup>jωt</sup>} — interference, reflection and shadowing behind walls.</li>` +
+        `<li>Walls attenuate/reflect per the material legend; |U| is <i>relative</i> (arbitrary source amplitude), not calibrated dBm.</li>` +
+        `<li><b>Place Rx</b> (left) drops a receiver → <b>U</b>, field-derived <b>path loss</b> &amp; <b>RSRP</b>, and the Tx→Rx component distances. <b>Export all cells (CSV)</b> writes every grid cell's position, U, PL, RSRP and Δ(tx−rx).</li>` +
+        `</ul>`;
     }
 
     // ---- init: draw the plan, load contract + ONNX ----

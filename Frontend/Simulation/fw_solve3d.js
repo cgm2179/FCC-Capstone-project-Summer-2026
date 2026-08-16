@@ -312,11 +312,16 @@ export function eikonalRsrp3d(grid, dims, cell, fMHz, tx, txDbm, opts = {}) {
 }
 
 // ---------------------------------------------------------------- hybrid: ONNX (near) ⊕ eikonal (far)
+// Blend radii (metres from the Tx): ≤ R1 = pure ONNX surrogate (near field, accurate); ≥ R2 = pure
+// eikonal path-loss (far field, approximate); R1..R2 = linear dB blend. Exported so the studio's CSV
+// method label + near-field warning stay in lock-step with the solver.
+export const HYBRID_R1_M = 3.0, HYBRID_R2_M = 6.5;
+
 // Absolute-RSRP whole-floor map: the sub-volume-trained net supplies the near-Tx structure; the
 // eikonal supplies path loss + wall shadows everywhere else; blended in dB across a transition ring.
 export async function hybridField3d(session, grid, dims, cell, fMHz, tx, txDbm, contract, onProg) {
   const [X, Y, Z] = dims, N = X * Y * Z, id = (x, y, z) => (x * Y + y) * Z + z;
-  const R1 = 3.0, R2 = 6.5;                                                     // metres: pure-ONNX / pure-eikonal
+  const R1 = HYBRID_R1_M, R2 = HYBRID_R2_M;                                     // metres: pure-ONNX / pure-eikonal
   const eik = eikonalRsrp3d(grid, dims, cell, fMHz, tx, txDbm);
   if (onProg) onProg(0.25);
   const Rc = Math.ceil(R2 / cell) + contract.box;                              // tile only the near box
