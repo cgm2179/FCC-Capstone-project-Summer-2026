@@ -23,9 +23,10 @@ this way; this file lists *what's in each folder*.
 | `Essentials + HTML/` | dir | Source ground-truth assets — the floor-plan PNG + MapInfo `.TAB` georeference the indoor pipeline rasterizes. |
 | `ARCHIVE/` | dir | Superseded / early code kept for reference (below). |
 | `docs/` | dir | Project docs, plans, roadmaps + the AI/ML guide (below). |
-| `unity/`, `Unity_RF_Simulator/`* | dir | The (separate) Unity WebGL port work. *`Unity_RF_Simulator/` is a nested repo, git-ignored. |
-| `.claude/` | dir | Editor/agent config (e.g. `launch.json` dev-server presets). |
-| `.github/`, `.githooks/` | dir | CI workflows + git hooks. |
+| `misc/` | dir | Ancillary bits corralled out of the root: `misc/unity/` (the vendored ~32 MB Unity WebGL build the Simulation tab embeds) and `misc/.githooks/` (the commit-message hook). |
+| `Unity_RF_Simulator/`* | dir | The (separate) Unity C# **source** project. *nested repo, git-ignored — not part of a clone. |
+| `.claude/` | dir | Editor/agent config (e.g. `launch.json` dev-server presets). Kept at root — tooling reads it there. |
+| `.github/` | dir | `CODEOWNERS` (+ any CI workflows). Kept at root — GitHub only honors it there. |
 | `REPO_STRUCTURE.md`, `DIRECTORY.md` | file | This split's rationale, and this guide. |
 | **Root symlinks** | link | `Map Coverage`, `Statistics`, `Simulation`, `Time Elapse` → `Frontend/…`; `Physics Engine`, `scripts` → `Backend/…`; `Data → Data + Model`; `SIM`/`SIM3D`/`TESTS3D` → into `Backend/Physics Engine/…`; `AGENTS.md`/`QUICKSTART.md` → `docs/…`. |
 

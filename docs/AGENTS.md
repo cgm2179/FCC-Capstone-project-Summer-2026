@@ -19,7 +19,7 @@ this section only captures the non-obvious, durable gotchas for future cloud age
 - Do **not** add `Co-authored-by: Cursor Agent <cursoragent@cursor.com>` (or any
   `cursoragent@…`) trailers. Strip them if the harness injects them.
 - Before committing in a fresh clone, run `bash scripts/setup_contributor_git.sh`
-  (sets `user.name` / `user.email` and `core.hooksPath=.githooks`).
+  (sets `user.name` / `user.email` and `core.hooksPath=misc/.githooks`).
 - Prefer: `GIT_AUTHOR_NAME=cgm2179 GIT_AUTHOR_EMAIL=cgm2179@columbia.edu \
   GIT_COMMITTER_NAME=cgm2179 GIT_COMMITTER_EMAIL=cgm2179@columbia.edu git commit …`
 

@@ -10,7 +10,7 @@ Unity render + the two blind assumptions must be verified/tuned by you.
 
 **Rebuild (your one R)**
 1. In `Unity_RF_Simulator/Unity_RF_Simulator/`, run `WebGLBuilder.BuildWebGL` (Unity 6, headless or Editor menu).
-2. Copy `Build/WebGL` → `indoor-walk-test/unity/Build/WebGL` (the vendored build the dashboard serves).
+2. Copy `Build/WebGL` → `indoor-walk-test/misc/unity/Build/WebGL` (the vendored build the dashboard serves).
 3. Hard-reload the dashboard.
 
 **Verify + tune (report the tuned numbers → I bake them as C# defaults)**
@@ -25,13 +25,13 @@ Unity render + the two blind assumptions must be verified/tuned by you.
 
 
 Sequenced plan for the four Unity Map-Coverage items. Repos:
-- **UI / vendored build:** `indoor-walk-test` (this repo) — `Frontend/…`, `unity/Build/WebGL`, `scripts/*.py`
+- **UI / vendored build:** `indoor-walk-test` (this repo) — `Frontend/…`, `misc/unity/Build/WebGL`, `scripts/*.py`
 - **Unity C# source:** `indoor-outdoor-walk-test-with-Unity-Engine` → nested at `Unity_RF_Simulator/Unity_RF_Simulator/` (own git)
 
 ## Working constraint (read first)
 The in-app preview browser **cannot render Unity WebGL** (its tab is backgrounded → `requestAnimationFrame` is paused → the player loop never advances past the splash; no C# callback fires). So for every C# item below the loop is:
 1. Claude edits C# in `Unity_RF_Simulator/…/Assets/Scripts/…`
-2. **You** rebuild: `WebGLBuilder.BuildWebGL` (Unity 6 headless), then copy `Build/WebGL` → `unity/Build/WebGL` (+ `unity/unity_embed.html` if changed)
+2. **You** rebuild: `WebGLBuilder.BuildWebGL` (Unity 6 headless), then copy `Build/WebGL` → `misc/unity/Build/WebGL` (+ `misc/unity/unity_embed.html` if changed)
 3. **You** verify the render in a real browser; report back / screenshot
 Claude can still verify the **driving JS/postMessage** (stub the iframe, fire synthetic `unitySim` messages, assert commands) — done for Step 1.
 

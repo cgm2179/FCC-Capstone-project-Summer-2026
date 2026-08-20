@@ -6,14 +6,14 @@
  * preprocess, or the imported-model flow — those keep working exactly as before; Unity is just an
  * alternative renderer you can flip to and back.
  *
- * The Unity engine's built WebGL bundle is VENDORED into this repo at ./unity/ (the embed host page
- * unity/unity_embed.html + the build under unity/Build/WebGL). It is a copy of the output from the
+ * The Unity engine's built WebGL bundle is VENDORED into this repo at ./misc/unity/ (the embed host page
+ * misc/unity/unity_embed.html + the build under misc/unity/Build/WebGL). It is a copy of the output from the
  * separate Unity source repo (indoor-outdoor-walk-test-with-Unity-Engine); the C# source and Unity
  * project are NOT vendored here — only the ~32 MB runtime build — so a plain `git clone` of THIS repo
  * runs the Unity engine out of the box, with no second checkout. To refresh it, rebuild in the Unity
- * repo and re-copy unity/Build/WebGL (+ unity/unity_embed.html).
+ * repo and re-copy misc/unity/Build/WebGL (+ misc/unity/unity_embed.html).
  *
- * Requirement: the dashboard must be served over http from the main-repo root (so unity/… is reachable);
+ * Requirement: the dashboard must be served over http from the main-repo root (so misc/unity/… is reachable);
  * on file:// the toggle shows a "build not found" status and the three.js engine is unaffected.
  *
  * PR #5 (Unity repo) fix carried over: Unity runs in its OWN document (unity_embed.html) inside an
@@ -31,9 +31,9 @@
   'use strict';
 
   // iframe host page, vendored in this repo (served from the main-repo root).
-  var EMBED_URL = 'unity/unity_embed.html';
+  var EMBED_URL = 'misc/unity/unity_embed.html';
   // sector catalog, from the vendored Unity build's StreamingAssets.
-  var CATALOG_URL = 'unity/Build/WebGL/StreamingAssets/base_stations.json';
+  var CATALOG_URL = 'misc/unity/Build/WebGL/StreamingAssets/base_stations.json';
   // Indoor Tx is Wi-Fi only (Step 4): 2.4 / 5 / 6 GHz. (The band selector is shown for the indoor floor;
   // outdoor gets its frequency from the cellular sector picker instead.)
   var BANDS_MHZ = [2442, 5500, 6125];
