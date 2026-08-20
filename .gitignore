@@ -62,6 +62,12 @@ colab-mcp-main/
 # repo entirely so the two histories never mix.
 Unity_RF_Simulator/
 
+# Local-only folders — not part of the project, and not for the external handoff.
+# "RF Propagation Theory/" is personal study material (a copyrighted textbook PDF);
+# "Extensions/" is an empty scratch folder.
+Extensions/
+RF Propagation Theory/
+
 # Local development virtualenv (created by the environment update script)
 .venv/
 

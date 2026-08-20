@@ -27,6 +27,7 @@ this way; this file lists *what's in each folder*.
 | `Unity_RF_Simulator/`* | dir | The (separate) Unity C# **source** project. *nested repo, git-ignored — not part of a clone. |
 | `.claude/` | dir | Editor/agent config (e.g. `launch.json` dev-server presets). Kept at root — tooling reads it there. |
 | `.github/` | dir | `CODEOWNERS` (+ any CI workflows). Kept at root — GitHub only honors it there. |
+| `README.md` | file | **Start here** — project overview, quick start, and the Windows/symlink note. |
 | `REPO_STRUCTURE.md`, `DIRECTORY.md` | file | This split's rationale, and this guide. |
 | **Root symlinks** | link | `Map Coverage`, `Statistics`, `Simulation`, `Time Elapse` → `Frontend/…`; `Physics Engine`, `scripts` → `Backend/…`; `Data → Data + Model`; `SIM`/`SIM3D`/`TESTS3D` → into `Backend/Physics Engine/…`; `AGENTS.md`/`QUICKSTART.md` → `docs/…`. |
 
