@@ -1,3 +1,4 @@
+```The views expressed here are my own and do not reflect the views of the United States Government or my employing agency.```
 # Indoor / Outdoor Walk-Test Studio
 
 A browser dashboard for exploring measured **4G / 5G / Wi-Fi** walk-test data — a signal-coverage
@@ -90,3 +91,4 @@ maintainer task, not required to use the app. See the detailed list in
 ---
 
 *Sole author/contributor: **cgm2179** (see `.github/CODEOWNERS`).*
+Publicly shareable. All rights reserved.
