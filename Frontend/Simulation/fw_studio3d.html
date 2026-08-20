@@ -49,6 +49,15 @@
     #actionBar .btn2 { padding:6px 11px; border:0; border-radius:9px; background:#eef2ef; color:var(--muted);
                        font:inherit; font-weight:600; cursor:pointer; }
     #actionBar .btn2.on { background:#1f2a2a; color:#fff; }
+    /* receiver-point toolbar above the model (Get a Point) */
+    #probeBar { flex:none; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+                padding:8px 14px; border-bottom:1px solid var(--line); background:var(--panel); }
+    #probeBar .lab { font-weight:600; color:var(--muted); font-size:0.8rem; }
+    #probeBar input { width:auto; padding:5px 8px; }
+    #probeBar input[type=number] { width:96px; }
+    #probeBar .btn2 { padding:6px 11px; border:0; border-radius:9px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+    #probeBar .btn2.ghost { background:#eef2ef; color:var(--muted); }
+    #probeMsg { font-size:0.78rem; color:var(--muted); }
     #view:fullscreen, #view:-webkit-full-screen { width:100vw; height:100vh; background:#0b0e14; }
     body.fs-fallback-body { overflow:hidden; }
     #view.fs-fallback { position:fixed; inset:0; z-index:50; width:100vw; height:100vh;
@@ -116,6 +125,15 @@
   </div>
 
   <div id="view">
+    <div id="probeBar">
+      <span class="lab">Get a Point</span>
+      <input id="rxX" type="number" step="any" placeholder="X (m)">
+      <input id="rxY" type="number" step="any" placeholder="Y (m)">
+      <input id="rxZ" type="number" step="any" placeholder="Z (m)">
+      <button class="btn2" id="rxPlace">◉ Place receiver</button>
+      <button class="btn2 ghost" id="rxClearBar">Clear</button>
+      <span id="probeMsg"></span>
+    </div>
     <div id="stage">
       <canvas id="gl"></canvas>
       <div id="hud">
@@ -400,6 +418,17 @@
 
     $('placeRx').onclick = () => { placingRx = true; setStatus('click the model to place the Rx…'); };
     $('clearRx').onclick = () => { rx = null; placingRx = false; placeRxMarker(); updateRxReadout(); };
+
+    // Get-a-Point: drop the Rx at typed metres (cell = metres / CELL), snapped to the nearest air voxel
+    $('rxPlace').onclick = () => {
+      const mx = parseFloat($('rxX').value), my = parseFloat($('rxY').value), mz = parseFloat($('rxZ').value);
+      if (!isFinite(mx) || !isFinite(my) || !isFinite(mz)) { $('probeMsg').textContent = 'enter X, Y and Z'; return; }
+      let v = { x: Math.round(mx / CELL), y: Math.round(my / CELL), z: Math.round(mz / CELL) };
+      if (v.x < 0 || v.y < 0 || v.z < 0 || v.x >= X || v.y >= Y || v.z >= Z) { $('probeMsg').textContent = '⚠ point is outside the voxel grid'; return; }
+      rx = snap3dAir(v); placingRx = false; placeRxMarker(); updateRxReadout();
+      $('probeMsg').textContent = `◉ receiver at (${(rx.x * CELL).toFixed(1)}, ${(rx.y * CELL).toFixed(1)}, ${(rx.z * CELL).toFixed(1)}) m`;
+    };
+    $('rxClearBar').onclick = () => { $('clearRx').click(); $('probeMsg').textContent = ''; $('rxX').value = ''; $('rxY').value = ''; $('rxZ').value = ''; };
     $('txp').addEventListener('input', () => { if (field) { if (anchor) anchor.txDbm = parseFloat($('txp').value) || 20; updateRxReadout(); } });
     // which engine produced a cell: hybrid splits by Tx distance (surrogate near ⊕ eikonal far, R1/R2
     // straight from the solver); FDTD sub-volume is all near-field FDTD.

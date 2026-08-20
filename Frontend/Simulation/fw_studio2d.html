@@ -51,6 +51,15 @@
     #actionBar .btn2 { padding:6px 11px; border:0; border-radius:9px; background:#eef2ef; color:var(--muted);
                        font:inherit; font-weight:600; cursor:pointer; }
     #actionBar .btn2.on { background:#1f2a2a; color:#fff; }
+    /* receiver-point toolbar above the plan (Get a Point) */
+    #probeBar { flex:none; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+                padding:8px 14px; border-bottom:1px solid var(--line); background:var(--panel); }
+    #probeBar .lab { font-weight:600; color:var(--muted); font-size:0.8rem; }
+    #probeBar input { width:auto; padding:5px 8px; }
+    #probeBar input[type=number] { width:110px; }
+    #probeBar .btn2 { padding:6px 11px; border:0; border-radius:9px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+    #probeBar .btn2.ghost { background:#eef2ef; color:var(--muted); }
+    #probeMsg { font-size:0.78rem; color:var(--muted); }
     #view:fullscreen, #view:-webkit-full-screen { width:100vw; height:100vh; background:#eceef0; }
     body.fs-fallback-body { overflow:hidden; }
     #view.fs-fallback { position:fixed; inset:0; z-index:50; width:100vw; height:100vh;
@@ -60,14 +69,14 @@
 <body>
   <div id="side">
     <h2>Full-Wave Studio · 2D</h2>
-    <p class="sub">SIM V3 · place a Tx, pick a band, generate the field on the 7th-floor plan. Full-wave via the ONNX surrogate (fast) or FDTD; or the non-AI/ML path-loss solvers — Eikonal, Ray-trace, Motley-Keenan, FSPL.</p>
+    <p class="sub">SIM V3 · place a Tx, pick a band, generate the field on the 7th-floor plan. Full-wave via the ONNX surrogate (fast) or FDTD, or the non-AI/ML Ray Tracing solver.</p>
 
     <div class="grp"><label>Solver</label>
       <div class="seg" id="solverSeg">
-        <button data-v="onnx" data-aiml="1">ONNX</button><button class="on" data-v="fdtd">FDTD</button><button data-v="eikonal">Eikonal</button><button data-v="raytrace">Ray-trace</button><button data-v="motley">Motley-Keenan</button><button data-v="fspl">FSPL</button>
+        <button data-v="onnx" data-aiml="1">ONNX</button><button class="on" data-v="fdtd">FDTD</button><button data-v="raytrace">Ray Tracing</button>
       </div>
       <div id="engine">loading model…</div>
-      <p class="note">SIM&nbsp;V3 — pick an engine: ONNX surrogate (fast) / FDTD full-wave, or the non-AI/ML solvers (Eikonal / Ray-trace / Motley-Keenan / FSPL). <b>Not</b> the legacy “physics (exact JS mirror)”.</p>
+      <p class="note">SIM&nbsp;V3 — pick an engine: ONNX surrogate (fast), FDTD full-wave, or the non-AI/ML Ray Tracing solver. <b>Not</b> the legacy “physics (exact JS mirror)”.</p>
     </div>
     <div class="grp"><label>Band</label><select id="band"></select></div>
     <div class="grp"><label>Tx power (dBm)</label><input id="txp" type="number" value="20" min="0" max="46" step="1"></div>
@@ -101,6 +110,14 @@
   </div>
 
   <div id="view">
+    <div id="probeBar">
+      <span class="lab">Get a Point</span>
+      <input id="rxX" type="number" step="any" placeholder="X (m)">
+      <input id="rxY" type="number" step="any" placeholder="Y (m)">
+      <button class="btn2" id="rxPlace">◉ Place receiver</button>
+      <button class="btn2 ghost" id="rxClearBar">Clear</button>
+      <span id="probeMsg"></span>
+    </div>
     <div id="stage">
       <canvas id="cv"></canvas>
       <div id="hud">
@@ -191,8 +208,7 @@
 
     // AI/ML gate: the parent appends ?aiml=0 for a CREATED project (its ONNX surrogate is trained
     // on the DEFAULT dataset only, so it's invalid here). Disable ONNX / Auto and default to the
-    // FDTD physics solver; the other physics solvers (Eikonal / Ray-trace / Motley-Keenan / FSPL)
-    // stay available.
+    // FDTD physics solver; the non-AI/ML Ray Tracing solver stays available.
     if (new URLSearchParams(location.search).get('aiml') === '0') {
       document.querySelectorAll('#solverSeg button[data-aiml="1"]').forEach(b => {
         b.disabled = true; b.classList.remove('on');
@@ -215,8 +231,8 @@
       if (field && isFinite(rangeHi) && isFinite(rangeLo)) render();
     }));
 
-    const PHYS_LABEL = { fdtd: 'in-browser FDTD (approx.)', eikonal: 'Eikonal — shortest-path loss',
-      raytrace: 'Ray-trace — LOS ⊕ reflections', motley: 'Motley-Keenan — FSPL + wall loss', fspl: 'Free-space path loss' };
+    const PHYS_LABEL = { fdtd: 'in-browser FDTD (approx.)',
+      raytrace: 'Ray Tracing — LOS ⊕ reflections' };
     function reflectEngine() {
       const eff = solverSel === 'auto' ? (onnxReady ? 'ONNX surrogate (full-wave)' : 'FDTD (ONNX unavailable)') :
                   solverSel === 'onnx' ? (onnxReady ? 'ONNX surrogate (full-wave)' : 'ONNX UNAVAILABLE — will error') :
@@ -295,6 +311,18 @@
 
     $('placeRx').onclick = () => { placingRx = true; setStatus('click the plan to place the Rx…'); };
     $('clearRx').onclick = () => { rx = null; placingRx = false; updateRxReadout(); if (field) render(); else drawPlan(); };
+
+    // Get-a-Point: drop the Rx at typed floor-plan metres (X = col·CELL, Y = row·CELL)
+    $('rxPlace').onclick = () => {
+      const X = parseFloat($('rxX').value), Y = parseFloat($('rxY').value);
+      if (!isFinite(X) || !isFinite(Y)) { $('probeMsg').textContent = 'enter both coordinates'; return; }
+      const j = Math.round(X / CELL), i = Math.round(Y / CELL);
+      if (i < 0 || j < 0 || i >= H || j >= W) { $('probeMsg').textContent = '⚠ point is outside the plan'; return; }
+      rx = { i, j }; placingRx = false; updateRxReadout();
+      $('probeMsg').textContent = `◉ receiver at (${(j * CELL).toFixed(1)}, ${(i * CELL).toFixed(1)}) m`;
+      if (field) render(); else drawPlan();
+    };
+    $('rxClearBar').onclick = () => { $('clearRx').click(); $('probeMsg').textContent = ''; $('rxX').value = ''; $('rxY').value = ''; };
     $('txp').addEventListener('input', () => { if (field) { buildAnchor(); updateRxReadout(); } });
     $('dlCsv').onclick = () => {
       if (!field || !window.RxProbe) return;

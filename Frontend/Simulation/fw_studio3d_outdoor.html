@@ -101,11 +101,11 @@
 
     <div class="grp"><label>Solver</label>
       <div class="seg" id="solverSeg">
-        <button class="on" data-v="eikonal">Eikonal</button><button data-v="onnx" data-aiml="1">ONNX (hybrid)</button><button data-v="fdtd">FDTD</button>
+        <button class="on" data-v="fspl">FSPL</button>
       </div>
       <div id="engine"></div>
-      <p class="note"><b>Eikonal</b> = whole-city absolute RSRP (FSPL + ray-marched building/foliage loss) — the iBwave/WinProp coverage look. <b>ONNX (hybrid)</b> = the trained full-wave surrogate in the box around the antenna ⊕ eikonal for the rest of the city. <b>FDTD</b> solves the true sub-volume field around the station at λ/8.</p></div>
-    <div class="grp" id="fdtdBudgetGrp"><label>FDTD detail vs speed</label>
+      <p class="note"><b>FSPL</b> = free-space path loss from the antenna (20·log₁₀ distance + frequency term) — the line-of-sight baseline, ignoring buildings and foliage.</p></div>
+    <div class="grp" id="fdtdBudgetGrp" style="display:none"><label>FDTD detail vs speed</label>
       <select id="fdtdBudget">
         <option value="500000">Fast (coarse · ~0.5 M cells)</option>
         <option value="1200000" selected>Balanced (~1.2 M cells)</option>
@@ -559,7 +559,7 @@
 
     // ---- segmented controls ----
     function seg(id, cb) { const el = $(id); el.querySelectorAll('button').forEach(b => b.onclick = () => { el.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); cb(b.dataset.v); }); }
-    let solverSel = 'eikonal', cmapName = 'rainbow', fieldStyle = 'slice';
+    let solverSel = 'fspl', cmapName = 'rainbow', fieldStyle = 'slice';
     let rangeHi = -40, rangeLo = -110;
     // ONNX (hybrid) solver state — the trained 3-D surrogate (shared with the indoor studio).
     let onnxReady = false, onnxWhy = 'loading ONNX surrogate…', session = null, contract = null;
@@ -570,16 +570,18 @@
     seg('fstyleSeg', v => { fieldStyle = v; if (field) buildFieldMesh(); });
     ['rangeHi', 'rangeLo'].forEach(id => $(id).addEventListener('input', () => { rangeHi = +$('rangeHi').value; rangeLo = +$('rangeLo').value; if (field && isFinite(rangeHi) && isFinite(rangeLo)) { buildFieldMesh(); drawCbar(); } }));
     function reflectEngine() {
-      const eff = solverSel === 'eikonal' ? 'eikonal RSRP (whole-city, physics)'
+      const eff = solverSel === 'fspl' ? 'FSPL — free-space path loss (whole-city LOS baseline)'
+                : solverSel === 'eikonal' ? 'eikonal RSRP (whole-city, physics)'
                 : solverSel === 'onnx' ? (onnxReady ? 'hybrid: ONNX near ⊕ eikonal far (whole-city RSRP)' : 'ONNX (hybrid) — surrogate ' + onnxWhy)
                 : 'penetrable FDTD sub-volume';
-      $('engine').textContent = `engine: SIM V3 · ${eff}` + (solverSel === 'onnx' && !onnxReady ? '  ·  use Eikonal or FDTD meanwhile' : '');
+      $('engine').textContent = `engine: SIM V3 · ${eff}`;
     }
 
     // ---- generate ----
     let field = null, fieldObj = null;
     $('run').onclick = generate;
     async function generate() {
+      if (solverSel === 'fspl') { setStatus('FSPL coverage solve isn’t wired yet — outdoor 3-D is still in preview.', true); return; }
       const s = curStation(); if (!s.inBounds) { setStatus('selected station is outside the city tile.', true); return; }
       setWarn(''); const fMHz = parseFloat($('band').value), txDbm = parseFloat($('txp').value) || 46;
       // antenna cell: on the rooftop, snapped up into air so the source is not buried in a wall

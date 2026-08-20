@@ -142,7 +142,6 @@
       </select>
       <input id="c0" type="number" step="any" placeholder="X (m, EPSG:3857)">
       <input id="c1" type="number" step="any" placeholder="Y (m, EPSG:3857)">
-      <input id="c2" type="number" step="any" placeholder="Z / height (m, opt)" title="3D height — recorded but not used by the 2D plane field">
       <button class="btn2" id="place">◉ Place receiver</button>
       <button class="btn2 ghost" id="clearRx">Clear</button>
       <span id="probeMsg"></span>
@@ -634,7 +633,7 @@
       if (x < 0 || z < 0 || x >= NX || z >= NZ) {
         rx = null; drawOverlay(); $('probeMsg').textContent = '⚠ point is outside the mapped city'; return;
       }
-      rx = { x, z, h: parseFloat($('c2').value) };
+      rx = { x, z, h: 0 };
       const box = S.regionBoxCells(CITY, sel, curRegionM());
       const inside = x >= box.x0 && x < box.x1 && z >= box.z0 && z < box.z1;
       $('probeMsg').textContent = inside ? '✓ inside calc box — valid receiver' : '⚠ outside the calc box';
@@ -671,7 +670,7 @@
       const pcol = Math.floor((ev.clientX - r.left) * NX / r.width), prow = Math.floor((ev.clientY - r.top) * NZ / r.height);
       const { x, z } = pxToCity(pcol, prow);
       if (x < 0 || z < 0 || x >= NX || z >= NZ) return;
-      rx = { x, z, h: parseFloat($('c2').value) || 0 };
+      rx = { x, z, h: 0 };
       $('rxGroup').style.display = ''; $('probeMsg').textContent = '◉ receiver placed — hover the dot for metrics';
       updateRxReadout(); drawOverlay();
     });

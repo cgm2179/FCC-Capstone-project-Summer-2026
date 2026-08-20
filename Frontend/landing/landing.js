@@ -780,6 +780,13 @@
       if (outToggle) outToggle.innerHTML = '▼ Outdoor Full-Wave (SIM V3 · base-station coverage)';
     }
 
+    // Legacy path-loss simulator ("Version 1" · Motley-Keenan, simulator_tab.js) is an
+    // indoor-floor-plan tool, so hide it in Outdoor·2D — the Outdoor Full-Wave studio above is
+    // the outdoor path there. Keep it in Indoor·2D (and it lives under sim2dPanel, so it is
+    // already gone in any 3D mode).
+    const legacyPanel = document.getElementById('simLegacyPanel');
+    if (legacyPanel) legacyPanel.style.display = isOutdoor2d ? 'none' : '';
+
     // Simulation 3D: same indoor/outdoor swap for the 3-D Full-Wave Studio. Indoor = fw_studio3d
     // (7th-floor voxel grid); outdoor = fw_studio3d_outdoor (NoMa city + known BS). Only relevant in 3D mode.
     const isOutdoor3d = window.appMode.environment === 'outdoor' && dim === '3d';

@@ -608,6 +608,10 @@
           })();
         </script>
 
+        <!-- Legacy path-loss simulator ("Version 1" · Motley-Keenan engine, SIM/web/simulator_tab.js).
+             It is an indoor-floor-plan tool, so landing.js hides #simLegacyPanel in Outdoor·2D mode
+             (there the "Outdoor Full-Wave" studio above is the path). Shown in Indoor·2D. -->
+        <div id="simLegacyPanel">
         <div class="sim-subtabs">
           <button type="button" class="sim-subtab" data-sub="received">Received Signal (outdoor BS)</button>
           <button type="button" class="sim-subtab active" data-sub="transmitter">Transmitter (indoor Tx)</button>
@@ -705,6 +709,7 @@
           values. Received-power math: P_rx = P_tx + G − PL (path loss is the only model
           output). Maps combine in linear power. Physics constants come from
           <code>SIM/manifest.json</code> — the legend above is generated from it.</p>
+        </div><!-- /simLegacyPanel -->
         </div><!-- /sim2dPanel -->
 
         <!-- 3D Simulation: construct + place Tx/Rx on the voxel model, pick a
