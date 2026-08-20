@@ -1,10 +1,12 @@
 // fw_fdtd3d_worker.js — sub-volume 3-D scalar FDTD for the 3-D Full-Wave Studio.
 //
 // The 3-D twin of fw_solve2d.fdtdSolve, run OFF the main thread so the UI stays live.
-// Nearest-upsamples the coarse material sub-volume (around the Tx) to λ/npw, leapfrogs
-// u_tt = c² lap(u) with class-3 rigid barriers + a 6-face absorbing sponge + a soft CW
-// point source, pulls the steady-state phasor U with a running DFT over the last periods,
-// then downsamples U back to the coarse sub-volume grid the page renders.
+// Nearest-upsamples the coarse material sub-volume (around the Tx) to λ/npw, then runs the damped,
+// variable-speed leapfrog  u_tt + 2γ·u_t = c²·lap(u)  with per-class ITU materials (nByClass/gammaByClass
+// from fw_solve3d.materialLuts): speed c = C0/√εr' → refraction/reflection, loss a = γ·dt → absorption.
+// Class-3 stays a rigid reflector, plus a 6-face absorbing sponge + a soft CW point source. Pulls the
+// steady-state phasor U with a running DFT over the last periods, then downsamples U back to the coarse
+// sub-volume grid the page renders. (No per-class LUTs → falls back to a lossless air solve.)
 //
 // Whole-floor 3-D FDTD at λ/10 is millions of cells (would freeze the tab) — so the studio
 // only ever hands this worker a few-metre sub-volume, exactly the box the surrogate is
@@ -26,7 +28,8 @@ function upsample3d(grid, X, Y, Z, up) {
 
 self.onmessage = (ev) => {
   const m = ev.data || {};
-  const { grid, X0, Y0, Z0, cell, fMHz, tx0, up = 1, crossings = 1.4, safety = 0.4, periods = 2 } = m;
+  const { grid, X0, Y0, Z0, cell, fMHz, tx0, up = 1, crossings = 1.4, safety = 0.4, periods = 2,
+          nByClass = null, gammaByClass = null } = m;
   const { g, X, Y, Z } = upsample3d(grid, X0, Y0, Z0, up);
   const tx = { x: Math.round(tx0.x * up), y: Math.round(tx0.y * up), z: Math.round(tx0.z * up) };
   const h = cell / up, f0 = fMHz * 1e6, w = 2 * Math.PI * f0;
@@ -59,6 +62,25 @@ self.onmessage = (ev) => {
   let nWin = 0;
   const rate = Math.max(1, Math.floor(steps / 60));
 
+  // per-class material coefficients → per-cell damped, variable-speed leapfrog (matches Python fullwave2d):
+  //   speed c = C0/n  ⇒  cdt2[cls] = (C0/n·dt)²/h² = cdt2ih2 / n²
+  //   loss  a = γ·dt  ⇒  u_next = (2u − (1−a)·u_prev + cdt2·lap) / (1+a)
+  // Unknown class / no LUT defaults to air (n=1, a=0) → the original lossless update, so this is safe.
+  const NC = 256;
+  const cdt2Cls = new Float64Array(NC).fill(cdt2ih2);
+  const inv1paCls = new Float64Array(NC).fill(1);
+  const oneMinusaCls = new Float64Array(NC).fill(1);
+  if (nByClass || gammaByClass) {
+    const L = Math.max(nByClass ? nByClass.length : 0, gammaByClass ? gammaByClass.length : 0);
+    for (let c = 0; c < L; c++) {
+      const ni = (nByClass && nByClass[c] > 0) ? nByClass[c] : 1;
+      const a = (gammaByClass ? (gammaByClass[c] || 0) : 0) * dt;
+      cdt2Cls[c] = cdt2ih2 / (ni * ni);
+      inv1paCls[c] = 1 / (1 + a);
+      oneMinusaCls[c] = 1 - a;
+    }
+  }
+
   for (let n = 0; n < steps; n++) {
     for (let x = 1; x < X - 1; x++) {
       const xB = x * YZ;
@@ -67,8 +89,9 @@ self.onmessage = (ev) => {
         for (let z = 1; z < Z - 1; z++) {
           const idx = idx0 + z;
           if (rigid[idx]) { un[idx] = 0; continue; }
+          const cl = g[idx];                                    // material class → speed + absorption
           const lap = u[idx - YZ] + u[idx + YZ] + u[idx - Z] + u[idx + Z] + u[idx - 1] + u[idx + 1] - 6 * u[idx];
-          un[idx] = 2 * u[idx] - up_[idx] + cdt2ih2 * lap;
+          un[idx] = (2 * u[idx] - oneMinusaCls[cl] * up_[idx] + cdt2Cls[cl] * lap) * inv1paCls[cl];
         }
       }
     }

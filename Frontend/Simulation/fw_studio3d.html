@@ -86,7 +86,10 @@
     <div class="grp"><label>Tx power (dBm)</label><input id="txp" type="number" value="20" min="0" max="46" step="1"></div>
     <div class="grp" id="fdtdResGrp"><label>FDTD sub-volume (half-width, m)</label>
       <select id="region"><option value="3">±3 m (fast)</option><option value="4" selected>±4 m</option><option value="6">±6 m (slow)</option></select>
-      <p class="note">FDTD box around the Tx at λ/8, full ceiling height. Bigger = slower.</p></div>
+      <p class="note">FDTD box around the Tx at λ/8, full ceiling height. Bigger = slower.</p>
+      <label style="margin-top:8px">FDTD materials</label>
+      <div class="seg" id="fdtdPhysSeg"><button class="on" data-v="material">Material-aware</button><button data-v="airy">Airy (FSPL)</button></div>
+      <p class="note"><b>Material-aware</b> = real ITU absorption + wave-speed, so walls attenuate / reflect / refract (P.2040, matches the Python full-wave engine). <b>Airy</b> = lossless air-speed stand-in → free-space only (class-3 core still reflects).</p></div>
 
     <button class="btn ghost" id="place">＋ Place Tx (click the model)</button>
     <button class="btn" id="run">▶ Generate field</button>
@@ -283,8 +286,9 @@
 
     // ---- segmented controls ----
     function seg(id, cb) { const el = $(id); el.querySelectorAll('button').forEach(b => b.onclick = () => { el.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); cb(b.dataset.v); }); }
-    let solverSel = 'fdtd', viewMode = 'heat', cmapName = 'rainbow', rangeHi = 0, rangeLo = -40, fieldStyle = 'cloud';
+    let solverSel = 'fdtd', viewMode = 'heat', cmapName = 'rainbow', rangeHi = 0, rangeLo = -40, fieldStyle = 'cloud', fdtdMaterial = true;
     seg('solverSeg', v => { solverSel = v; $('fdtdResGrp').style.display = (v === 'onnx') ? 'none' : 'block'; reflectEngine(); });
+    seg('fdtdPhysSeg', v => { fdtdMaterial = (v === 'material'); });   // material-aware ITU physics vs lossless airy/FSPL
     seg('modelSeg', v => { modelView = v; applyModelView(); });
     seg('viewSeg', v => { viewMode = v; drawCbar(); if (field) recolorField(viewMode === 'wave' ? phase : null); });
     seg('cmapSeg', v => { cmapName = v; drawCbar(); if (field) recolorField(viewMode === 'wave' ? phase : null); });
@@ -353,14 +357,14 @@
       const t0 = performance.now();
       let res;
       try {
-        res = await S.fdtdSolve3d({ grid: sv.sub, X0: sv.dims[0], Y0: sv.dims[1], Z0: sv.dims[2], cell: CELL, fMHz, tx0: sv.txLocal, up: plan.up }, setBar);
+        res = await S.fdtdSolve3d({ grid: sv.sub, X0: sv.dims[0], Y0: sv.dims[1], Z0: sv.dims[2], cell: CELL, fMHz, tx0: sv.txLocal, up: plan.up, materialAware: fdtdMaterial }, setBar);
       } catch (e) { setBar(null); setStatus('solve failed: ' + e.message, true); $('run').disabled = false; return; }
       const secs = (performance.now() - t0) / 1000; setBar(null); $('run').disabled = false;
 
       const env = S.envelopeDb3d(res.re, res.im, sv.sub);
-      field = { re: res.re, im: res.im, db: env.db, dims: sv.dims, origin: sv.origin, sub: sv.sub, fMHz, txy: sv.txLocal.y, mode: 'fdtd' };
+      field = { re: res.re, im: res.im, db: env.db, dims: sv.dims, origin: sv.origin, sub: sv.sub, fMHz, txy: sv.txLocal.y, mode: 'fdtd', airy: !fdtdMaterial };
       afterGenerate();
-      $('hudMeta').textContent = `${sv.dims.join('×')} sub-volume · FDTD · ${fMHz} MHz · ${secs < 1 ? (secs * 1e3).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}`;
+      $('hudMeta').textContent = `${sv.dims.join('×')} sub-volume · FDTD${fdtdMaterial ? '' : ' (airy/FSPL)'} · ${fMHz} MHz · ${secs < 1 ? (secs * 1e3).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}`;
       setStatus(`done — FDTD field in ${secs < 1 ? (secs * 1e3).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}.`);
       setOpacity(0.3); $('modelOpacity').value = 30;
       buildFieldMesh(); updateDesc();
@@ -368,6 +372,22 @@
 
     // ---- receiver (Rx): field-derived U / PL / RSRP + per-voxel CSV ----
     const matName = c => { const m = MATS.find(mm => mm.id === c); return m ? m.name.replace(/_/g, ' ') : ('class_' + c); };
+    // per-material LOS ABSORPTION budget from the SAME ITU physics the FDTD field uses (NOT Motley-Keenan):
+    // integrate each material's spatial attenuation α(f) [dB/m] (fw_solve3d.materialAlphaDbM) along the
+    // straight Tx→cell path. Diagnostic only — the field itself already carries this loss.
+    const clsAt = (x, y, z) => (x >= 0 && y >= 0 && z >= 0 && x < X && y < Y && z < Z) ? GRID[idx(x, y, z)] : 0;
+    let _alphaF = null, _alphaObj = null;                     // cache the α LUT (dB/m) by frequency
+    function alphaByClass(fMHz) {
+      if (fMHz !== _alphaF) {
+        _alphaF = fMHz; const a = S.materialAlphaDbM(fMHz);
+        _alphaObj = {}; for (let c = 0; c < a.length; c++) if (a[c] > 0) _alphaObj[c] = a[c];
+      }
+      return _alphaObj;
+    }
+    const LOSSY = MATS.filter(m => (S.materialAlphaDbM(1000)[m.id] || 0) > 0);     // penetrable lossy classes, id order
+    const losBudget = (gx, gy, gz, fMHz) => window.RxProbe.materialLossLos({
+      tx: { x: tx.x, y: tx.y, z: tx.z }, rx: { x: gx, y: gy, z: gz },
+      classAt: clsAt, lossDb: {}, lossPerM: alphaByClass(fMHz), cell: CELL });
     function snap3dAir(v) {                              // nearest air voxel to a solid hit
       if (GRID[idx(v.x, v.y, v.z)] === 0) return v;
       for (let r = 1; r < 12; r++)
@@ -410,6 +430,10 @@
           const m = window.RxProbe.metricsAt(anchor, { A: smp.A, db: smp.db, d, dx, dy, dz,
             world: [rx.x * CELL, rx.y * CELL, rx.z * CELL], material: matName(smp.mat) });
           s += `\nU = ${smp.A.toExponential(2)}  ·  PL = ${m.PL.toFixed(1)} dB  ·  RSRP = ${m.RSRP.toFixed(1)} dBm`;
+          const b = losBudget(rx.x, rx.y, rx.z, field.fMHz);
+          const parts = LOSSY.filter(mm => b.perClass[mm.id]).map(mm => `${matName(mm.id)} ${b.perClass[mm.id].toFixed(1)}`);
+          const budLabel = field.airy ? 'LOS absorption (ITU α — NOT in airy field)' : 'LOS absorption (ITU α)';
+          s += `\n${budLabel}: ${parts.length ? parts.join(' + ') + ' = ' + b.total.toFixed(1) + ' dB' : 'clear LOS (0 dB)'}`;
           s += `\nmethod: ${methodFor(d)}${field.mode === 'hybrid' && d > S.HYBRID_R1_M ? ' — approx.' : ''}`;
         } else s += `\n(outside the solved ${field.absolute ? 'floor' : 'sub-volume'} — U/PL n/a)`;
       } else s += `\n(generate a field for U / PL / RSRP)`;
@@ -445,19 +469,22 @@
     // straight from the solver); FDTD sub-volume is all near-field FDTD.
     const methodFor = d => (field && field.mode === 'hybrid')
       ? (d <= S.HYBRID_R1_M ? 'onnx-surrogate' : d >= S.HYBRID_R2_M ? 'eikonal' : 'blend')
-      : 'fdtd';
+      : (field && field.airy ? 'fdtd-airy' : 'fdtd');
     $('dlCsv').onclick = () => {
       if (!field || !window.RxProbe) return;
       if (!anchor) buildAnchor();
       const [sx, sy, sz] = field.dims, [ox, oy, oz] = field.origin;
       const csv = window.RxProbe.buildCsv({
-        anchor, nCells: sx * sy * sz, has3D: true, extraCols: ['method'],
+        anchor, nCells: sx * sy * sz, has3D: true,
+        extraCols: ['method', 'los_absorb_dB', ...LOSSY.map(m => `absorb_${m.name}_dB`)],
         sampleOf: li => {
           const zl = li % sz, yl = ((li - zl) / sz) % sy, xl = ((li - zl) / sz - yl) / sy;
           const gx = xl + ox, gy = yl + oy, gz = zl + oz;
           const dx = (tx.x - gx) * CELL, dy = (tx.y - gy) * CELL, dz = (tx.z - gz) * CELL, d = Math.hypot(dx, dy, dz);
+          const b = losBudget(gx, gy, gz, field.fMHz);   // per-material LOS ITU-α absorption along Tx→this voxel
           return { A: Math.hypot(field.re[li], field.im[li]), db: field.db[li], d,
-            dx, dy, dz, world: [gx * CELL, gy * CELL, gz * CELL], material: matName(field.sub[li]), i: gx, j: gy, k: gz, extra: [methodFor(d)] };
+            dx, dy, dz, world: [gx * CELL, gy * CELL, gz * CELL], material: matName(field.sub[li]), i: gx, j: gy, k: gz,
+            extra: [methodFor(d), b.total.toFixed(2), ...LOSSY.map(m => (b.perClass[m.id] || 0).toFixed(2))] };
         },
       });
       window.RxProbe.downloadCsv(`sim_v3_indoor3d_${Math.round(field.fMHz)}MHz_cells.csv`, csv);

@@ -14,6 +14,63 @@ export const C0 = 299792458.0;
 const BARRIER = 3;
 const tick = () => new Promise(r => setTimeout(r, 0));
 
+// ---------------------------------------------------------------- ITU material EM (P.2040-3)
+// Faithful JS port of Backend/Physics Engine/2D/SIM/physics/physics_v2.py (P2040 + permittivity +
+// MATERIALS7) and 2D/SIM V3/physics/fullwave2d.py:damping_by_class, so the browser FDTD uses the
+// SAME material physics as the validated Python engine (real εr → wave speed / refraction; Im(εr) →
+// absorption). KEEP THESE TABLES IN SYNC WITH physics_v2.py.
+const EPS0 = 8.8541878128e-12;
+const P2040 = {                                        // eps' = a·f_GHz^b ; sigma = c·f_GHz^d
+  vacuum:       { a: 1.00, b: 0.0, c: 0.0,    d: 0.0 },
+  concrete:     { a: 5.24, b: 0.0, c: 0.0462, d: 0.7822 },
+  plasterboard: { a: 2.73, b: 0.0, c: 0.0085, d: 0.9395 },
+  wood:         { a: 1.99, b: 0.0, c: 0.0047, d: 1.0718 },
+  glass:        { a: 6.31, b: 0.0, c: 0.0036, d: 1.3394 },
+};
+// 6-class indoor scheme (manifest ids 0..5). barrier (class 3) is a rigid reflector: it carries NO
+// bulk speed/loss (held at u=0), exactly like physics_3d.speed_field masks it + damping_by_class skips
+// it. Furniture is dilute clutter: FULL wood n for speed (physics_3d.refractive_index_by_class does not
+// dilute n) but absorption scaled by fill_fraction (damping_by_class does).
+const MATERIALS6 = [
+  { id: 0, p2040: null,           per_metre: false },
+  { id: 1, p2040: 'plasterboard', per_metre: false },
+  { id: 2, p2040: 'concrete',     per_metre: false },
+  { id: 3, p2040: 'concrete',     per_metre: false, barrier: true },
+  { id: 4, p2040: 'wood',         per_metre: true, fill_fraction: 0.021 },
+  { id: 5, p2040: 'glass',        per_metre: false },
+];
+
+// Complex relative permittivity eps' - j·eps'' at f (MHz). exp(+jωt) → lossy has positive `im` here
+// (the magnitude of the negative imaginary part). Mirrors physics_v2.permittivity.
+export function permittivity(mat, fMHz) {
+  const p = P2040[mat], fG = fMHz / 1000.0;
+  const epsRe = p.a * Math.pow(fG, p.b);
+  const sigma = p.c * Math.pow(fG, p.d);
+  const epsIm = sigma / (2 * Math.PI * (fG * 1e9) * EPS0);
+  return { re: epsRe, im: epsIm };
+}
+
+// Per-class LUTs at f, indexed by class id:
+//   n     real refractive index √εr'  (air / barrier → 1)
+//   gamma damping rate π·f·tanδ [1/s] (air / barrier → 0; dilute clutter × fill_fraction)
+//   alphaDbM spatial amplitude attenuation in dB/m: amp ~ e^{-γt}, t = L·n/C0 ⇒ α = 8.686·γ·n/C0
+export function materialLuts(fMHz) {
+  const N = MATERIALS6.length;
+  const n = new Float64Array(N), gamma = new Float64Array(N), alphaDbM = new Float64Array(N);
+  for (const m of MATERIALS6) {
+    if (!m.p2040 || m.p2040 === 'vacuum' || m.barrier) { n[m.id] = 1; continue; }  // gamma/alpha stay 0
+    const eps = permittivity(m.p2040, fMHz);
+    const nRe = Math.sqrt((Math.hypot(eps.re, eps.im) + eps.re) / 2);     // Re(√εr) — matches physics_3d
+    let g = Math.PI * (fMHz * 1e6) * (eps.im / Math.max(eps.re, 1e-6));   // π f tanδ
+    if (m.per_metre && m.fill_fraction) g *= m.fill_fraction;
+    n[m.id] = nRe; gamma[m.id] = g; alphaDbM[m.id] = 8.6858896 * g * nRe / C0;
+  }
+  return { n, gamma, alphaDbM };
+}
+// Per-class spatial attenuation (dB per metre) — the FDTD-consistent per-material loss used by the
+// studio's CSV breakdown (NOT the analytic Motley-Keenan per-crossing model).
+export const materialAlphaDbM = (fMHz) => materialLuts(fMHz).alphaDbM;
+
 // ---------------------------------------------------------------- geometry helpers
 export const wavelength = fMHz => C0 / (fMHz * 1e6);
 export const cellFine = (fMHz, npw) => wavelength(fMHz) / npw;      // λ/npw target FDTD cell
@@ -74,6 +131,12 @@ export function calibrateFdtd3dMcps() {
 
 // run the sub-volume FDTD off-thread; resolves { re, im, dims:[sx,sy,sz], steps }
 export function fdtdSolve3d(args, onProg) {
+  // Material-aware (default): per-class LUTs (real εr → speed, Im(εr) → absorption) so the worker runs
+  // the SAME damped, variable-speed leapfrog as the Python full-wave engine. Airy (materialAware:false):
+  // omit the LUTs → the worker falls back to the lossless air-speed stand-in (free-space/FSPL; only the
+  // class-3 core reflects).
+  const msg = { ...args };
+  if (args.materialAware !== false) { const { n, gamma } = materialLuts(args.fMHz); msg.nByClass = n; msg.gammaByClass = gamma; }
   return new Promise((resolve, reject) => {
     let wk;
     try { wk = new Worker(new URL('./fw_fdtd3d_worker.js', import.meta.url), { type: 'module' }); }
@@ -84,7 +147,7 @@ export function fdtdSolve3d(args, onProg) {
       else if (m.type === 'done') { wk.terminate(); resolve(m); }
     };
     wk.onerror = (e) => { wk.terminate(); reject(new Error(e.message || 'FDTD worker error')); };
-    wk.postMessage(args);
+    wk.postMessage(msg);
   });
 }
 
