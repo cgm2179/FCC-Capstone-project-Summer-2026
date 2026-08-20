@@ -84,6 +84,9 @@
     </div>
     <div class="grp"><label>Band</label><select id="band"></select></div>
     <div class="grp"><label>Tx power (dBm)</label><input id="txp" type="number" value="20" min="0" max="46" step="1"></div>
+    <div class="grp"><label>Antenna</label>
+      <div class="seg" id="antennaSeg"><button class="on" data-v="omni">Omni</button><button data-v="dipole">Dipole (WiFi)</button></div>
+      <p class="note"><b>Omni</b> = isotropic point source (default). <b>Dipole</b> = vertical λ/2 whip — omnidirectional across the floor, with nulls straight up/down. Applied to both FDTD and ONNX as a directional gain on the field.</p></div>
     <div class="grp" id="fdtdResGrp"><label>FDTD sub-volume (half-width, m)</label>
       <select id="region"><option value="3">±3 m (fast)</option><option value="4" selected>±4 m</option><option value="6">±6 m (slow)</option></select>
       <p class="note">FDTD box around the Tx at λ/8, full ceiling height. Bigger = slower.</p>
@@ -286,9 +289,10 @@
 
     // ---- segmented controls ----
     function seg(id, cb) { const el = $(id); el.querySelectorAll('button').forEach(b => b.onclick = () => { el.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); cb(b.dataset.v); }); }
-    let solverSel = 'fdtd', viewMode = 'heat', cmapName = 'rainbow', rangeHi = 0, rangeLo = -40, fieldStyle = 'cloud', fdtdMaterial = true;
+    let solverSel = 'fdtd', viewMode = 'heat', cmapName = 'rainbow', rangeHi = 0, rangeLo = -40, fieldStyle = 'cloud', fdtdMaterial = true, antennaSel = 'omni';
     seg('solverSeg', v => { solverSel = v; $('fdtdResGrp').style.display = (v === 'onnx') ? 'none' : 'block'; reflectEngine(); });
     seg('fdtdPhysSeg', v => { fdtdMaterial = (v === 'material'); });   // material-aware ITU physics vs lossless airy/FSPL
+    seg('antennaSeg', v => { antennaSel = v; });                       // omni isotropic (default) vs vertical dipole geometry
     seg('modelSeg', v => { modelView = v; applyModelView(); });
     seg('viewSeg', v => { viewMode = v; drawCbar(); if (field) recolorField(viewMode === 'wave' ? phase : null); });
     seg('cmapSeg', v => { cmapName = v; drawCbar(); if (field) recolorField(viewMode === 'wave' ? phase : null); });
@@ -321,7 +325,7 @@
         setStatus('solving (hybrid: ONNX near ⊕ eikonal far)…'); setBar(0);
         const t0 = performance.now();
         let res;
-        try { res = await S.hybridField3d(session, GRID, [X, Y, Z], CELL, fMHz, tx, txDbm, contract, setBar); }
+        try { res = await S.hybridField3d(session, GRID, [X, Y, Z], CELL, fMHz, tx, txDbm, contract, setBar, { antenna: antennaSel }); }
         catch (e) { setBar(null); setStatus('hybrid failed: ' + e.message, true); $('run').disabled = false; return; }
         const secs = (performance.now() - t0) / 1000; setBar(null); $('run').disabled = false;
         for (let i = 0; i < res.db.length; i++) if (!isFinite(res.db[i])) res.db[i] = -120;   // solids → below floor
@@ -330,7 +334,7 @@
         // absolute RSRP range (dBm)
         rangeHi = -40; rangeLo = -100; $('rangeHi').value = rangeHi; $('rangeLo').value = rangeLo;
         $('cbLo').textContent = `${rangeLo} dBm`; $('cbHi').textContent = `${rangeHi} dBm`;
-        $('hudMeta').textContent = `${X}×${Y}×${Z} whole floor · hybrid (ONNX ${res.tiles} tiles ⊕ eikonal) · ${fMHz} MHz · ${secs.toFixed(1)} s`;
+        $('hudMeta').textContent = `${X}×${Y}×${Z} whole floor · hybrid (ONNX ${res.tiles} tiles ⊕ eikonal)${antennaSel === 'dipole' ? ' · dipole' : ''} · ${fMHz} MHz · ${secs.toFixed(1)} s`;
         setStatus(`done — hybrid RSRP in ${secs.toFixed(1)} s (peak ${res.dbMax.toFixed(0)} dBm).`);
         setOpacity(0.3); $('modelOpacity').value = 30;
         fieldStyle = 'slice';                                  // whole-floor → coverage cut-plane (the iBwave look)
@@ -357,14 +361,14 @@
       const t0 = performance.now();
       let res;
       try {
-        res = await S.fdtdSolve3d({ grid: sv.sub, X0: sv.dims[0], Y0: sv.dims[1], Z0: sv.dims[2], cell: CELL, fMHz, tx0: sv.txLocal, up: plan.up, materialAware: fdtdMaterial }, setBar);
+        res = await S.fdtdSolve3d({ grid: sv.sub, X0: sv.dims[0], Y0: sv.dims[1], Z0: sv.dims[2], cell: CELL, fMHz, tx0: sv.txLocal, up: plan.up, materialAware: fdtdMaterial, antenna: antennaSel }, setBar);
       } catch (e) { setBar(null); setStatus('solve failed: ' + e.message, true); $('run').disabled = false; return; }
       const secs = (performance.now() - t0) / 1000; setBar(null); $('run').disabled = false;
 
       const env = S.envelopeDb3d(res.re, res.im, sv.sub);
       field = { re: res.re, im: res.im, db: env.db, dims: sv.dims, origin: sv.origin, sub: sv.sub, fMHz, txy: sv.txLocal.y, mode: 'fdtd', airy: !fdtdMaterial };
       afterGenerate();
-      $('hudMeta').textContent = `${sv.dims.join('×')} sub-volume · FDTD${fdtdMaterial ? '' : ' (airy/FSPL)'} · ${fMHz} MHz · ${secs < 1 ? (secs * 1e3).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}`;
+      $('hudMeta').textContent = `${sv.dims.join('×')} sub-volume · FDTD${fdtdMaterial ? '' : ' (airy/FSPL)'}${antennaSel === 'dipole' ? ' · dipole' : ''} · ${fMHz} MHz · ${secs < 1 ? (secs * 1e3).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}`;
       setStatus(`done — FDTD field in ${secs < 1 ? (secs * 1e3).toFixed(0) + ' ms' : secs.toFixed(1) + ' s'}.`);
       setOpacity(0.3); $('modelOpacity').value = 30;
       buildFieldMesh(); updateDesc();

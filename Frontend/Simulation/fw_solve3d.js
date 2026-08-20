@@ -71,6 +71,39 @@ export function materialLuts(fMHz) {
 // studio's CSV breakdown (NOT the analytic Motley-Keenan per-crossing model).
 export const materialAlphaDbM = (fMHz) => materialLuts(fMHz).alphaDbM;
 
+// ---------------------------------------------------------------- antenna geometry
+// Directive gain (dB, relative to the broadside peak) of a VERTICAL (y-axis) antenna in the direction
+// (dx,dy,dz) from the Tx.
+//   omni   → 0 everywhere: an isotropic point source (the default; unchanged behaviour).
+//   dipole → half-wave whip toroid F(θ)=cos(½π·cosθ)/sinθ, θ measured from the vertical axis: 0 dB in
+//            the horizontal plane, deep null straight up/down (a WiFi AP's vertical dipole). Normalized
+//            to 0 dB at broadside so omni and dipole share one peak — the dipole only carves the
+//            up/down nulls. Applied as a directional gain overlay to both the FDTD and ONNX fields.
+export function antennaPatternDb(kind, dx, dy, dz) {
+  if (kind !== 'dipole') return 0;                          // omni / unknown → isotropic
+  const r = Math.hypot(dx, dy, dz); if (r < 1e-9) return 0;
+  const cosT = Math.min(1, Math.abs(dy) / r);               // cos(angle from vertical axis)
+  const sinT = Math.sqrt(Math.max(1e-12, 1 - cosT * cosT));
+  const F = Math.cos(Math.PI / 2 * cosT) / sinT;            // 1 at broadside (θ=90°), →0 along the axis
+  return 20 * Math.log10(Math.max(F, 1.3e-3));              // dB, floored ≈ -58 dB at the null
+}
+
+// Apply the antenna directional pattern to a solved FDTD sub-volume in place: scale the complex field
+// |U| by 10^(G(θ)/20) per cell (θ from the Tx). Mirrors the ONNX gain overlay so both engines share one
+// antenna geometry — isotropic full-wave propagation × directional gain, the standard coverage method.
+// (A physical λ/2 line source only develops the far-field toroid at r≫λ, undeveloped across a few-metre
+// sub-volume, so the gain overlay is used for a clean, consistent pattern.)
+function applyAntennaFdtd(res, antenna, tx0) {
+  if (!antenna || antenna === 'omni' || !tx0) return;
+  const [sx, sy, sz] = res.dims;
+  for (let x = 0; x < sx; x++) for (let y = 0; y < sy; y++) for (let z = 0; z < sz; z++) {
+    const g = antennaPatternDb(antenna, x - tx0.x, y - tx0.y, z - tx0.z);
+    if (g === 0) continue;
+    const f = Math.pow(10, g / 20), i = (x * sy + y) * sz + z;
+    res.re[i] *= f; res.im[i] *= f;
+  }
+}
+
 // ---------------------------------------------------------------- geometry helpers
 export const wavelength = fMHz => C0 / (fMHz * 1e6);
 export const cellFine = (fMHz, npw) => wavelength(fMHz) / npw;      // λ/npw target FDTD cell
@@ -144,7 +177,7 @@ export function fdtdSolve3d(args, onProg) {
     wk.onmessage = (e) => {
       const m = e.data;
       if (m.type === 'progress') { if (onProg) onProg(m.f); }
-      else if (m.type === 'done') { wk.terminate(); resolve(m); }
+      else if (m.type === 'done') { wk.terminate(); applyAntennaFdtd(m, args.antenna, args.tx0); resolve(m); }
     };
     wk.onerror = (e) => { wk.terminate(); reject(new Error(e.message || 'FDTD worker error')); };
     wk.postMessage(msg);
@@ -382,8 +415,9 @@ export const HYBRID_R1_M = 3.0, HYBRID_R2_M = 6.5;
 
 // Absolute-RSRP whole-floor map: the sub-volume-trained net supplies the near-Tx structure; the
 // eikonal supplies path loss + wall shadows everywhere else; blended in dB across a transition ring.
-export async function hybridField3d(session, grid, dims, cell, fMHz, tx, txDbm, contract, onProg) {
+export async function hybridField3d(session, grid, dims, cell, fMHz, tx, txDbm, contract, onProg, opts = {}) {
   const [X, Y, Z] = dims, N = X * Y * Z, id = (x, y, z) => (x * Y + y) * Z + z;
+  const antenna = opts.antenna || 'omni';                                       // directional gain overlay
   const R1 = HYBRID_R1_M, R2 = HYBRID_R2_M;                                     // metres: pure-ONNX / pure-eikonal
   const eik = eikonalRsrp3d(grid, dims, cell, fMHz, tx, txDbm);
   if (onProg) onProg(0.25);
@@ -414,6 +448,7 @@ export async function hybridField3d(session, grid, dims, cell, fMHz, tx, txDbm, 
     if (dm <= R1 && isFinite(oa)) val = oa;
     else if (dm >= R2 || !isFinite(oa)) val = ea;
     else { const w = (R2 - dm) / (R2 - R1); val = w * oa + (1 - w) * ea; }      // linear dB blend
+    val += antennaPatternDb(antenna, x - tx.x, y - tx.y, z - tx.z);             // directional antenna geometry
     db[i] = val; if (val > dbMax) dbMax = val;
   }
   for (let i = 0; i < N; i++) {                                                 // synth complex for the wave view
