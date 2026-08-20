@@ -131,6 +131,7 @@
       <input id="rxY" type="number" step="any" placeholder="Y (m)">
       <input id="rxZ" type="number" step="any" placeholder="Z (m)">
       <button class="btn2" id="rxPlace">◉ Place receiver</button>
+      <button class="btn2" id="txPlace">◎ Place transmitter</button>
       <button class="btn2 ghost" id="rxClearBar">Clear</button>
       <span id="probeMsg"></span>
     </div>
@@ -429,6 +430,16 @@
       $('probeMsg').textContent = `◉ receiver at (${(rx.x * CELL).toFixed(1)}, ${(rx.y * CELL).toFixed(1)}, ${(rx.z * CELL).toFixed(1)}) m`;
     };
     $('rxClearBar').onclick = () => { $('clearRx').click(); $('probeMsg').textContent = ''; $('rxX').value = ''; $('rxY').value = ''; $('rxZ').value = ''; };
+    // Get-a-Point: drop the Tx at the same typed metres (cell = metres / CELL), snapped off walls
+    $('txPlace').onclick = () => {
+      const mx = parseFloat($('rxX').value), my = parseFloat($('rxY').value), mz = parseFloat($('rxZ').value);
+      if (!isFinite(mx) || !isFinite(my) || !isFinite(mz)) { $('probeMsg').textContent = 'enter X, Y and Z'; return; }
+      const v = { x: Math.round(mx / CELL), y: Math.round(my / CELL), z: Math.round(mz / CELL) };
+      if (v.x < 0 || v.y < 0 || v.z < 0 || v.x >= X || v.y >= Y || v.z >= Z) { $('probeMsg').textContent = '⚠ point is outside the voxel grid'; return; }
+      tx.x = v.x; tx.y = v.y; tx.z = v.z; snapTx(); placeTxMarker();
+      if (field) { buildAnchor(); updateRxReadout(); }
+      $('probeMsg').textContent = `◎ transmitter at (${(tx.x * CELL).toFixed(1)}, ${(tx.y * CELL).toFixed(1)}, ${(tx.z * CELL).toFixed(1)}) m — press Generate`;
+    };
     $('txp').addEventListener('input', () => { if (field) { if (anchor) anchor.txDbm = parseFloat($('txp').value) || 20; updateRxReadout(); } });
     // which engine produced a cell: hybrid splits by Tx distance (surrogate near ⊕ eikonal far, R1/R2
     // straight from the solver); FDTD sub-volume is all near-field FDTD.

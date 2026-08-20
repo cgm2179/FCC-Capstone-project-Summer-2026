@@ -115,6 +115,7 @@
       <input id="rxX" type="number" step="any" placeholder="X (m)">
       <input id="rxY" type="number" step="any" placeholder="Y (m)">
       <button class="btn2" id="rxPlace">◉ Place receiver</button>
+      <button class="btn2" id="txPlace">◎ Place transmitter</button>
       <button class="btn2 ghost" id="rxClearBar">Clear</button>
       <span id="probeMsg"></span>
     </div>
@@ -323,6 +324,16 @@
       if (field) render(); else drawPlan();
     };
     $('rxClearBar').onclick = () => { $('clearRx').click(); $('probeMsg').textContent = ''; $('rxX').value = ''; $('rxY').value = ''; };
+    // Get-a-Point: drop the Tx at the same typed metres (X = col·CELL, Y = row·CELL), snapped off walls
+    $('txPlace').onclick = () => {
+      const X = parseFloat($('rxX').value), Y = parseFloat($('rxY').value);
+      if (!isFinite(X) || !isFinite(Y)) { $('probeMsg').textContent = 'enter both coordinates'; return; }
+      const j = Math.round(X / CELL), i = Math.round(Y / CELL);
+      if (i < 0 || j < 0 || i >= H || j >= W) { $('probeMsg').textContent = '⚠ point is outside the plan'; return; }
+      tx = { i, j }; snapTx();
+      if (field) { buildAnchor(); updateRxReadout(); render(); } else drawPlan();
+      $('probeMsg').textContent = `◎ transmitter at (${(tx.j * CELL).toFixed(1)}, ${(tx.i * CELL).toFixed(1)}) m — press Generate`;
+    };
     $('txp').addEventListener('input', () => { if (field) { buildAnchor(); updateRxReadout(); } });
     $('dlCsv').onclick = () => {
       if (!field || !window.RxProbe) return;
